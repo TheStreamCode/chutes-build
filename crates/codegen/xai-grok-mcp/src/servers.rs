@@ -210,7 +210,7 @@ pub struct McpConfigChange {
     pub claim: InitClaimGuard,
 }
 
-/// MCP server name used as the key in client/tool maps (e.g. `"github"`, `"grok_com_linear"`).
+/// MCP server name used as the key in client/tool maps (e.g. `"github"`, `"chutes_build_com_linear"`).
 pub type McpServerName = String;
 
 /// Unqualified MCP tool name (e.g. `"create_issue"`, without the `server__` prefix).
@@ -4685,15 +4685,18 @@ fn is_figma_mcp(server_name: &str, url: &str) -> bool {
     if server_name.eq_ignore_ascii_case("figma") {
         return true;
     }
-    // Legacy direct managed name (`grok_com_figma`); newer clients use gateway tools (`managed_mcp_gateway_tools_enabled`).
-    const MANAGED_PREFIX: &str = "grok_com_";
-    if let (Some(prefix), Some(rest)) = (
-        server_name.get(..MANAGED_PREFIX.len()),
-        server_name.get(MANAGED_PREFIX.len()..),
-    ) && prefix.eq_ignore_ascii_case(MANAGED_PREFIX)
-        && rest.eq_ignore_ascii_case("figma")
-    {
-        return true;
+    // Managed names (`chutes_build_com_figma`, short `chutes_figma`, legacy `grok_com_figma`);
+    // newer clients use gateway tools (`managed_mcp_gateway_tools_enabled`).
+    const MANAGED_PREFIXES: &[&str] = &["chutes_build_com_", "chutes_", "grok_com_"];
+    for managed_prefix in MANAGED_PREFIXES {
+        if let (Some(prefix), Some(rest)) = (
+            server_name.get(..managed_prefix.len()),
+            server_name.get(managed_prefix.len()..),
+        ) && prefix.eq_ignore_ascii_case(managed_prefix)
+            && rest.eq_ignore_ascii_case("figma")
+        {
+            return true;
+        }
     }
     reqwest::Url::parse(url)
         .ok()
@@ -4710,14 +4713,14 @@ fn ensure_figma_user_agent(headers: &mut reqwest::header::HeaderMap, server_name
     }
     headers.insert(
         reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("grok-cli"),
+        reqwest::header::HeaderValue::from_static("chutes-build"),
     );
 }
 
 static DEFAULT_USER_AGENT: LazyLock<reqwest::header::HeaderValue> = LazyLock::new(|| {
-    format!("grok-cli/{}", xai_grok_version::VERSION)
+    format!("chutes-build/{}", xai_grok_version::VERSION)
         .parse()
-        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("grok-cli"))
+        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("chutes-build"))
 });
 
 fn ensure_default_user_agent(headers: &mut reqwest::header::HeaderMap) {
@@ -4727,7 +4730,7 @@ fn ensure_default_user_agent(headers: &mut reqwest::header::HeaderMap) {
     headers.insert(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT.clone());
 }
 
-/// Figma keeps its pinned bare `grok-cli` attribution token; every other server gets the versioned default.
+/// Figma keeps its pinned bare `chutes-build` attribution token; every other server gets the versioned default.
 /// A `User-Agent` already in the map always wins.
 fn apply_user_agent_policy(headers: &mut reqwest::header::HeaderMap, server_name: &str, url: &str) {
     ensure_figma_user_agent(headers, server_name, url);
@@ -4948,9 +4951,14 @@ pub async fn start_mcp_server(
             let local_agent_endpoint = ctx.send_grok_agent_id_header;
             if local_agent_endpoint && let Some(session_id) = ctx.session_id {
                 reqwest::header::HeaderValue::try_from(session_id).map_err(|error| {
-                    McpError::ClientError(format!("invalid {CHUTES_BUILD_AGENT_ID_HEADER} value: {error}"))
+                    McpError::ClientError(format!(
+                        "invalid {CHUTES_BUILD_AGENT_ID_HEADER} value: {error}"
+                    ))
                 })?;
-                headers.push((CHUTES_BUILD_AGENT_ID_HEADER.to_owned(), session_id.to_owned()));
+                headers.push((
+                    CHUTES_BUILD_AGENT_ID_HEADER.to_owned(),
+                    session_id.to_owned(),
+                ));
             }
             let bearer_token_file = BearerTokenPath::from_meta(meta.as_ref())
                 .map_err(|e| McpError::ClientError(format!("MCP server '{name}': {e}")))?

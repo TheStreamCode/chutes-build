@@ -162,18 +162,18 @@ fn short_kind_label(kind: UsageWindowKind) -> &'static str {
 fn format_compact_value(window: &UsageWindow) -> String {
     match window.unit {
         UsageUnit::Requests => {
-            let used = window.used.map_or("--".to_string(), |v| format!("{}", v.round()));
+            let used = window
+                .used
+                .map_or("--".to_string(), |v| format!("{}", v.round()));
             let limit = match window.limit {
                 None => "--".to_string(),
-                Some(v) if v == 0.0 => "∞".to_string(),
+                Some(0.0) => "∞".to_string(),
                 Some(v) => format!("{}", v.round()),
             };
             format!("{used}/{limit}")
         }
         UsageUnit::Usd => {
-            let used = window
-                .used
-                .map_or("--".to_string(), |v| format!("${v:.2}"));
+            let used = window.used.map_or("--".to_string(), |v| format!("${v:.2}"));
             let limit = window
                 .limit
                 .map_or("--".to_string(), |v| format!("${v:.0}"));
@@ -235,7 +235,13 @@ struct WindowCandidate {
 
 const CANDIDATES: &[WindowCandidate] = &[
     WindowCandidate {
-        keys: &["billing_cycle_cap", "monthly_cap", "monthly_window", "billing_cycle", "monthly"],
+        keys: &[
+            "billing_cycle_cap",
+            "monthly_cap",
+            "monthly_window",
+            "billing_cycle",
+            "monthly",
+        ],
         kind: UsageWindowKind::BillingCycle,
         unit: UsageUnit::Usd,
         label: "Billing Cycle Cap",
@@ -249,7 +255,13 @@ const CANDIDATES: &[WindowCandidate] = &[
         nested_reset_keys: &["reset_at", "reset_label"],
     },
     WindowCandidate {
-        keys: &["four_hour_window", "rolling_4h_window", "four_hour_cap", "rolling_window", "four_hour"],
+        keys: &[
+            "four_hour_window",
+            "rolling_4h_window",
+            "four_hour_cap",
+            "rolling_window",
+            "four_hour",
+        ],
         kind: UsageWindowKind::Rolling4h,
         unit: UsageUnit::Usd,
         label: "4-Hour Window",
@@ -263,7 +275,12 @@ const CANDIDATES: &[WindowCandidate] = &[
         nested_reset_keys: &["reset_at", "reset_label"],
     },
     WindowCandidate {
-        keys: &["daily_quota_usage", "daily_quota", "daily_window", "daily_requests"],
+        keys: &[
+            "daily_quota_usage",
+            "daily_quota",
+            "daily_window",
+            "daily_requests",
+        ],
         kind: UsageWindowKind::DailyRequests,
         unit: UsageUnit::Requests,
         label: "Daily Quota",
@@ -442,8 +459,18 @@ fn normalize_usage_windows(
         .iter()
         .filter_map(|candidate| {
             let (matched_key, nested) = pick_nested(payload, candidate.keys);
-            let used = pick_number(nested, payload, candidate.used_keys, candidate.nested_used_keys);
-            let limit = pick_number(nested, payload, candidate.limit_keys, candidate.nested_limit_keys);
+            let used = pick_number(
+                nested,
+                payload,
+                candidate.used_keys,
+                candidate.nested_used_keys,
+            );
+            let limit = pick_number(
+                nested,
+                payload,
+                candidate.limit_keys,
+                candidate.nested_limit_keys,
+            );
             let remaining = pick_number(
                 nested,
                 payload,
@@ -451,7 +478,12 @@ fn normalize_usage_windows(
                 candidate.nested_remaining_keys,
             )
             .or_else(|| compute_remaining(used, limit));
-            let reset_label = pick_string(nested, payload, candidate.reset_keys, candidate.nested_reset_keys);
+            let reset_label = pick_string(
+                nested,
+                payload,
+                candidate.reset_keys,
+                candidate.nested_reset_keys,
+            );
             let label = pick_string(nested, payload, &[], &["label"])
                 .unwrap_or_else(|| candidate.label.to_string());
             if nested.is_none() && used.is_none() && limit.is_none() && remaining.is_none() {
@@ -471,9 +503,7 @@ fn normalize_usage_windows(
                 data_source: None,
             })
         })
-        .filter(|window| {
-            !(window.kind == UsageWindowKind::DailyRequests && live_daily.is_some())
-        })
+        .filter(|window| !(window.kind == UsageWindowKind::DailyRequests && live_daily.is_some()))
         .collect();
     if let Some(daily) = live_daily {
         windows.push(daily);
@@ -495,14 +525,16 @@ fn build_daily_quota_window(
         }
     }
     total_quota?;
-    let limit = quota_usage.and_then(|summary| summary.quota).or(total_quota);
+    let limit = quota_usage
+        .and_then(|summary| summary.quota)
+        .or(total_quota);
     let is_unlimited = limit == Some(0.0);
     let live_total = invocation_total_requests.unwrap_or(0.0);
     let is_stale = quota_usage.map(|summary| summary.used) == Some(Some(0.0)) && live_total > 0.0;
     let used = if is_stale {
         None
     } else {
-        quota_usage.and_then(|summary| summary.trusted.then(|| summary.used).flatten())
+        quota_usage.and_then(|summary| summary.trusted.then_some(summary.used).flatten())
     };
     let remaining = if is_unlimited {
         None
@@ -552,9 +584,15 @@ fn normalize_plan(payload: &serde_json::Value, windows: &[UsageWindow]) -> Optio
     let empty = serde_json::Map::new();
     let source = plan_object.unwrap_or(&empty);
     let object = payload.as_object()?;
-    let billing_window = windows.iter().find(|w| w.kind == UsageWindowKind::BillingCycle);
-    let rolling_window = windows.iter().find(|w| w.kind == UsageWindowKind::Rolling4h);
-    let daily_window = windows.iter().find(|w| w.kind == UsageWindowKind::DailyRequests);
+    let billing_window = windows
+        .iter()
+        .find(|w| w.kind == UsageWindowKind::BillingCycle);
+    let rolling_window = windows
+        .iter()
+        .find(|w| w.kind == UsageWindowKind::Rolling4h);
+    let daily_window = windows
+        .iter()
+        .find(|w| w.kind == UsageWindowKind::DailyRequests);
     let billing_cap = payload.get("billing_cycle_cap").and_then(|v| v.as_object());
     let four_hour_cap = payload.get("four_hour_window").and_then(|v| v.as_object());
     let daily_quota = payload.get("daily_quota_usage").and_then(|v| v.as_object());
@@ -567,7 +605,8 @@ fn normalize_plan(payload: &serde_json::Value, windows: &[UsageWindow]) -> Optio
         .and_then(|v| as_string(Some(v)))
         .or_else(|| as_string(object.get("plan_name")))
         .or_else(|| derive_plan_name(object));
-    let monthly_price_usd = get(source, "monthly_price").or_else(|| as_number(object.get("monthly_price")));
+    let monthly_price_usd =
+        get(source, "monthly_price").or_else(|| as_number(object.get("monthly_price")));
     let monthly_cap_usd = get(source, "monthly_cap_usd")
         .or_else(|| as_number(object.get("monthly_cap_usd")))
         .or_else(|| as_number(object.get("billing_cycle_limit")))
@@ -620,7 +659,9 @@ fn normalize_plan(payload: &serde_json::Value, windows: &[UsageWindow]) -> Optio
 fn derive_plan_name(payload: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
     let subscription = payload.get("subscription").and_then(|v| v.as_bool());
     let custom = payload.get("custom").and_then(|v| v.as_bool());
-    let monthly_price = payload.get("monthly_price").and_then(|v| as_number(Some(v)));
+    let monthly_price = payload
+        .get("monthly_price")
+        .and_then(|v| as_number(Some(v)));
     if subscription == Some(false) {
         return Some("Free tier".to_string());
     }
@@ -657,10 +698,12 @@ fn normalize_plan_limits(plan: Option<&PlanInfo>) -> Vec<PlanLimitEntry> {
             )
         })
         .collect();
-    if let Some(current) = plan.and_then(|plan| plan.plan_name.as_deref()) {
-        if !references.iter().any(|(name, _, _)| name.eq_ignore_ascii_case(current)) {
-            entries.insert(0, to_plan_limit_entry(current, plan, None, None));
-        }
+    if let Some(current) = plan.and_then(|plan| plan.plan_name.as_deref())
+        && !references
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case(current))
+    {
+        entries.insert(0, to_plan_limit_entry(current, plan, None, None));
     }
     entries
 }
@@ -671,8 +714,12 @@ fn to_plan_limit_entry(
     reference_price: Option<f64>,
     reference_discount: Option<f64>,
 ) -> PlanLimitEntry {
-    let monthly_price = plan.and_then(|plan| plan.monthly_price_usd).or(reference_price);
-    let payg_discount = plan.and_then(|plan| plan.payg_discount_percent).or(reference_discount);
+    let monthly_price = plan
+        .and_then(|plan| plan.monthly_price_usd)
+        .or(reference_price);
+    let payg_discount = plan
+        .and_then(|plan| plan.payg_discount_percent)
+        .or(reference_discount);
     PlanLimitEntry {
         name: name.to_string(),
         price_label: monthly_price.map_or("--".to_string(), |v| format!("{}/mo", format_usd(v))),

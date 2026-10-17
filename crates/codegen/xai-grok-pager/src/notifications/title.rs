@@ -116,7 +116,7 @@ fn write_item(
     tick_count: u64,
 ) -> bool {
     match item {
-        TitleItem::Grok => {
+        TitleItem::AppName => {
             push_separator(buf, has_parts);
             buf.push_str("chutes-build");
         }
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn grok_only_produces_just_grok() {
-        let cfg = config_with_items(vec![TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
         mgr.update(&state);
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn session_name_and_grok_joined_with_separator() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             session_name: Some("my project"),
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn missing_session_name_skipped() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
         mgr.update(&state);
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn empty_session_name_skipped() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             session_name: Some(""),
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn spinner_only_shown_when_active() {
-        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
 
         mgr.update(&idle_state());
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn activity_hidden_when_idle() {
-        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
         assert_eq!(mgr.last_title, "chutes-build");
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn spinner_shown_when_busy_without_activity() {
-        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Spinner, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             is_busy: true,
@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn activity_shows_waiting_when_busy_without_activity() {
-        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             is_busy: true,
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn activity_prefers_specific_activity_over_waiting() {
-        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let activity = TurnActivity::Thinking;
         let state = TitleState {
@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn action_required_visible_on_first_tick() {
-        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             has_pending_permissions: true,
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn action_required_blinks_across_ticks() {
-        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             has_pending_permissions: true,
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn action_required_hidden_when_no_permissions() {
-        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::ActionRequired, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             has_pending_permissions: false,
@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn dedup_skips_emission_when_unchanged() {
-        let cfg = config_with_items(vec![TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
 
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn model_item_shown_when_present() {
-        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             model: Some("grok-3"),
@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn model_item_hidden_when_none() {
-        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Model, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
         assert_eq!(mgr.last_title, "chutes-build");
@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn cwd_shows_last_component() {
-        let cfg = config_with_items(vec![TitleItem::Cwd, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::Cwd, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             cwd: Some("/home/user/my-project"),
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn turn_timer_shown_when_above_one_second() {
-        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             turn_elapsed: Some(std::time::Duration::from_secs(42)),
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn turn_timer_hidden_when_under_one_second() {
-        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::TurnTimer, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let state = TitleState {
             turn_elapsed: Some(std::time::Duration::from_millis(500)),
@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn reset_clears_state_and_emits_grok() {
-        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::Grok]);
+        let cfg = config_with_items(vec![TitleItem::SessionName, TitleItem::AppName]);
         let mut mgr = TitleManager::new(&cfg);
         let activity = TurnActivity::Thinking;
         let state = TitleState {
@@ -772,7 +772,10 @@ mod tests {
 
         // Both should contain the persistent parts.
         for t in [&t1, &t2] {
-            assert!(t.contains("chutes-build"), "title missing 'chutes-build': {t}");
+            assert!(
+                t.contains("chutes-build"),
+                "title missing 'chutes-build': {t}"
+            );
             assert!(t.contains("Responding"), "title missing 'Responding': {t}");
             assert!(t.contains("my-session"), "title missing session name: {t}");
         }
@@ -797,7 +800,7 @@ mod tests {
             TitleItem::SessionName,
             TitleItem::Model,
             TitleItem::Cwd,
-            TitleItem::Grok,
+            TitleItem::AppName,
         ]);
         let mut mgr = TitleManager::new(&cfg);
         let activity = TurnActivity::Thinking;

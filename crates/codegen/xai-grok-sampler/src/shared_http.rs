@@ -29,7 +29,9 @@ fn sharing_disabled() -> bool {
             Err(_) => false,
         };
         if disabled {
-            tracing::info!("sampler HTTP client sharing disabled via CHUTES_BUILD_SAMPLER_SHARED_CLIENT");
+            tracing::info!(
+                "sampler HTTP client sharing disabled via CHUTES_BUILD_SAMPLER_SHARED_CLIENT"
+            );
         }
         disabled
     })

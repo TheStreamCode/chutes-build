@@ -38,7 +38,8 @@ impl Default for ScrollDebugHud {
 
 impl ScrollDebugHud {
     pub fn new() -> Self {
-        let env_on = std::env::var("CHUTES_BUILD_SCROLL_DEBUG").is_ok_and(|v| !v.is_empty() && v != "0");
+        let env_on =
+            std::env::var("CHUTES_BUILD_SCROLL_DEBUG").is_ok_and(|v| !v.is_empty() && v != "0");
         Self { enabled: env_on }
     }
 

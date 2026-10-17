@@ -227,7 +227,8 @@ fn subprocess_entry() {
     let workspace = dunce::canonicalize(&workspace).expect("canonicalize workspace");
     let workspace = workspace.as_path();
     let home = PathBuf::from(std::env::var(HOME_ENV).expect(HOME_ENV));
-    let grok_home = PathBuf::from(std::env::var(CHUTES_BUILD_HOME_ENV).expect(CHUTES_BUILD_HOME_ENV));
+    let grok_home =
+        PathBuf::from(std::env::var(CHUTES_BUILD_HOME_ENV).expect(CHUTES_BUILD_HOME_ENV));
     unsafe {
         std::env::set_var("HOME", &home);
         std::env::set_var("CHUTES_BUILD_HOME", &grok_home);

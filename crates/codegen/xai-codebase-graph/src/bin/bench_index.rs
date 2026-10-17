@@ -15,7 +15,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = if let Some(p) = args.get(1) {
         p.clone()
-    } else if let Ok(p) = std::env::var("BENCH_REPO_ROOT").or_else(|_| std::env::var("XAI_ROOT")) {
+    } else if let Ok(p) = std::env::var("BENCH_REPO_ROOT")
+        .or_else(|_| std::env::var("CHUTES_ROOT"))
+        .or_else(|_| std::env::var("XAI_ROOT"))
+    {
         p
     } else {
         eprintln!("Usage: bench_index <path>");

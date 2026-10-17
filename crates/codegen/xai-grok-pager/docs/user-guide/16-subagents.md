@@ -27,7 +27,7 @@ Manage both in the agents modal. Open it with `/config-agents` (alias `/agents`)
 
 ## Disabling Subagents
 
-Disable subagents with a CLI flag, an environment variable, or the config file (highest priority first). The same rules apply to the interactive `grok` TUI, `chutes-build agent stdio`, and headless runs.
+Disable subagents with a CLI flag, an environment variable, or the config file (highest priority first). The same rules apply to the interactive `chutes-build` TUI, `chutes-build agent stdio`, and headless runs.
 
 ```bash
 chutes-build --no-subagents                  # This session only

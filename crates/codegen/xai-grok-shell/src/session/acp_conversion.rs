@@ -1082,7 +1082,9 @@ mod tests {
         let output = ToolOutput::ReadFile(ReadFileOutput::FileContent(FileContent {
             content: "content".to_string(),
             content_concise: None,
-            absolute_path: PathBuf::from("/root/.chutes-build/worktrees/myproject/ab-123/src/main.rs"),
+            absolute_path: PathBuf::from(
+                "/root/.chutes-build/worktrees/myproject/ab-123/src/main.rs",
+            ),
             offset: None,
             limit: None,
             raw_output: "content".to_string(),
@@ -1220,7 +1222,9 @@ mod tests {
                 new_string: "new".to_string(),
                 tool_output_for_prompt: String::new(),
                 tool_output_for_prompt_concise: None,
-                absolute_path: PathBuf::from("/root/.chutes-build/worktrees/myproject/ab-123/src/lib.rs"),
+                absolute_path: PathBuf::from(
+                    "/root/.chutes-build/worktrees/myproject/ab-123/src/lib.rs",
+                ),
                 edits: SearchReplaceEditContextInformation::default(),
                 patch: None,
                 unicode_normalized: false,
@@ -1257,7 +1261,8 @@ mod tests {
         )
         .unwrap();
         // Session directory paths use urlencoding::encode(&cwd)
-        let encoded_overlay = urlencoding::encode("/root/.chutes-build/worktrees/project/ab-123-a-overlay");
+        let encoded_overlay =
+            urlencoding::encode("/root/.chutes-build/worktrees/project/ab-123-a-overlay");
         let input = format!(
             "output-file: /root/.chutes-build/sessions/{}/session-id/terminal/call.log",
             encoded_overlay
@@ -1355,7 +1360,9 @@ mod tests {
         let output = ToolOutput::ReadFile(ReadFileOutput::FileContent(FileContent {
             content: "content".to_string(),
             content_concise: None,
-            absolute_path: PathBuf::from("/root/.chutes-build/worktrees/myproject/ab-123/src/main.rs"),
+            absolute_path: PathBuf::from(
+                "/root/.chutes-build/worktrees/myproject/ab-123/src/main.rs",
+            ),
             offset: None,
             limit: None,
             raw_output: "content".to_string(),

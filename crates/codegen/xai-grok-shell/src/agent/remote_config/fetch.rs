@@ -72,7 +72,7 @@ fn fetched_model_map(
     match source.fetch(auth) {
         Ok(FetchModelsResult { models, etag }) if !models.is_empty() => {
             let api_base_url_override = match fetch_auth {
-                ModelFetchAuth::ApiKey => Some(endpoints.xai_api_base_url.clone()),
+                ModelFetchAuth::ApiKey => Some(endpoints.public_api_base_url.clone()),
                 ModelFetchAuth::Session
                 | ModelFetchAuth::Deployment
                 | ModelFetchAuth::CustomEndpoint => None,

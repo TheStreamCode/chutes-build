@@ -39,7 +39,7 @@ Chutes Build stores each session in its own directory, grouped by working direct
   subagents/              # per-subagent metadata (meta.json); the child sessions live in the normal sessions tree
 ```
 
-`summary.json` is the index entry. It records the session summary and generated title, the model ID, the creation and update timestamps, the message counts, and a parent session reference for forked or restored sessions. It also records the latest last-turn summary and session recap so listing surfaces can show them. `updates.jsonl` is the authoritative conversation log that drives `/resume` and session restore. `tool_definitions.json` omits MCP `server__tool` entries because the model reaches those through `search_tool` and `use_tool`, which are listed. Per-turn token and cost totals are available through `grok usage`.
+`summary.json` is the index entry. It records the session summary and generated title, the model ID, the creation and update timestamps, the message counts, and a parent session reference for forked or restored sessions. It also records the latest last-turn summary and session recap so listing surfaces can show them. `updates.jsonl` is the authoritative conversation log that drives `/resume` and session restore. `tool_definitions.json` omits MCP `server__tool` entries because the model reaches those through `search_tool` and `use_tool`, which are listed. Per-turn token and cost totals are available through `chutes-build usage`.
 
 ### Session titles
 
@@ -109,7 +109,7 @@ Run `chutes-build --resume` without a value to resume the most recent session fo
 
 ### From the Welcome Screen
 
-When you launch `grok`, the welcome screen lists recent sessions for the current directory. Select one to resume it.
+When you launch `chutes-build`, the welcome screen lists recent sessions for the current directory. Select one to resume it.
 
 ---
 
@@ -273,16 +273,16 @@ chutes-build sessions search "rate limit"
 
 ---
 
-## The grok usage Subcommand
+## The usage Subcommand
 
 Print persisted token and cost usage for a session. Use this instead of reading session files:
 
 ```bash
 # Session totals plus every recorded turn
-grok usage <session-id>
+chutes-build usage <session-id>
 
 # One turn
-grok usage <session-id> 3
+chutes-build usage <session-id> 3
 ```
 
 Output is JSON with `sessionId`, `updatedAt`, `session`, and `turns`. A specific turn uses the same envelope with one element in `turns`. Session totals cover the whole conversation, including history inherited by resume or fork. `costUsdTicks` is 10¹⁰ ticks per USD (divide by `1e10` for dollars). A missing turn number is an error. Interactive credit and billing stay on `/usage` in the TUI.
@@ -303,31 +303,6 @@ Resume a session in a fresh worktree with `chutes-build -w -r <session-id>`.
 
 `chutes-build worktree create [NAME]` creates the same worktree `chutes-build -w [NAME]` would, without starting a session. It prints the directory the session would have opened in. That path is the only output on stdout, so `cd "$(chutes-build worktree create my-fix)"` works. By default the worktree starts from HEAD with your uncommitted changes copied over. Pass `--ref <ref>` to start from a clean checkout of a branch, tag, or commit. If the new worktree lacks the directory you ran from, such as a `--ref` checkout that predates it or an ignored directory, the command prints the worktree root.
 
-### Manage Grove redirections
-
-A Grove worktree can redirect ignored artifact directories such as `target` and `node_modules` to storage outside the projected tree. The redirect commands take the mount path as their first argument.
-
-```bash
-chutes-build worktree redirect list /path/to/worktree
-chutes-build worktree redirect list /path/to/worktree --json
-chutes-build worktree redirect add /path/to/worktree target bind
-chutes-build worktree redirect del /path/to/worktree target
-chutes-build worktree redirect fixup /path/to/worktree
-chutes-build worktree redirect unmount /path/to/worktree target
-```
-
-`list` prints `repo_path`, `type`, `mechanism`, `target`, `source`, and `state`. Run `unmount` without a repo-relative path to take down every redirect on the mount. Use `fixup --force` to replace Grove-owned residue. Use `fixup --strict` to refuse a populated plain directory.
-
-
-```bash
-grok clone https://example.com/org/repo.git --redirect-ignored
-grok clone https://example.com/org/repo.git \
-  --redirect-ignored --redirect-dir build --redirect-dir '**/node_modules'
-grok clone https://example.com/org/repo.git --no-redirects
-```
-
-`GROVE_REDIRECTS=0` remains a runtime kill switch. Chutes Build does not save the kill switch as the clone's redirect choice.
-
 ### Checking Disk Usage
 
 `chutes-build du` (alias: `chutes-build disk-usage`) reports what the Chutes Build home (`~/.chutes-build`) uses on disk. It lists each top-level directory, largest first, then each worktree with its size, type, age, label, and path. Worktrees the registry does not track appear as `untracked`. Pass `--json` for the same report as machine-readable output.
@@ -342,14 +317,14 @@ Disk usage for ~/.chutes-build
 
 Worktrees
         SIZE  TYPE                AGE        LABEL  PATH
-    380.0 GB  session             12d ago    my-fix ~/.chutes-build/worktrees/xai/worktree-abc
-     32.3 GB  untracked (session) 40d ago           ~/.chutes-build/worktrees/xai/worktree-old
+    380.0 GB  session             12d ago    my-fix ~/.chutes-build/worktrees/repo/worktree-abc
+     32.3 GB  untracked (session) 40d ago           ~/.chutes-build/worktrees/repo/worktree-old
 
 To reclaim space, run `chutes-build worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one.
 Untracked rows are not in the registry, so gc never visits them. Remove one with `chutes-build worktree rm --dry-run <path>`, then without `--dry-run`.
 ```
 
-After the grok-home table, `chutes-build du` may print **Redirections**, **Orphaned redirections**, and **Unattributed redirect directories**. Those bytes live in Grove escape jails, not in the grok-home total. An empty scan prints nothing. Reclaim a live jail with `chutes-build worktree clean-artifacts`. Purge live jails plus proven orphans with `chutes-build du --clean --yes`. Delete only proven orphans with `chutes-build du --clean-orphaned --yes`.
+After the home table, `chutes-build du` may print **Redirections**, **Orphaned redirections**, and **Unattributed redirect directories**. Those bytes live in Grove escape jails, not in the home total. An empty scan prints nothing. Purge live jails plus proven orphans with `chutes-build du --clean --yes`. Delete only proven orphans with `chutes-build du --clean-orphaned --yes`.
 
 `AGE` is the value `chutes-build worktree gc` measures: time since the worktree was last accessed, or since it was created when that is more recent. Session and agent activity update it; a shell or editor left open in the directory does not. An untracked worktree has no registry entry, so its age comes from the newest file underneath it.
 

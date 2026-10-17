@@ -544,7 +544,9 @@ mod tests {
             // SAFETY: see `pin_to_default`; lock is still held until self is dropped.
             unsafe {
                 match self.previous.take() {
-                    Some(prev) => std::env::set_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS", prev),
+                    Some(prev) => {
+                        std::env::set_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS", prev)
+                    }
                     None => std::env::remove_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS"),
                 }
             }

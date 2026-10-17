@@ -525,12 +525,17 @@ mod tests {
         // mount with root=/repo at /workspace/repo
         let mountinfo =
             "8267 8961 0:813 /repo /workspace/repo rw,relatime - btrfs /dev/loop0 rw,ssd";
-        let result =
-            resolve_via_subvol_mount("/dev/loop0", "/repo/.chutes-build-snapshots/wt-123", mountinfo)
-                .unwrap();
+        let result = resolve_via_subvol_mount(
+            "/dev/loop0",
+            "/repo/.chutes-build-snapshots/wt-123",
+            mountinfo,
+        )
+        .unwrap();
         assert_eq!(
             result,
-            Some(PathBuf::from("/workspace/repo/.chutes-build-snapshots/wt-123"))
+            Some(PathBuf::from(
+                "/workspace/repo/.chutes-build-snapshots/wt-123"
+            ))
         );
     }
 

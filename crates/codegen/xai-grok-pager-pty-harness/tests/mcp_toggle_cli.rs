@@ -266,7 +266,8 @@ fn enable_refuses_denied_project_server_in_untrusted_folder() {
         let mut env = blocked_env(user_config);
         env.extra_env.push(("CHUTES_BUILD_TEST_VERSION", "1.0.0"));
         let project_config = env.cwd.join(".chutes-build").join("config.toml");
-        std::fs::create_dir_all(env.cwd.join(".chutes-build")).expect("create project .chutes-build");
+        std::fs::create_dir_all(env.cwd.join(".chutes-build"))
+            .expect("create project .chutes-build");
         std::fs::write(
             &project_config,
             format!("[mcp_servers.corp]\nurl = \"{BLOCKED_URL}\"\n{project_extra}"),

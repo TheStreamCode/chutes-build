@@ -3,7 +3,7 @@ use xai_grok_shell::util::config::{ConsentAnswer, ConsentGate};
 
 const ACCOUNT: &str = "user@example.com";
 const NOTICE_ID: &str = "tos-2026-08";
-const TOS_URL: &str = "https://x.ai/legal/terms-of-service";
+const TOS_URL: &str = "https://chutes.ai/terms";
 
 fn gate() -> ConsentGate {
     ConsentGate {
@@ -105,7 +105,8 @@ fn an_answer_from_this_run_suppresses() {
 #[test]
 fn two_links_are_indexed_in_order() {
     let mut gate = gate();
-    gate.body = Some("Read [Terms](https://x.ai/a) and [Policy](https://x.ai/b).".to_owned());
+    gate.body =
+        Some("Read [Terms](https://chutes.ai/a) and [Policy](https://chutes.ai/b).".to_owned());
 
     let notice = ConsentNotice::try_from_remote(&gate).expect("valid");
 
@@ -125,7 +126,10 @@ fn two_links_are_indexed_in_order() {
             ConsentSegment::Text(".".to_owned()),
         ]
     );
-    assert_eq!(notice.links, vec!["https://x.ai/a", "https://x.ai/b"]);
+    assert_eq!(
+        notice.links,
+        vec!["https://chutes.ai/a", "https://chutes.ai/b"]
+    );
 }
 
 /// A url we would not open costs a hyperlink, not the whole notice: the sentence still reads.
@@ -134,7 +138,7 @@ fn a_url_we_will_not_open_degrades_to_plain_text() {
     for url in [
         "http://x.ai/a",
         // `cmd /c start` on Windows would read the tail as a second command.
-        "https://x.ai/a&calc",
+        "https://chutes.ai/a&calc",
         // A percent pair is a variable to the same shell.
         "https://x.ai/%USERNAME%",
     ] {
@@ -160,11 +164,11 @@ fn a_url_we_will_not_open_degrades_to_plain_text() {
 #[test]
 fn a_link_with_nothing_to_paint_is_dropped() {
     let mut gate = gate();
-    gate.body = Some("Read [ ](https://x.ai/a) and [Terms](https://x.ai/b).".to_owned());
+    gate.body = Some("Read [ ](https://chutes.ai/a) and [Terms](https://chutes.ai/b).".to_owned());
 
     let notice = ConsentNotice::try_from_remote(&gate).expect("valid");
 
-    assert_eq!(notice.links, vec!["https://x.ai/b"]);
+    assert_eq!(notice.links, vec!["https://chutes.ai/b"]);
     // The surviving link takes index 0, so the dropped one leaves no gap for a key to fall into.
     assert_eq!(
         notice.segments,
@@ -332,13 +336,13 @@ fn an_unusable_id_refuses() {
 fn unpairable_markup_refuses() {
     for body in [
         // The byte cap can cut a link mid-url.
-        "Read our [Terms](https://x.ai/legal/te",
+        "Read our [Terms](https://chutes.ai/te",
         // A url holds no space, so this `)` closes the second link, not the first.
-        "Read [Terms](https://x.ai/a [Policy](https://x.ai/b) now.",
+        "Read [Terms](https://chutes.ai/a [Policy](https://chutes.ai/b) now.",
         // The same, with the two links flush against each other and no space to give it away.
-        "Read [Terms](https://x.ai/a[Policy](https://x.ai/b) now.",
+        "Read [Terms](https://chutes.ai/a[Policy](https://chutes.ai/b) now.",
         // A `]` too many desyncs the pairing and leaves the url with no `[` in front of it.
-        "[a] b](https://x.ai/legal/tos) applies.",
+        "[a] b](https://chutes.ai/terms) applies.",
     ] {
         let mut gate = gate();
         gate.body = Some(body.to_owned());
@@ -355,7 +359,7 @@ fn unpairable_markup_refuses() {
 #[test]
 fn a_url_outside_a_link_refuses() {
     let mut gate = gate();
-    gate.body = Some("Review the terms at https://x.ai/legal/tos before continuing.".to_owned());
+    gate.body = Some("Review the terms at https://chutes.ai/terms before continuing.".to_owned());
 
     assert_eq!(
         ConsentNotice::try_from_remote(&gate),
@@ -368,7 +372,7 @@ fn a_url_outside_a_link_refuses() {
 #[test]
 fn a_body_that_paints_nothing_refuses() {
     for body in [
-        "[](https://x.ai/legal/tos)",
+        "[](https://chutes.ai/terms)",
         // Combining marks survive sanitizing and occupy no columns.
         "\u{0301}\u{0301}\u{0301}",
         // A space between them makes the row non-empty without making it readable.
@@ -389,12 +393,12 @@ fn a_body_that_paints_nothing_refuses() {
 #[test]
 fn no_body_shape_leaks_a_url_or_raw_markup() {
     let bodies = [
-        "[](https://x.ai/legal/tos) applies.",
-        "[note] see [AUP](https://x.ai/legal/aup).",
+        "[](https://chutes.ai/terms) applies.",
+        "[note] see [AUP](https://chutes.ai/privacy).",
         "Read [Terms](javascript:alert(1)) now.",
-        "Read [Terms](https://x.ai/a&calc) now.",
+        "Read [Terms](https://chutes.ai/a&calc) now.",
         // A `)` inside the url ends it early and leaves the rest to be painted as prose.
-        "Read [Terms](https://x.ai/a(b)https://evil.example) now.",
+        "Read [Terms](https://chutes.ai/a(b)https://evil.example) now.",
     ];
 
     for body in bodies {

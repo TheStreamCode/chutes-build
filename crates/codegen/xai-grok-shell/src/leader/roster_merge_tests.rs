@@ -61,7 +61,8 @@ fn list_response(id: Value, result: &ExtMethodResult<RosterListResponse>) -> Str
 }
 
 fn list_request(id: Value) -> String {
-    json!({"jsonrpc": "2.0", "id": id, "method": "_chutes.build/sessions/list", "params": {}}).to_string()
+    json!({"jsonrpc": "2.0", "id": id, "method": "_chutes.build/sessions/list", "params": {}})
+        .to_string()
 }
 
 fn session_ids(out: &str, path: &[&str]) -> Vec<Value> {
@@ -326,7 +327,10 @@ impl Notifier {
             .expect("notifier emitted within the timeout")
             .expect("sink open");
         let json = parsed(&line);
-        assert_eq!(Some(&json!("_chutes.build/sessions/changed")), json.get("method"));
+        assert_eq!(
+            Some(&json!("_chutes.build/sessions/changed")),
+            json.get("method")
+        );
         json.get("params").cloned().unwrap_or(Value::Null)
     }
 
@@ -424,6 +428,9 @@ fn changed_notification_is_machine_wide_broadcast_shape() {
     let json = parsed(&line);
     assert_eq!(Some(&json!("2.0")), json.get("jsonrpc"));
     assert!(json.get("id").is_none());
-    assert_eq!(Some(&json!("_chutes.build/sessions/changed")), json.get("method"));
+    assert_eq!(
+        Some(&json!("_chutes.build/sessions/changed")),
+        json.get("method")
+    );
     assert!(json.pointer("/params/sessionId").is_none());
 }

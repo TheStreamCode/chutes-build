@@ -3073,7 +3073,7 @@ fn dashboard_slash_restricted_command_upsells_via_toast() {
         .as_deref()
         .expect("restricted command must set the upsell toast");
     assert!(
-        toast.contains("/imagine") && toast.contains("SuperGrok"),
+        toast.contains("/imagine") && toast.contains("paid plan"),
         "toast must carry the upsell: {toast}"
     );
 }
@@ -5331,8 +5331,10 @@ fn dashboard_overlay_cycle_non_agent_active_view_is_noop() {
 #[serial_test::serial(CHUTES_BUILD_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_overlay_cycle_non_overlay_noop_when_dashboard_disabled() {
-    let _guard =
-        crate::test_util::EnvVarGuard::set("CHUTES_BUILD_AGENT_DASHBOARD", std::path::Path::new("0"));
+    let _guard = crate::test_util::EnvVarGuard::set(
+        "CHUTES_BUILD_AGENT_DASHBOARD",
+        std::path::Path::new("0"),
+    );
     let mut app = test_app_with_agent();
     let id1 = AgentId(0);
     mark_agent_nonempty(&mut app, id1);

@@ -103,7 +103,10 @@ fn filtering_policy() -> ShellEnvironmentPolicy {
 fn request_env() -> HashMap<String, String> {
     HashMap::from([
         ("CHUTES_BUILD_PIN_REQ".to_owned(), "req".to_owned()),
-        ("CHUTES_BUILD_PIN_SECRET_TOKEN".to_owned(), "leak".to_owned()),
+        (
+            "CHUTES_BUILD_PIN_SECRET_TOKEN".to_owned(),
+            "leak".to_owned(),
+        ),
     ])
 }
 

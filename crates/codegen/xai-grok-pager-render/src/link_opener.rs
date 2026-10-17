@@ -490,8 +490,15 @@ mod tests {
 
     #[test]
     fn ensure_query_param_url_encodes_value() {
-        let out = ensure_query_param("https://chutes.ai/supergrok", "referrer", "chutes-build build");
-        assert_eq!(out, "https://chutes.ai/supergrok?referrer=chutes-build+build");
+        let out = ensure_query_param(
+            "https://chutes.ai/supergrok",
+            "referrer",
+            "chutes-build build",
+        );
+        assert_eq!(
+            out,
+            "https://chutes.ai/supergrok?referrer=chutes-build+build"
+        );
     }
 
     #[test]

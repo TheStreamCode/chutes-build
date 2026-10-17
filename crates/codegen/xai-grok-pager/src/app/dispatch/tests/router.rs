@@ -630,7 +630,9 @@ fn announcements_open_cta_opens_promo_and_noops_under_critical() {
         let effects = dispatch(Action::AnnouncementsOpenCta(surface), &mut app);
         assert!(effects.is_empty(), "open is a side effect, not an Effect");
         assert!(
-            opened().lines().any(|l| l == "https://chutes.ai/promo-open"),
+            opened()
+                .lines()
+                .any(|l| l == "https://chutes.ai/promo-open"),
             "surface {surface:?} must open the promo url; got {:?}",
             opened()
         );
@@ -2955,7 +2957,7 @@ fn toggle_scroll_log_flips_recorder_and_reports_path() {
 fn open_managed_connectors_starts_wait_when_modal_open() {
     use crate::views::extensions_modal::{ExtensionsModalState, ExtensionsTab};
     let url_file = std::env::temp_dir().join(format!(
-        "grok-managed-connectors-open-{}.txt",
+        "chutes-managed-connectors-open-{}.txt",
         std::process::id()
     ));
     let _ = std::fs::remove_file(&url_file);

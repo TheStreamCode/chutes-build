@@ -147,7 +147,7 @@ async fn external_stream_end_to_end() {
 
     let records = server.recorder().log_records();
     for record in &records {
-        assert_eq!("ai.xai.grok_code", record.scope);
+        assert_eq!("ai.chutes.build", record.scope);
         assert_eq!(
             Some("grok-cli"),
             record.resource.get("service.name").and_then(Value::as_str),
@@ -159,9 +159,9 @@ async fn external_stream_end_to_end() {
         .map(|record| record.event_name.as_str())
         .collect();
     for expected in [
-        "grok_code.session_start",
-        "grok_code.user_prompt",
-        "grok_code.api_request",
+        "chutes_build.session_start",
+        "chutes_build.user_prompt",
+        "chutes_build.api_request",
     ] {
         assert!(
             event_names.contains(&expected),
@@ -172,7 +172,7 @@ async fn external_stream_end_to_end() {
         1,
         event_names
             .iter()
-            .filter(|name| **name == "grok_code.session_start")
+            .filter(|name| **name == "chutes_build.session_start")
             .count()
     );
 
@@ -190,7 +190,7 @@ async fn external_stream_end_to_end() {
             temporality,
             "default temporality must be Delta (CC parity)"
         );
-        if point.name == "grok_code.session.count"
+        if point.name == "chutes_build.session.count"
             && let Some(OtelNumber::Int(count)) = value
         {
             session_count_total += count;
@@ -198,10 +198,10 @@ async fn external_stream_end_to_end() {
     }
     let metric_names: Vec<&str> = metrics.iter().map(|point| point.name.as_str()).collect();
     assert!(
-        metric_names.contains(&"grok_code.session.count"),
+        metric_names.contains(&"chutes_build.session.count"),
         "missing session.count in {metric_names:?}"
     );
-    assert!(metric_names.contains(&"grok_code.token.usage"));
+    assert!(metric_names.contains(&"chutes_build.token.usage"));
     assert_eq!(
         1, session_count_total,
         "session.count must increment exactly once per SessionNew"
@@ -218,8 +218,8 @@ async fn external_stream_end_to_end() {
     );
     let prompt = server
         .recorder()
-        .log_record("grok_code.user_prompt")
-        .expect("grok_code.user_prompt record");
+        .log_record("chutes_build.user_prompt")
+        .expect("chutes_build.user_prompt record");
     assert_eq!(
         Some(OAUTH_EMAIL),
         prompt.attributes.get("user.email").and_then(Value::as_str)
@@ -227,8 +227,8 @@ async fn external_stream_end_to_end() {
     assert!(!prompt.attributes.contains_key("prompt"));
     let assistant = server
         .recorder()
-        .log_record("grok_code.assistant_response")
-        .expect("grok_code.assistant_response record");
+        .log_record("chutes_build.assistant_response")
+        .expect("chutes_build.assistant_response record");
     assert!(
         assistant.attributes.contains_key("response_length"),
         "response_length is always-on"
@@ -240,21 +240,21 @@ async fn external_stream_end_to_end() {
     assert_eq!(None, assistant.body, "no record may carry a body");
     let decision = server
         .recorder()
-        .log_record("grok_code.tool_decision")
-        .expect("grok_code.tool_decision record");
+        .log_record("chutes_build.tool_decision")
+        .expect("chutes_build.tool_decision record");
     assert!(!decision.attributes.contains_key("tool_parameters"));
     assert!(!decision.attributes.contains_key("full_command"));
     let tool = server
         .recorder()
-        .log_record("grok_code.tool_result")
-        .expect("grok_code.tool_result record");
+        .log_record("chutes_build.tool_result")
+        .expect("chutes_build.tool_result record");
     assert!(!tool.attributes.contains_key("full_command"));
     assert!(!tool.attributes.contains_key("tool_parameters"));
     assert!(!tool.attributes.contains_key("tool_input"));
     assert!(!tool.attributes.contains_key("tool_output"));
     assert!(
         metrics.iter().any(|point| {
-            point.name == "grok_code.session.count"
+            point.name == "chutes_build.session.count"
                 && point.attributes.get("user.email").and_then(Value::as_str) == Some(OAUTH_EMAIL)
         }),
         "user.email must ride metrics when OAuth identity is set"

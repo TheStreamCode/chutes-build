@@ -63,10 +63,8 @@ mod tests {
         let area = Rect::new(0, 0, 40, 6);
         let prompt = Rect::new(0, 4, 40, 2);
         let mut buf = Buffer::empty(area);
-        let long = crate::app::link_opener::browser_unavailable_line(
-            "https://x.ai/legal/terms-of-service",
-            false,
-        );
+        let long =
+            crate::app::link_opener::browser_unavailable_line("https://chutes.ai/terms", false);
 
         paint_welcome_toast(&mut buf, area, &long, Some(prompt));
         let y = prompt.y.saturating_sub(1);
@@ -76,7 +74,7 @@ mod tests {
             "narrow width must truncate with ellipsis: {long_row:?}"
         );
         assert!(
-            long_row.contains("https://x.ai"),
+            long_row.contains("https://chutes.ai"),
             "URL-first message should keep the URL prefix under truncation: {long_row:?}"
         );
         assert!(

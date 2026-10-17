@@ -271,8 +271,10 @@ mod tests {
                     "CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_PRECEDENCE".to_string(),
                     "from-extra".to_string(),
                 );
-                let out =
-                    expand_env_vars_with_extra("${CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_PRECEDENCE}", &extra);
+                let out = expand_env_vars_with_extra(
+                    "${CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_PRECEDENCE}",
+                    &extra,
+                );
                 assert_eq!(out, "from-extra");
             },
         );
@@ -285,8 +287,10 @@ mod tests {
             Some("/from/proc/env"),
             || {
                 let extra = HashMap::new();
-                let out =
-                    expand_env_vars_with_extra("${CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_FALLBACK}/x", &extra);
+                let out = expand_env_vars_with_extra(
+                    "${CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_FALLBACK}/x",
+                    &extra,
+                );
                 assert_eq!(out, "/from/proc/env/x");
             },
         );
@@ -422,7 +426,10 @@ mod tests {
     #[test]
     fn mixed_plain_and_modifier_only_plain_expanded() {
         let mut extra = HashMap::new();
-        extra.insert("CHUTES_BUILD_HOOKS_PLAIN".to_string(), "/usr/local".to_string());
+        extra.insert(
+            "CHUTES_BUILD_HOOKS_PLAIN".to_string(),
+            "/usr/local".to_string(),
+        );
         let input = "${CHUTES_BUILD_HOOKS_PLAIN}/${CHUTES_BUILD_HOOKS_DEFER:-/fallback}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, "/usr/local/${CHUTES_BUILD_HOOKS_DEFER:-/fallback}");

@@ -1,13 +1,12 @@
 # Monitoring Usage (External OpenTelemetry)
 
-> **Status: alpha.** The schema below is versioned (`grok_code.schema.version = v1`);
+> **Status: alpha.** The schema below is versioned (`chutes_build.schema.version = v1`);
 > additive changes may occur without notice, renames/removals will bump the
 > version and be called out in the changelog.
 
 Chutes Build CLI can export usage **metrics** and **events** to your organization's
 own OpenTelemetry collector, so platform teams can monitor adoption, token
-consumption, tool-permission decisions, and errors across the fleet — without
-any data flowing through SpaceXAI.
+consumption, tool-permission decisions, and errors across the fleet — without any data flowing through Chutes itself.
 
 ## Related settings
 
@@ -32,17 +31,17 @@ The external stream is:
 - **Content-free by default**: no prompts, no assistant prose, no code, no file
   paths (extension only), no tool arguments, no bash commands, and MCP/skill/plugin
   names collapsed to categories. Optional content gates re-enable some of these.
-- **Structurally separate** from SpaceXAI-internal telemetry: its exporters carry
-  only the headers you configure, never SpaceXAI credentials.
-- **Independent of SpaceXAI data-retention opt-outs**: it works even when
+- **Structurally separate** from Chutes-internal telemetry: its exporters carry
+  only the headers you configure, never Chutes credentials.
+- **Independent of Chutes data-retention opt-outs**: it works even when
   `telemetry` is disabled and for ZDR (zero-data-retention) teams. Those
-  settings govern SpaceXAI-side retention; the external stream is governed solely
+  settings govern Chutes-side retention; the external stream is governed solely
   by your own OTEL configuration.
 
 ### ZDR and this stream
 
 `/privacy` and Zero Data Retention do **not** disable this stream. ZDR turns
-off SpaceXAI-side retention (product analytics, session-trace upload,
+off Chutes-side retention (product analytics, session-trace upload,
 coding-data sharing). It does not mute `CHUTES_BUILD_EXTERNAL_OTEL`.
 
 When the stream is on:
@@ -67,7 +66,7 @@ export OTEL_LOGS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf  # or grpc
 export OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.corp.example:4318
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <collector-token>"
-grok
+chutes-build
 ```
 
 `CHUTES_BUILD_EXTERNAL_OTEL=1` alone enables **nothing** — you must also select at
@@ -78,7 +77,7 @@ without the master switch.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CHUTES_BUILD_EXTERNAL_OTEL` | `0` | Master switch. Distinct from `CHUTES_BUILD_TELEMETRY_ENABLED`, which controls SpaceXAI-internal product analytics — the two govern opposite-pointing data flows. |
+| `CHUTES_BUILD_EXTERNAL_OTEL` | `0` | Master switch. Distinct from `CHUTES_BUILD_TELEMETRY_ENABLED`, which controls Chutes-internal product analytics — the two govern opposite-pointing data flows. |
 | `OTEL_METRICS_EXPORTER` | `none` | `otlp` \| `console` \| `none`. |
 | `OTEL_LOGS_EXPORTER` | `none` | `otlp` \| `console` \| `none`. Gates the event stream. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | `http/protobuf` \| `grpc`. Base protocol for both signals. |
@@ -94,8 +93,8 @@ without the master switch.
 | `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE` | `delta` | `delta` \| `cumulative`. |
 | `OTEL_METRICS_INCLUDE_SESSION_ID` | `1` | Attach `session.id` to metrics (cardinality opt-out). |
 | `OTEL_METRICS_INCLUDE_VERSION` | `0` | Attach `app.version` to metrics. |
-| `OTEL_LOG_USER_PROMPTS` | `0` | Content gate: prompt text on `grok_code.user_prompt` (60 KB cap, secret-scrubbed). |
-| `OTEL_LOG_ASSISTANT_RESPONSES` | follows prompts if unset | Content gate: `response` on `grok_code.assistant_response` (60 KB cap, secret-scrubbed). Unset follows `OTEL_LOG_USER_PROMPTS`; explicit `0` keeps responses off while prompts stay on. `response_length` always exports. Env-only fleets with `OTEL_LOG_USER_PROMPTS=1` must set `OTEL_LOG_ASSISTANT_RESPONSES=0` (or pin it off in requirements) to keep a prompts-only stream. |
+| `OTEL_LOG_USER_PROMPTS` | `0` | Content gate: prompt text on `chutes_build.user_prompt` (60 KB cap, secret-scrubbed). |
+| `OTEL_LOG_ASSISTANT_RESPONSES` | follows prompts if unset | Content gate: `response` on `chutes_build.assistant_response` (60 KB cap, secret-scrubbed). Unset follows `OTEL_LOG_USER_PROMPTS`; explicit `0` keeps responses off while prompts stay on. `response_length` always exports. Env-only fleets with `OTEL_LOG_USER_PROMPTS=1` must set `OTEL_LOG_ASSISTANT_RESPONSES=0` (or pin it off in requirements) to keep a prompts-only stream. |
 | `OTEL_LOG_TOOL_DETAILS` | `0` | Metadata gate: 4 KB `tool_parameters` preview, full file paths, verbatim MCP/skill/plugin names. Does **not** include full bodies. Details without CONTENT is the enterprise default. |
 | `OTEL_LOG_TOOL_CONTENT` | `0` | Body gate: `tool_input`, `tool_output`, `full_command`, and failure `error_message` (secret-scrubbed; 60 KB for input/output/command, 4 KB for error_message). Independent of DETAILS — CONTENT does **not** imply DETAILS. Default off. |
 
@@ -182,15 +181,17 @@ launcher after strip, never in this TOML.
 
 ## Startup suppression (why nothing arrives for the first few seconds)
 
-Because xAI can force-disable this stream fleet-wide, the CLI holds emission
+Because Chutes can force-disable this stream fleet-wide (a tighten-only
+policy delivered with the proxy `/settings` fetch), the CLI holds emission
 closed at startup until it knows whether that switch is set — it fetches the
-fleet policy from `/v1/settings` and only then starts exporting. In a healthy
+fleet policy and only then starts exporting. In a healthy
 setup that is well under a second and invisible.
 
-**The wait is bounded**, so a deployment that cannot reach xAI still exports:
+**The wait is bounded**, so a deployment that cannot reach the proxy still exports:
 
 - If no fleet policy can apply at all — `[features] remote_fetch = false`, or
-  `[endpoints] cli_chat_proxy_base_url` points somewhere other than xAI — the
+  `[endpoints] cli_chat_proxy_base_url` points somewhere other than the
+  production Chutes proxy — the
   stream starts immediately, governed by your local configuration.
 - If the policy fetch fails or never completes (firewalled host, offline
   laptop), emission starts anyway once the attempt is exhausted, and in all
@@ -208,11 +209,11 @@ resolved its configuration, and whether it is exporting or suppressed.
 
 | Attribute | Value |
 |---|---|
-| `service.name` | `grok-cli` |
+| `service.name` | `chutes-build` |
 | `service.version`, `client.version` | build/client versions |
 | `app.entrypoint` | `cli` \| `headless` \| `agent` |
 | `terminal.type` | terminal emulator brand |
-| `grok_code.schema.version` | `v1` |
+| `chutes_build.schema.version` | `v1` |
 
 Identity attributes (`user.id`, and `organization.id` / `team.id` /
 `deployment.id` when known) are attached per metric data point and per event
@@ -222,22 +223,22 @@ non-empty address — it is identity, not a content gate, and is never taken fro
 git, an API key, or a deployment key. `prompt.id` (per-prompt UUID) appears on
 events only, never metrics.
 
-## Metrics (meter scope `ai.xai.grok_code`)
+## Metrics (meter scope `ai.chutes.build`)
 
 | Metric | Unit | Attributes |
 |---|---|---|
-| `grok_code.session.count` | `{session}` | base attrs only |
-| `grok_code.token.usage` | `{token}` | `type` = `input` \| `output` \| `reasoning` \| `cache_read`; `model` |
-| `grok_code.turn.count` | `{turn}` | `outcome` = `completed` \| `cancelled` \| `error`; `model` |
-| `grok_code.turn.ttft` | `ms` | `model` |
-| `grok_code.turn.ttfm` | `ms` | `model` |
-| `grok_code.tool.decision` | `{decision}` | `tool_name`, `decision` = `allow` \| `deny` \| `cancelled` \| `followup`, `access_kind`, `permission_mode` |
-| `grok_code.tool.usage` | `{call}` | `tool_name`, `outcome` |
-| `grok_code.error.count` | `{error}` | `error_category`, `model` |
-| `grok_code.startup.total` | `ms` | `outcome` = `ok` \| `timeout` \| `error`; `auth_mode` |
-| `grok_code.startup.interactive` | `ms` | `auth_mode` |
-| `grok_code.startup.phase_duration` | `ms` | `phase`, `outcome`, `auth_mode` |
-| `grok_code.startup.timeout` | `{timeout}` | `stuck_in`, `auth_mode` |
+| `chutes_build.session.count` | `{session}` | base attrs only |
+| `chutes_build.token.usage` | `{token}` | `type` = `input` \| `output` \| `reasoning` \| `cache_read`; `model` |
+| `chutes_build.turn.count` | `{turn}` | `outcome` = `completed` \| `cancelled` \| `error`; `model` |
+| `chutes_build.turn.ttft` | `ms` | `model` |
+| `chutes_build.turn.ttfm` | `ms` | `model` |
+| `chutes_build.tool.decision` | `{decision}` | `tool_name`, `decision` = `allow` \| `deny` \| `cancelled` \| `followup`, `access_kind`, `permission_mode` |
+| `chutes_build.tool.usage` | `{call}` | `tool_name`, `outcome` |
+| `chutes_build.error.count` | `{error}` | `error_category`, `model` |
+| `chutes_build.startup.total` | `ms` | `outcome` = `ok` \| `timeout` \| `error`; `auth_mode` |
+| `chutes_build.startup.interactive` | `ms` | `auth_mode` |
+| `chutes_build.startup.phase_duration` | `ms` | `phase`, `outcome`, `auth_mode` |
+| `chutes_build.startup.timeout` | `{timeout}` | `stuck_in`, `auth_mode` |
 
 `startup.total` measures process start to a usable session, recorded once per
 process; `outcome` = `timeout` or `error` means startup ended without one.
@@ -264,7 +265,7 @@ turn on the same clock, so `ttft` never exceeds `ttfm`. A turn that produced no
 model output records no `ttft`; a reasoning-only or tool-only turn records `ttft`
 but no `ttfm`.
 
-There is no `cost.usage` metric: join `grok_code.token.usage` with your own
+There is no `cost.usage` metric: join `chutes_build.token.usage` with your own
 price sheet. `lines_of_code.count` and `active_time.total` are planned for a
 later phase.
 
@@ -284,24 +285,24 @@ stream is active.
 
 | `event.name` | Attributes |
 |---|---|
-| `grok_code.session_start` | `model`, `permission_mode`, `mcp_server_count`, `plugin_count`, `skill_count`, `hook_count`, `memory_enabled`, `is_git_repo`, `client_identifier` |
-| `grok_code.session_end` | `duration_secs`, `turn_count`, `tool_call_count`, `compaction_count`, `model` |
-| `grok_code.user_prompt` | `prompt_length`, `model`, `screen_mode?` (`fullscreen` \| `inline` \| `minimal` \| `headless` \| `other`), `command_name?` (slash/skill name, always-on metadata); `prompt` (**prompts**) |
-| `grok_code.assistant_response` | `response_length`; `response` (**responses**; omitted on tool-only turns) |
-| `grok_code.turn_completed` | `outcome`, `duration_ms`, `tool_call_count`, `model`, `error_category?`, `cancellation_category?` |
-| `grok_code.api_request` | `model`, `duration_ms`, `stop_reason?`, `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens` |
-| `grok_code.api_error` | `error_category`, `model`, `status_code?`, `duration_ms?` |
-| `grok_code.tool_result` | `tool_name`, `outcome`, `success`, `duration_ms`, `file_extension`, `tool_use_id`; reduced `mcp_tool.name` / `mcp_server.name` always (verbatim under **details**); `tool_parameters` preview + `file_path` (**details**); `tool_input`, `tool_output`, `full_command`, `error_message` (**content**) |
-| `grok_code.tool_decision` | `tool_name`, `decision`, `access_kind`, `permission_mode`, `source`, `tool_use_id`; reduced MCP names always (verbatim under **details**); `tool_parameters` preview (**details**); `tool_input`, `full_command` (**content**) |
-| `grok_code.mcp_server_connection` | `status`, `transport_type`, `duration_ms`, `tool_count?`, `error_type?`; reduced `mcp_server.name` always (verbatim under **details**); `error_message` (**content**) |
-| `grok_code.permission_mode_changed` | `from_mode`, `to_mode`, `trigger` |
-| `grok_code.skill_activated` | `skill_source`, `trigger` = `slash_command` \| `skill_md_read` \| `skill_tool`; `skill.name` (**details**) |
-| `grok_code.plugin_loaded` | `install_kind?`, `success`, `error_category?`; `plugin_name` (**details**) |
-| `grok_code.compaction` | `duration_ms`, `tokens_before`, `tokens_after`, `model?` |
-| `grok_code.subagent` | `phase` = `launched` \| `completed`, `subagent_type?`, `outcome?`, `duration_ms?` |
-| `grok_code.auth` | `auth_method` |
-| `grok_code.internal_error` | `error_type` (class only — no message, no location) |
-| `grok_code.model_switched` | `from_model`, `to_model`, `success`, `error_code?` |
+| `chutes_build.session_start` | `model`, `permission_mode`, `mcp_server_count`, `plugin_count`, `skill_count`, `hook_count`, `memory_enabled`, `is_git_repo`, `client_identifier` |
+| `chutes_build.session_end` | `duration_secs`, `turn_count`, `tool_call_count`, `compaction_count`, `model` |
+| `chutes_build.user_prompt` | `prompt_length`, `model`, `screen_mode?` (`fullscreen` \| `inline` \| `minimal` \| `headless` \| `other`), `command_name?` (slash/skill name, always-on metadata); `prompt` (**prompts**) |
+| `chutes_build.assistant_response` | `response_length`; `response` (**responses**; omitted on tool-only turns) |
+| `chutes_build.turn_completed` | `outcome`, `duration_ms`, `tool_call_count`, `model`, `error_category?`, `cancellation_category?` |
+| `chutes_build.api_request` | `model`, `duration_ms`, `stop_reason?`, `input_tokens`, `output_tokens`, `reasoning_tokens`, `cache_read_tokens` |
+| `chutes_build.api_error` | `error_category`, `model`, `status_code?`, `duration_ms?` |
+| `chutes_build.tool_result` | `tool_name`, `outcome`, `success`, `duration_ms`, `file_extension`, `tool_use_id`; reduced `mcp_tool.name` / `mcp_server.name` always (verbatim under **details**); `tool_parameters` preview + `file_path` (**details**); `tool_input`, `tool_output`, `full_command`, `error_message` (**content**) |
+| `chutes_build.tool_decision` | `tool_name`, `decision`, `access_kind`, `permission_mode`, `source`, `tool_use_id`; reduced MCP names always (verbatim under **details**); `tool_parameters` preview (**details**); `tool_input`, `full_command` (**content**) |
+| `chutes_build.mcp_server_connection` | `status`, `transport_type`, `duration_ms`, `tool_count?`, `error_type?`; reduced `mcp_server.name` always (verbatim under **details**); `error_message` (**content**) |
+| `chutes_build.permission_mode_changed` | `from_mode`, `to_mode`, `trigger` |
+| `chutes_build.skill_activated` | `skill_source`, `trigger` = `slash_command` \| `skill_md_read` \| `skill_tool`; `skill.name` (**details**) |
+| `chutes_build.plugin_loaded` | `install_kind?`, `success`, `error_category?`; `plugin_name` (**details**) |
+| `chutes_build.compaction` | `duration_ms`, `tokens_before`, `tokens_after`, `model?` |
+| `chutes_build.subagent` | `phase` = `launched` \| `completed`, `subagent_type?`, `outcome?`, `duration_ms?` |
+| `chutes_build.auth` | `auth_method` |
+| `chutes_build.internal_error` | `error_type` (class only — no message, no location) |
+| `chutes_build.model_switched` | `from_model`, `to_model`, `success`, `error_code?` |
 
 ## Privacy model
 
@@ -361,14 +362,14 @@ Example queries (PromQL, with the Prometheus exporter above):
 
 ```promql
 # Tokens by model and type across the org, 1h rate
-sum by (model, type) (rate(grok_code_token_usage_total[1h]))
+sum by (model, type) (rate(chutes_build_token_usage_total[1h]))
 
 # Sessions per team per day
-sum by (team_id) (increase(grok_code_session_count_total[1d]))
+sum by (team_id) (increase(chutes_build_session_count_total[1d]))
 
 # Tool-permission denial ratio
-sum(rate(grok_code_tool_decision_total{decision="deny"}[1h]))
-  / sum(rate(grok_code_tool_decision_total[1h]))
+sum(rate(chutes_build_tool_decision_total{decision="deny"}[1h]))
+  / sum(rate(chutes_build_tool_decision_total[1h]))
 ```
 
 ## Debugging

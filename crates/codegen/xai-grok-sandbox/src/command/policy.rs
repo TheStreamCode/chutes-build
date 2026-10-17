@@ -8,8 +8,8 @@ mod apply;
 
 pub(crate) use apply::symlink_free_spelling;
 pub use protected::{
-    BUILD_CACHE_TREES, CHUTES_BUILD_HOME_SECRET_GLOBS, SECRET_READ_DENY_DIRS, SECRET_READ_DENY_FILES,
-    VERIFIED_BUILD_CACHES, default_tmp_dirs,
+    BUILD_CACHE_TREES, CHUTES_BUILD_HOME_SECRET_GLOBS, SECRET_READ_DENY_DIRS,
+    SECRET_READ_DENY_FILES, VERIFIED_BUILD_CACHES, default_tmp_dirs,
 };
 
 use std::collections::BTreeMap;
@@ -536,10 +536,14 @@ fn read_denies_for(
             deny.push(DenyEntry::Path(secret));
         }
     }
-    deny.extend(CHUTES_BUILD_HOME_SECRET_GLOBS.iter().map(|glob| DenyEntry::Glob {
-        root: grok_home.to_path_buf(),
-        tail: (*glob).to_owned(),
-    }));
+    deny.extend(
+        CHUTES_BUILD_HOME_SECRET_GLOBS
+            .iter()
+            .map(|glob| DenyEntry::Glob {
+                root: grok_home.to_path_buf(),
+                tail: (*glob).to_owned(),
+            }),
+    );
     // The grant files' lock sidecars: a command able to open one could hold its `flock`
     deny.extend(
         [grok_home, &own_session_dir]

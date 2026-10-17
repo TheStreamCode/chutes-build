@@ -1,6 +1,6 @@
 //! Bridge the shell's `AuthManager` onto the voice crate's STT routes.
 //!
-//! voice-api accepts an xAI API key or an xAI OAuth2 token at `api.chutes.ai` and attributes per-user billing for OAuth.
+//! voice-api accepts a Chutes API key or a Chutes OAuth2 token at `api.chutes.ai` and attributes per-user billing for OAuth.
 //! The bearer comes from the shell's side-call resolver, the same one the Imagine tools use, so a login issued by a
 //! foreign authority is refused here and no socket opens for it. A build that can transcribe a finished clip through
 //! that login's own backend offers it as the second route, so such a login records and transcribes instead of failing.
@@ -36,7 +36,7 @@ impl VoiceAuthProvider for AuthManagerVoiceAuth {
 }
 /// Build the voice bearer provider from the connection's `AuthManager`.
 ///
-/// Serves xAI logins and `CHUTES_API_KEY` / per-model BYOK keys. A foreign-issuer login resolves to
+/// Serves Chutes logins and `CHUTES_API_KEY` / per-model BYOK keys. A foreign-issuer login resolves to
 /// [`VoiceAuthError::ForeignSession`] instead of a bearer.
 fn build_voice_auth(auth_manager: Arc<xai_grok_login::AuthManager>) -> SharedVoiceAuth {
     Arc::new(AuthManagerVoiceAuth(
@@ -44,7 +44,7 @@ fn build_voice_auth(auth_manager: Arc<xai_grok_login::AuthManager>) -> SharedVoi
     ))
 }
 /// Streaming bearer, plus the clip transcriber on builds that can transcribe for the signed-in login. The pipeline
-/// consults it only after [`VoiceAuthError::ForeignSession`], so an xAI credential always keeps streaming.
+/// consults it only after [`VoiceAuthError::ForeignSession`], so a Chutes credential always keeps streaming.
 pub fn build_stt_routes(auth_manager: Arc<xai_grok_login::AuthManager>) -> SttRoutes {
     let clip_transcriber = None;
     SttRoutes {

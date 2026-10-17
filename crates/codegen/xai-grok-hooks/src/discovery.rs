@@ -343,28 +343,30 @@ pub fn discover_hook_source_paths(options: DiscoveryOptions<'_>) -> HookSourcePa
         options.compat.claude && options.claude_import == ClaudeImport::NotImported;
     let include_cursor = options.compat.cursor;
 
-    let mut global: Vec<HookSourceConfig> =
-        match resolve_global_hook_sources(options.grok_home, /* reject_symlinks */ false) {
-            Ok(resolved) => {
-                if let Some(e) = &resolved.configured_error {
-                    tracing::warn!(
-                        error = %e,
-                        "hooks-paths unreadable; retaining fixed Chutes Build hook discovery sources only"
-                    );
-                }
-                resolved
-                    .discovery_sources()
-                    .map(|s| classify_grok_hook_source(s.path.clone()))
-                    .collect()
-            }
-            Err(e) => {
+    let mut global: Vec<HookSourceConfig> = match resolve_global_hook_sources(
+        options.grok_home,
+        /* reject_symlinks */ false,
+    ) {
+        Ok(resolved) => {
+            if let Some(e) = &resolved.configured_error {
                 tracing::warn!(
                     error = %e,
-                    "global hook source resolve hard-failed; omitting Chutes Build global sources"
+                    "hooks-paths unreadable; retaining fixed Chutes Build hook discovery sources only"
                 );
-                Vec::new()
             }
-        };
+            resolved
+                .discovery_sources()
+                .map(|s| classify_grok_hook_source(s.path.clone()))
+                .collect()
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "global hook source resolve hard-failed; omitting Chutes Build global sources"
+            );
+            Vec::new()
+        }
+    };
 
     if let Some(h) = options.home {
         if include_claude {
@@ -392,7 +394,9 @@ pub fn discover_hook_source_paths(options: DiscoveryOptions<'_>) -> HookSourcePa
                 root.join(".claude").join("settings.local.json"),
             ));
         }
-        project.push(classify_grok_hook_source(root.join(".chutes-build").join("hooks")));
+        project.push(classify_grok_hook_source(
+            root.join(".chutes-build").join("hooks"),
+        ));
         if include_cursor {
             project.push(HookSourceConfig::SettingsFile(
                 root.join(".cursor").join("hooks.json"),

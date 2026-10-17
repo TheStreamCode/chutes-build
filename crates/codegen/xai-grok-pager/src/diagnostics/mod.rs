@@ -260,7 +260,9 @@ pub(crate) fn collect_startup_warnings_from(
     {
         let message = match fullscreen_active {
             Some(true) => "Fullscreen may be unreliable in tmux control mode",
-            Some(false) => "Chutes Build is using inline mode because tmux control mode limits fullscreen",
+            Some(false) => {
+                "Chutes Build is using inline mode because tmux control mode limits fullscreen"
+            }
             None => "Display may be limited in tmux control mode",
         };
         let mut warning = TerminalWarning::new(WarningCategory::ControlMode, message, None, None);

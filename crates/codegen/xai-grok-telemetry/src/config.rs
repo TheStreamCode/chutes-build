@@ -185,8 +185,10 @@ impl Default for TelemetryConfig {
     fn default() -> Self {
         let (baked_url, baked_key, baked_token, baked_enabled) = internal_defaults();
         let build_url = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_URL"));
-        let build_key = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_API_KEY"));
-        let build_token = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_MIXPANEL_TOKEN"));
+        let build_key =
+            build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_API_KEY"));
+        let build_token =
+            build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_MIXPANEL_TOKEN"));
         let mixpanel_enabled = baked_enabled || build_token.is_some();
         let (events_url, events_api_key, mixpanel_token) = (
             build_url.or(baked_url),

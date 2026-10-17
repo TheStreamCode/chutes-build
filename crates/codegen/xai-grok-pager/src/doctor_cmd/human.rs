@@ -5,7 +5,8 @@ use crate::diagnostics::{
 };
 use crate::host::{DisplayServer, HostOs};
 
-const LIVE_TUI_PROBE_CTA: &str = "Some checks only run in Chutes Build. Start Chutes Build and run /doctor.";
+const LIVE_TUI_PROBE_CTA: &str =
+    "Some checks only run in Chutes Build. Start Chutes Build and run /doctor.";
 
 pub(super) fn format(report: &DiagnosticReport) -> String {
     let facts = &report.facts;

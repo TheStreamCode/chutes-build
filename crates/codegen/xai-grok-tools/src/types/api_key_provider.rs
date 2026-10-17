@@ -2,15 +2,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-/// Why a provider has no bearer for a direct `api.x.ai` call (Imagine, voice), which resolves only
-/// an xAI API key or xAI OAuth2 token. Neither variant is a cue to fall back to another credential.
+/// Why a provider has no bearer for a direct `api.chutes.ai` call (Imagine, voice), which resolves only
+/// a Chutes API key or Chutes OAuth2 token. Neither variant is a cue to fall back to another credential.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SideCallBearerError {
     #[error(
-        "this account's login is not an xAI credential; image, video, and voice need an xAI API key or an xAI login"
+        "this account's login is not a Chutes credential; image, video, and voice need a Chutes API key or a Chutes login"
     )]
     ForeignSession,
-    #[error("no xAI credential available; run `chutes-build login` or set CHUTES_API_KEY")]
+    #[error("no Chutes credential available; run `chutes-build login` or set CHUTES_API_KEY")]
     Missing,
 }
 
@@ -25,10 +25,10 @@ pub trait ApiKeyProvider: Send + Sync + 'static {
         Box::pin(std::future::ready(self.current_api_key()))
     }
 
-    /// Bearer for a direct call to an xAI host (Imagine, voice), or why there is none.
+    /// Bearer for a direct call to a Chutes host (Imagine, voice), or why there is none.
     ///
     /// The default refuses: a provider that cannot say whose credential it holds must not have it
-    /// sent to `api.x.ai`. A provider that can classify its credential overrides this.
+    /// sent to `api.chutes.ai`. A provider that can classify its credential overrides this.
     fn side_call_bearer(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<String, SideCallBearerError>> + Send + '_>> {

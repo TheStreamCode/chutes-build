@@ -1,7 +1,7 @@
 //! The `[endpoints]` config table, its environment variable overrides, and the URLs resolved from it.
 //!
 //! The auxiliary services (feedback, trace upload, managed config, telemetry) resolve to the cli-chat-proxy.
-//! Only API-key inference uses `xai_api_base_url`.
+//! Only API-key inference uses `public_api_base_url`.
 use serde::{Deserialize, Serialize};
 use xai_grok_env::{PROD_CLI_CHAT_PROXY_BASE_URL, env_bool, env_string};
 pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = PROD_CLI_CHAT_PROXY_BASE_URL;
@@ -12,9 +12,11 @@ pub struct EndpointsConfig {
     /// `Some` means someone configured it, even when the value is the default URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Base URL for API-key inference. The field keeps its upstream name so
-    /// existing `[endpoints]` tables keep parsing; the default is Chutes.
-    pub xai_api_base_url: String,
+    /// Base URL for API-key inference. Env: `CHUTES_BUILD_PUBLIC_API_BASE_URL`
+    /// (`CHUTES_BUILD_XAI_API_BASE_URL` still works as a deprecated fallback).
+    /// The default is Chutes.
+    #[serde(alias = "xai_api_base_url")]
+    pub public_api_base_url: String,
     /// An extra access header value for matching first-party hosts, used only with the optional non-production feature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_test_key: Option<String>,
@@ -275,7 +277,8 @@ impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
             cli_chat_proxy_base_url: std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("CHUTES_BUILD_XAI_API_BASE_URL")
+            public_api_base_url: std::env::var("CHUTES_BUILD_PUBLIC_API_BASE_URL")
+                .or_else(|_| std::env::var("CHUTES_BUILD_XAI_API_BASE_URL"))
                 .unwrap_or_else(|_| CHUTES_API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
             models_base_url: env_string("CHUTES_BUILD_MODELS_BASE_URL"),
@@ -292,7 +295,9 @@ impl Default for EndpointsConfig {
             otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
             otel_exporter_otlp_headers: env_string("OTEL_EXPORTER_OTLP_HEADERS"),
-            grok_internal_otlp_traces_endpoint: env_string("CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT"),
+            grok_internal_otlp_traces_endpoint: env_string(
+                "CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT",
+            ),
             grok_internal_otlp_headers: env_string("CHUTES_BUILD_INTERNAL_OTLP_HEADERS"),
             external_otel_master_switch: external_otel_master_switch_resolved(),
             otel_traces_exporter: env_string("OTEL_TRACES_EXPORTER"),

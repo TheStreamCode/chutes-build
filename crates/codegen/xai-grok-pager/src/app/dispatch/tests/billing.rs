@@ -430,7 +430,7 @@ fn upsell_non_max_qa_heading_is_spending_cap_when_payg_on() {
 }
 
 #[test]
-fn upsell_non_max_upgrade_url_is_supergrok() {
+fn upsell_non_max_upgrade_url_is_usage() {
     let mut app = test_app_with_agent();
     open_upsell_qa(
         &mut app,
@@ -440,8 +440,9 @@ fn upsell_non_max_upgrade_url_is_supergrok() {
         .id
         .as_deref()
         .unwrap();
-    assert!(url.contains("supergrok"), "got: {url}");
-    assert!(url.contains("referrer=chutes-build"), "got: {url}");
+    // The option id carries the raw URL; `referrer=chutes-build` is stamped at click time.
+    assert!(url.contains("_s=usage"), "got: {url}");
+    assert!(!url.contains("referrer="), "got: {url}");
 }
 
 #[test]
@@ -1286,22 +1287,17 @@ fn free_usage_upsell_shows_three_options_with_exact_labels() {
         )
     ));
     let q = first_question(qv);
-    assert_eq!(q.question, "You hit your free usage limit.");
+    assert_eq!(q.question, "You hit your usage limit.");
     let expected = [
         (
-            "Upgrade to SuperGrok",
-            "For everyday coding and productivity tasks",
+            "Upgrade your plan",
+            "Raise your Chutes plan limits",
             Some(UPSELL_URL_UPGRADE),
         ),
         (
-            "Upgrade to SuperGrok Plus",
-            "Significantly higher usage and rate limits",
-            Some(UPSELL_URL_UPGRADE),
-        ),
-        (
-            "Upgrade to SuperGrok Heavy",
-            "Get the most out of Chutes Build. Highest usage limits.",
-            Some(UPSELL_URL_UPGRADE),
+            "Buy more credits",
+            "Purchase credits to keep using Chutes Build",
+            Some(UPSELL_URL_PAYG),
         ),
     ];
     assert_eq!(q.options.len(), expected.len());
@@ -1431,14 +1427,12 @@ fn restricted_command_submit_opens_three_option_upsell() {
         )
     ));
     let q = first_question(qv);
-    assert_eq!(q.question, "Unlock all features with SuperGrok.");
-    assert_eq!(q.options.len(), 3);
-    assert_eq!(option_at(q, 0).label, "Upgrade to SuperGrok");
+    assert_eq!(q.question, "Unlock all features with a Chutes plan.");
+    assert_eq!(q.options.len(), 2);
+    assert_eq!(option_at(q, 0).label, "Upgrade your plan");
     assert_eq!(option_at(q, 0).id.as_deref(), Some(UPSELL_URL_UPGRADE));
-    assert_eq!(option_at(q, 1).label, "Upgrade to SuperGrok Plus");
-    assert_eq!(option_at(q, 1).id.as_deref(), Some(UPSELL_URL_UPGRADE));
-    assert_eq!(option_at(q, 2).label, "Upgrade to SuperGrok Heavy");
-    assert_eq!(option_at(q, 2).id.as_deref(), Some(UPSELL_URL_UPGRADE));
+    assert_eq!(option_at(q, 1).label, "Buy more credits");
+    assert_eq!(option_at(q, 1).id.as_deref(), Some(UPSELL_URL_PAYG));
 }
 
 /// Aliases of a restricted command hit the same upsell (deny-list matching covers aliases via the registry).

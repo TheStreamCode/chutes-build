@@ -513,7 +513,10 @@ pub(crate) struct ExtListResponseMeta {
     #[serde(rename = "chutes.ai/partial")]
     pub partial: PartialInfo,
     /// Present only when the listing relaxed beyond the cwd.
-    #[serde(rename = "chutes.ai/listScope", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "chutes.ai/listScope",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub list_scope: Option<&'static str>,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -971,15 +974,22 @@ mod tests {
     #[serial_test::serial]
     fn conversations_lane_env_gating_matrix() {
         {
-            let _off = xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS");
+            let _off =
+                xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS");
             assert!(!conversations_lane_enabled());
         }
         {
-            let _on = xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS", "1");
+            let _on = xai_grok_test_support::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
+                "1",
+            );
             assert_eq!(conversations_lane_enabled(), false);
         }
         {
-            let _off = xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS", "0");
+            let _off = xai_grok_test_support::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
+                "0",
+            );
             assert!(!conversations_lane_enabled());
         }
     }
@@ -996,8 +1006,10 @@ mod tests {
             "no env ⇒ lane off (Build-mode default)"
         );
         {
-            let _desktop =
-                xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS", "1");
+            let _desktop = xai_grok_test_support::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
+                "1",
+            );
             assert_eq!(conversations_lane_active(), false);
         }
         {
@@ -1101,7 +1113,9 @@ mod tests {
         }))
         .expect("serialize");
         assert_eq!(
-            healthy.get("_meta").and_then(|m| m.get("chutes.ai/partial")),
+            healthy
+                .get("_meta")
+                .and_then(|m| m.get("chutes.ai/partial")),
             Some(&serde_json::json!({ "conversations": false }))
         );
     }

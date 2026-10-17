@@ -406,7 +406,11 @@ mod tests {
         with_test_env(|| {
             set(ThemeKind::Terminal);
             set_terminal_native_lock(true);
-            assert_eq!(current_kind(), ThemeKind::ChutesNight, "masked nominal kind");
+            assert_eq!(
+                current_kind(),
+                ThemeKind::ChutesNight,
+                "masked nominal kind"
+            );
             assert_eq!(selected_kind(), ThemeKind::Terminal, "raw stored selection");
             set_terminal_native_lock(false);
             assert_eq!(selected_kind(), current_kind());
@@ -750,7 +754,10 @@ mod tests {
     #[test]
     fn grok_theme_wins_over_lc_and_config() {
         with_test_env(|| {
-            let env = theme_env(&[("CHUTES_BUILD_THEME", "chutesday"), ("LC_CHUTES_BUILD_THEME", "tokyonight")]);
+            let env = theme_env(&[
+                ("CHUTES_BUILD_THEME", "chutesday"),
+                ("LC_CHUTES_BUILD_THEME", "tokyonight"),
+            ]);
             assert_eq!(
                 resolve_initial_theme_from(
                     env_theme_name_from(&env),
@@ -830,7 +837,10 @@ mod tests {
             );
             assert_eq!(
                 resolve_initial_theme_from(
-                    env_theme_name_from(&theme_env(&[("CHUTES_BUILD_THEME", ""), ("LC_CHUTES_BUILD_THEME", "")])),
+                    env_theme_name_from(&theme_env(&[
+                        ("CHUTES_BUILD_THEME", ""),
+                        ("LC_CHUTES_BUILD_THEME", "")
+                    ])),
                     Some(ThemeKind::ChutesDay),
                     true,
                 ),

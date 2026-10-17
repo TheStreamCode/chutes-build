@@ -1,7 +1,7 @@
 //! Async task-result application: routes task results into state.
 use super::auth::{
-    ensure_login_method, handle_auth_complete, handle_auth_url_ready, handle_mcp_auth_trigger_done,
-    handle_mcp_setup_submit_done,
+    ensure_login_method, handle_api_key_accepted, handle_api_key_rejected, handle_auth_complete,
+    handle_auth_url_ready, handle_mcp_auth_trigger_done, handle_mcp_setup_submit_done,
 };
 use super::billing::{
     PAYWALL_AUTO_CHECK_TIMEOUT, apply_auto_topup, handle_billing_fetched,
@@ -1184,6 +1184,10 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         } => handle_auth_url_ready(app, request_seq, auth_url, external, mode),
         TaskResult::AuthCodeSubmitted { .. } => vec![],
         TaskResult::AuthCancelComplete => vec![],
+        TaskResult::ApiKeyAccepted { request_seq } => handle_api_key_accepted(app, request_seq),
+        TaskResult::ApiKeyRejected { request_seq, error } => {
+            handle_api_key_rejected(app, request_seq, error)
+        }
         TaskResult::McpsListLoaded { agent_id, result } => {
             use crate::views::extensions_modal::TabDataState;
             if let Some(agent) = app.agents.get_mut(&agent_id)
@@ -1692,11 +1696,9 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::AccountComplete { agent_id, text } => {
             handle_account_result(app, agent_id, text)
         }
-        TaskResult::AccountFailed { agent_id, error } => handle_account_result(
-            app,
-            agent_id,
-            format!("Couldn't load account: {error}"),
-        ),
+        TaskResult::AccountFailed { agent_id, error } => {
+            handle_account_result(app, agent_id, format!("Couldn't load account: {error}"))
+        }
         TaskResult::FeedbackComplete {
             agent_id,
             origin,

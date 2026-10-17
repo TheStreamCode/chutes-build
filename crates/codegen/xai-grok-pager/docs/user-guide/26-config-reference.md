@@ -22,7 +22,7 @@ Chutes Build also reads these layers, later rows winning except where a requirem
 4. Project `.chutes-build/config.toml`: only `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
 5. `CHUTES_BUILD_CONFIG` (inline JSON) or `CHUTES_BUILD_CONFIG_PATH` (JSON or TOML file). Allowlisted keys only.
 6. `$CHUTES_BUILD_HOME/requirements.toml`, then `/etc/chutes-build/requirements.toml`, then macOS MDM `ai.x.chutes-build`. Admin layer. Keys marked `pin` in the table cannot be overridden; keys marked `yes` are also valid in this file.
-7. `GROK_*` environment variables.
+7. `CHUTES_BUILD_*` environment variables.
 8. CLI flags such as `--model`, `--sandbox`, `--yolo`.
 
 Run `chutes-build inspect` or `chutes-build inspect --json` to see which files and values won.
@@ -51,28 +51,28 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `auth` | `table` | `yes` | `user` | Alias of `[grok_com_config]`; every `grok_com_config.*` key also works as `auth.*`. |
-| `auth.auth_provider_command` | `string` | `yes` | `user` | External auth binary; stdout is the token. With `endpoints.models_base_url` or `models_list_url` set, that endpoint's list decides which models are offered. Also CHUTES_BUILD_AUTH_PROVIDER_COMMAND; also valid as `grok_com_config.auth_provider_command`. |
-| `auth.auth_provider_label` | `string` | `yes` | `user` | Login button label for an external auth provider. Also CHUTES_BUILD_AUTH_PROVIDER_LABEL; also valid as `grok_com_config.auth_provider_label`. |
-| `auth.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token. Also CHUTES_BUILD_AUTH_TOKEN_TTL; also valid as `grok_com_config.auth_token_ttl`. |
-| `auth.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth so only the deployment IdP can log in. Also CHUTES_BUILD_DISABLE_API_KEY_AUTH; also valid as `grok_com_config.disable_api_key_auth`. |
-| `auth.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID, or any of an array; empty array fails closed. Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID; also valid as `grok_com_config.force_login_team_uuid`. |
-| `auth.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for remote control. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_ORIGIN. |
-| `auth.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_URL. |
-| `auth.oauth2` | `table` | `yes` | `user` | OAuth2 provider used when enterprise OIDC is unset; also valid as `grok_com_config.oauth2`. |
-| `auth.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id. Also CHUTES_BUILD_OAUTH2_CLIENT_ID; also valid as `grok_com_config.oauth2.client_id`. |
-| `auth.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL. Also CHUTES_BUILD_OAUTH2_ISSUER; also valid as `grok_com_config.oauth2.issuer`. |
-| `auth.oauth2.principal_id` | `string` | `yes` | `user` | Required principal id when `principal_type` is set. Also CHUTES_BUILD_OAUTH2_PRINCIPAL_ID; also valid as `grok_com_config.oauth2.principal_id`. |
-| `auth.oauth2.principal_type` | `string` | `yes` | `user` | Token principal type, such as Team. Also CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE; also valid as `grok_com_config.oauth2.principal_type`. |
-| `auth.oauth2.referrer` | `string` | `yes` | `user` | Referrer for OAuth usage attribution. Also CHUTES_BUILD_OAUTH2_REFERRER; also valid as `grok_com_config.oauth2.referrer`. |
-| `auth.oauth2.scopes` | `string[]` | `yes` | `user` | OAuth2 scopes. Also CHUTES_BUILD_OAUTH2_SCOPES; also valid as `grok_com_config.oauth2.scopes`. |
-| `auth.oidc` | `table` | `yes` | `user` | Customer OIDC identity-provider settings; also valid as `grok_com_config.oidc`. |
-| `auth.oidc.audience` | `string` | `yes` | `user` | Optional OIDC audience. Also CHUTES_BUILD_OIDC_AUDIENCE; also valid as `grok_com_config.oidc.audience`. |
-| `auth.oidc.client_id` | `string` | `yes` | `user` | OIDC client id. Also CHUTES_BUILD_OIDC_CLIENT_ID; also valid as `grok_com_config.oidc.client_id`. |
-| `auth.oidc.issuer` | `string` | `yes` | `user` | OIDC issuer URL. Also CHUTES_BUILD_OIDC_ISSUER; also valid as `grok_com_config.oidc.issuer`. |
-| `auth.oidc.scopes` | `string[]` | `yes` | `user` | OIDC scopes. Also CHUTES_BUILD_OIDC_SCOPES; also valid as `grok_com_config.oidc.scopes`. |
+| `auth` | `table` | `yes` | `user` | Canonical auth settings; `[grok_com_config]` is the legacy alias. |
+| `auth.auth_provider_command` | `string` | `yes` | `user` | External auth binary (dormant: parsed but never honored; API key only). Also CHUTES_BUILD_AUTH_PROVIDER_COMMAND; also valid as `grok_com_config.auth_provider_command`. |
+| `auth.auth_provider_label` | `string` | `yes` | `user` | Login button label for an external auth provider (dormant). Also CHUTES_BUILD_AUTH_PROVIDER_LABEL; also valid as `grok_com_config.auth_provider_label`. |
+| `auth.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token (dormant). Also CHUTES_BUILD_AUTH_TOKEN_TTL; also valid as `grok_com_config.auth_token_ttl`. |
+| `auth.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth (dormant: parsed but never honored; API key only). Also CHUTES_BUILD_DISABLE_API_KEY_AUTH; also valid as `grok_com_config.disable_api_key_auth`. |
+| `auth.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID (dormant: parsed but never honored; API key only). Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID; also valid as `grok_com_config.force_login_team_uuid`. |
+| `auth.ws_origin` | `string` | `yes` | `user` | Websocket origin for remote control. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_ORIGIN (`grok_ws_origin` still works as a deprecated alias). |
+| `auth.ws_url` | `string` | `yes` | `user` | Relay websocket URL. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_URL (`grok_ws_url` still works as a deprecated alias). |
+| `auth.oauth2` | `table` | `yes` | `user` | OAuth2 provider (dormant: parsed but never honored; API key only); also valid as `grok_com_config.oauth2`. |
+| `auth.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id (dormant). Also CHUTES_BUILD_OAUTH2_CLIENT_ID; also valid as `grok_com_config.oauth2.client_id`. |
+| `auth.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL (dormant). Also CHUTES_BUILD_OAUTH2_ISSUER; also valid as `grok_com_config.oauth2.issuer`. |
+| `auth.oauth2.principal_id` | `string` | `yes` | `user` | Required principal id when `principal_type` is set (dormant). Also CHUTES_BUILD_OAUTH2_PRINCIPAL_ID; also valid as `grok_com_config.oauth2.principal_id`. |
+| `auth.oauth2.principal_type` | `string` | `yes` | `user` | Token principal type, such as Team (dormant). Also CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE; also valid as `grok_com_config.oauth2.principal_type`. |
+| `auth.oauth2.referrer` | `string` | `yes` | `user` | Referrer for OAuth usage attribution (dormant). Also CHUTES_BUILD_OAUTH2_REFERRER; also valid as `grok_com_config.oauth2.referrer`. |
+| `auth.oauth2.scopes` | `string[]` | `yes` | `user` | OAuth2 scopes (dormant). Also CHUTES_BUILD_OAUTH2_SCOPES; also valid as `grok_com_config.oauth2.scopes`. |
+| `auth.oidc` | `table` | `yes` | `user` | Customer OIDC identity-provider settings (dormant: parsed but never honored; API key only); also valid as `grok_com_config.oidc`. |
+| `auth.oidc.audience` | `string` | `yes` | `user` | Optional OIDC audience (dormant). Also CHUTES_BUILD_OIDC_AUDIENCE; also valid as `grok_com_config.oidc.audience`. |
+| `auth.oidc.client_id` | `string` | `yes` | `user` | OIDC client id (dormant). Also CHUTES_BUILD_OIDC_CLIENT_ID; also valid as `grok_com_config.oidc.client_id`. |
+| `auth.oidc.issuer` | `string` | `yes` | `user` | OIDC issuer URL (dormant). Also CHUTES_BUILD_OIDC_ISSUER; also valid as `grok_com_config.oidc.issuer`. |
+| `auth.oidc.scopes` | `string[]` | `yes` | `user` | OIDC scopes (dormant). Also CHUTES_BUILD_OIDC_SCOPES; also valid as `grok_com_config.oidc.scopes`. |
 | `auth.preferred_method` | `api_key / oidc` | `yes` | `user` | Pin automatic auth to one method with no fallthrough; also valid as `grok_com_config.preferred_method`. |
-| `auth.token_header` | `string` | `yes` | `user` | Header name that carries the CLI auth token; default `xai-grok-cli`; also valid as `grok_com_config.token_header`. |
+| `auth.token_header` | `string` | `yes` | `user` | Header name that carries the CLI auth token; default `chutes-build-cli`; also valid as `grok_com_config.token_header`. |
 
 ### `auth_provider`
 
@@ -189,7 +189,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `endpoints.trace_upload_endpoint_url` | `string` | `yes` | `user` | Custom S3-compatible endpoint for s3:// bucket uploads. Also CHUTES_BUILD_TRACE_UPLOAD_ENDPOINT_URL. |
 | `endpoints.trace_upload_region` | `string` | `yes` | `user` | AWS region for s3:// bucket uploads; default us-east-1. Also CHUTES_BUILD_TRACE_UPLOAD_REGION. |
 | `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces when no direct bucket is set. Also CHUTES_BUILD_TRACE_UPLOAD_URL. |
-| `endpoints.xai_api_base_url` | `string` | `pin` | `user` | Public xAI API base. Also CHUTES_BUILD_XAI_API_BASE_URL. |
+| `endpoints.public_api_base_url` | `string` | `pin` | `user` | Base URL for API-key inference. Also CHUTES_BUILD_PUBLIC_API_BASE_URL (`xai_api_base_url` / CHUTES_BUILD_XAI_API_BASE_URL still work as deprecated aliases). |
 
 ### `features`
 
@@ -210,9 +210,9 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.feedback` | `boolean` | `pin` | `user` | Enable or disable `feedback`. Default true. Also `CHUTES_BUILD_FEEDBACK_ENABLED`. |
 | `features.feedback_trace_card` | `boolean` | `pin` | `user` | Show a trace-upload consent question after `/feedback`. Default false. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
 | `features.file_acceleration` | `boolean` | `pin` | `user` | Hand local sessions' file systems to a file accelerator when the build installs one. Default false. Also `CHUTES_BUILD_FILE_ACCELERATION`. |
-| `features.image_edit_model_override` | `string` | `yes` | `user` | Imagine model id for image_edit. |
-| `features.image_gen` | `boolean` | `pin` | `user` | Enable image_gen / `/imagine`. |
-| `features.image_gen_model_override` | `string` | `yes` | `user` | Imagine model id for image_gen. Empty defers to the remotely configured default. |
+| `features.image_edit_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_edit. `/imagine` uses the native `generate_media` tool instead. |
+| `features.image_gen` | `boolean` | `pin` | `user` | Enable the legacy image_gen tool (xAI Imagine API; off by default — `/imagine` uses `generate_media`). Also `CHUTES_BUILD_IMAGE_GEN`. |
+| `features.image_gen_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_gen. Empty defers to the remotely configured default. |
 | `features.lsp_tools` | `boolean` | `pin` | `user` | Enable or disable `lsp_tools`. Default false. Also `CHUTES_BUILD_LSP_TOOLS`. |
 | `features.managed_config` | `boolean` | `yes` | `user` | Fetch managed_config.toml and requirements.toml from the deployment. |
 | `features.mcp_auto_restart` | `boolean` | `yes` | `user` | Auto-restart stdio MCP servers after transport failure. Also CHUTES_BUILD_MCP_AUTO_RESTART. |
@@ -224,7 +224,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.remote_fetch` | `boolean` | `pin` | `fleet` | Pin remote model-catalog and asset fetch. Managed wins over the user file when both set. |
 | `features.session_recap` | `boolean` | `pin` | `user` | Enable or disable `session_recap`. Default true. Also `CHUTES_BUILD_SESSION_RECAP`. |
 | `features.session_search` | `boolean` | `pin` | `user` | Enable or disable `session_search`. Default true. Also `CHUTES_BUILD_SESSION_SEARCH`. |
-| `features.subagent_model_inheritance` | `boolean` | `pin` | `user` | Hide the subagent `model` argument when every model you can pick is an xAI model, so subagents inherit the parent's model. Default false. Also `CHUTES_BUILD_SUBAGENT_MODEL_INHERITANCE`. Read when a session starts; changing it requires a restart. |
+| `features.subagent_model_inheritance` | `boolean` | `pin` | `user` | Hide the subagent `model` argument when every model you can pick is a first-party model, so subagents inherit the parent's model. Default false. Also `CHUTES_BUILD_SUBAGENT_MODEL_INHERITANCE`. Read when a session starts; changing it requires a restart. |
 | `features.subagent_worktree_snapshot` | `boolean` | `pin` | `user` | Enable or disable `subagent_worktree_snapshot`. Default false. Also `CHUTES_BUILD_SUBAGENT_WORKTREE_SNAPSHOT`. |
 | `features.support_permission` | `boolean` | `yes` | `user` | Allow the agent to ask permission for tool executions. |
 | `features.telemetry` | `boolean / session_metrics / off` | `pin` | `user` | Product telemetry mode. Enterprise default is off. |
@@ -232,7 +232,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.title_refresh` | `boolean` | `pin` | `user` | Early-session auto-title refresh. Pin this in requirements to beat CHUTES_BUILD_TITLE_REFRESH. |
 | `features.turn_summary` | `boolean` | `pin` | `user` | Enable or disable `turn_summary`. Default true. Also `CHUTES_BUILD_TURN_SUMMARY`. |
 | `features.two_pass_compaction` | `boolean` | `pin` | `user` | Enable or disable `two_pass_compaction`. Default true. Also `CHUTES_BUILD_TWO_PASS_COMPACTION`. |
-| `features.video_gen` | `boolean` | `pin` | `user` | Enable video tools / `/imagine-video`. |
+| `features.video_gen` | `boolean` | `pin` | `user` | Enable the legacy video tools (xAI Imagine API; off by default — `/imagine-video` uses `generate_media`). Also `CHUTES_BUILD_VIDEO_GEN`. |
 | `features.voice_mode` | `boolean` | `pin` | `user` | Enable or disable `voice_mode`. Default true. Also `CHUTES_BUILD_VOICE_MODE`. |
 | `features.web_fetch` | `boolean` | `pin` | `user` | Enable or disable `web_fetch`. Default false. Also `CHUTES_BUILD_WEB_FETCH`. |
 | `features.write_file` | `boolean` | `pin` | `user` | Enable or disable `write_file`. Default true. Also `CHUTES_BUILD_WRITE_FILE`. |
@@ -260,9 +260,13 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 ### `grok_com_config`
 
+Legacy alias of `[auth]`, kept so older configs still parse. New configs
+MUST use `[auth]`. OAuth/OIDC rows below are parsed but never honored:
+this build authenticates by Chutes API key only.
+
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `grok_com_config` | `table` | `yes` | `user` | Chutes Build.com websocket and OAuth/OIDC settings. `[auth]` is an alias. |
+| `grok_com_config` | `table` | `yes` | `user` | Legacy alias of `[auth]`. |
 | `grok_com_config.auth_provider_command` | `string` | `yes` | `user` | External auth binary; stdout is the token. With `endpoints.models_base_url` or `models_list_url` set, that endpoint's list decides which models are offered. Also CHUTES_BUILD_AUTH_PROVIDER_COMMAND. |
 | `grok_com_config.auth_provider_label` | `string` | `yes` | `user` | Login button label for an external auth provider. Also CHUTES_BUILD_AUTH_PROVIDER_LABEL. |
 | `grok_com_config.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token. Also CHUTES_BUILD_AUTH_TOKEN_TTL. |
@@ -270,20 +274,20 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `grok_com_config.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID, or any of an array; empty array fails closed. Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID. |
 | `grok_com_config.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for remote control. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_ORIGIN. |
 | `grok_com_config.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_URL. |
-| `grok_com_config.oauth2` | `table` | `yes` | `user` | OAuth2 provider used when enterprise OIDC is unset. |
-| `grok_com_config.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id. Also CHUTES_BUILD_OAUTH2_CLIENT_ID. |
-| `grok_com_config.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL. Also CHUTES_BUILD_OAUTH2_ISSUER. |
+| `grok_com_config.oauth2` | `table` | `yes` | `user` | OAuth2 provider (dormant: parsed but never honored; API key only). |
+| `grok_com_config.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id (dormant). Also CHUTES_BUILD_OAUTH2_CLIENT_ID. |
+| `grok_com_config.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL (dormant). Also CHUTES_BUILD_OAUTH2_ISSUER. |
 | `grok_com_config.oauth2.principal_id` | `string` | `yes` | `user` | Required principal id when `principal_type` is set. Also CHUTES_BUILD_OAUTH2_PRINCIPAL_ID. |
 | `grok_com_config.oauth2.principal_type` | `string` | `yes` | `user` | Token principal type, such as Team. Also CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE. |
 | `grok_com_config.oauth2.referrer` | `string` | `yes` | `user` | Referrer for OAuth usage attribution. Also CHUTES_BUILD_OAUTH2_REFERRER. |
-| `grok_com_config.oauth2.scopes` | `string[]` | `yes` | `user` | OAuth2 scopes. Also CHUTES_BUILD_OAUTH2_SCOPES. |
-| `grok_com_config.oidc` | `table` | `yes` | `user` | Customer OIDC identity-provider settings. |
+| `grok_com_config.oauth2.scopes` | `string[]` | `yes` | `user` | OAuth2 scopes (dormant). Also CHUTES_BUILD_OAUTH2_SCOPES. |
+| `grok_com_config.oidc` | `table` | `yes` | `user` | Customer OIDC identity-provider settings (dormant: parsed but never honored; API key only). |
 | `grok_com_config.oidc.audience` | `string` | `yes` | `user` | Optional OIDC audience. Also CHUTES_BUILD_OIDC_AUDIENCE. |
-| `grok_com_config.oidc.client_id` | `string` | `yes` | `user` | OIDC client id. Also CHUTES_BUILD_OIDC_CLIENT_ID. |
-| `grok_com_config.oidc.issuer` | `string` | `yes` | `user` | OIDC issuer URL. Also CHUTES_BUILD_OIDC_ISSUER. |
-| `grok_com_config.oidc.scopes` | `string[]` | `yes` | `user` | OIDC scopes. Also CHUTES_BUILD_OIDC_SCOPES. |
-| `grok_com_config.preferred_method` | `api_key / oidc` | `yes` | `user` | Pin automatic auth to one method with no fallthrough. |
-| `grok_com_config.token_header` | `string` | `yes` | `user` | Header name that carries the CLI auth token; default `xai-grok-cli`. |
+| `grok_com_config.oidc.client_id` | `string` | `yes` | `user` | OIDC client id (dormant). Also CHUTES_BUILD_OIDC_CLIENT_ID. |
+| `grok_com_config.oidc.issuer` | `string` | `yes` | `user` | OIDC issuer URL (dormant). Also CHUTES_BUILD_OIDC_ISSUER. |
+| `grok_com_config.oidc.scopes` | `string[]` | `yes` | `user` | OIDC scopes (dormant). Also CHUTES_BUILD_OIDC_SCOPES. |
+| `grok_com_config.preferred_method` | `api_key / oidc` | `yes` | `user` | Pin automatic auth to one method with no fallthrough (dormant for `oidc`: parsed but never honored; API key only). |
+| `grok_com_config.token_header` | `string` | `yes` | `user` | Header name that carries the CLI auth token; default `chutes-build-cli`. |
 
 ### `harness`
 
@@ -571,9 +575,9 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `telemetry.otel_metrics_client_certificate` | `string` | `pin` | `user` | Metrics-signal mTLS client cert PEM path. Also OTEL_EXPORTER_OTLP_METRICS_CLIENT_CERTIFICATE. |
 | `telemetry.otel_metrics_client_key` | `string` | `pin` | `user` | Metrics-signal mTLS client key PEM path. Also OTEL_EXPORTER_OTLP_METRICS_CLIENT_KEY. |
 | `telemetry.otel_metrics_include_session_id` | `boolean` | `pin` | `user` | Attach session.id to metrics. Also OTEL_METRICS_INCLUDE_SESSION_ID. |
-| `telemetry.otel_log_user_prompts` | `boolean` | `pin` | `user` | Content gate for prompt text on grok_code.user_prompt. Also OTEL_LOG_USER_PROMPTS. Pinning any content gate without listing a sibling defaults the omitted sibling off. |
+| `telemetry.otel_log_user_prompts` | `boolean` | `pin` | `user` | Content gate for prompt text on chutes_build.user_prompt. Also OTEL_LOG_USER_PROMPTS. Pinning any content gate without listing a sibling defaults the omitted sibling off. |
 | `telemetry.otel_log_tool_details` | `boolean` | `pin` | `user` | Metadata gate for tool-arg preview, paths, and verbatim names. Recommended on for SIEM join. Also OTEL_LOG_TOOL_DETAILS. Does not include full bodies. |
-| `telemetry.otel_log_assistant_responses` | `boolean` | `pin` | `user` | Content gate for grok_code.assistant_response text. Unset follows otel_log_user_prompts unless a sibling gate is pinned in requirements. Env-only OTEL_LOG_USER_PROMPTS=1 must set this to 0 (or pin it false) for a prompts-only stream. Also OTEL_LOG_ASSISTANT_RESPONSES. |
+| `telemetry.otel_log_assistant_responses` | `boolean` | `pin` | `user` | Content gate for chutes_build.assistant_response text. Unset follows otel_log_user_prompts unless a sibling gate is pinned in requirements. Env-only OTEL_LOG_USER_PROMPTS=1 must set this to 0 (or pin it false) for a prompts-only stream. Also OTEL_LOG_ASSISTANT_RESPONSES. |
 | `telemetry.otel_log_tool_content` | `boolean` | `pin` | `user` | Body gate for tool_input, tool_output, full_command, and error_message. Independent of details; default off. CONTENT-only loses verbatim MCP names and paths. Also OTEL_LOG_TOOL_CONTENT. |
 | `telemetry.trace_upload` | `boolean` | `pin` | `user` | Upload session traces. Requirements pin beats user config. |
 
@@ -581,9 +585,9 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `tools.disable_zdr_incompatible_tools` | `boolean` | `yes` | `user` | Restrict tools that need xAI-hosted output under ZDR. Also CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS. |
-| `tools.media_gen.max_parallel_image_gen_calls` | `integer` | `yes` | `user` | Cap parallel image_gen/image_edit calls in one model step. Also CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS. |
-| `tools.media_gen.max_parallel_video_gen_calls` | `integer` | `yes` | `user` | Cap parallel video_gen calls in one model step. Also CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS. |
+| `tools.disable_zdr_incompatible_tools` | `boolean` | `yes` | `user` | Restrict tools that need hosted output storage under ZDR. Also CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS. |
+| `tools.media_gen.max_parallel_image_gen_calls` | `integer` | `yes` | `user` | Cap parallel `generate_media` / image_gen / image_edit calls in one model step (default 8). Also CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS. |
+| `tools.media_gen.max_parallel_video_gen_calls` | `integer` | `yes` | `user` | Cap parallel video_gen calls in one model step (default 4). Also CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS. |
 | `tools.respect_gitignore` | `boolean` | `pin` | `user` | When true, search and read tools skip gitignored files. Also CHUTES_BUILD_RESPECT_GITIGNORE. |
 | `tools.zdr_video_output_s3` | `table` | `yes` | `user` | Team S3 bucket for ZDR video output. See ZDR Video Storage. |
 
@@ -642,7 +646,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `prompt_suggestions.reasoning_effort` | `none / minimal / low / medium / high` | `yes` | `user` | Reasoning effort for the suggestion call; default and `none` disable reasoning, while other values use a supported model effort. Remote-overridable. |
 | `ui.remember_tool_approvals` | `boolean` | `yes` | `user` | Show per-tool Always allow options. Also CHUTES_BUILD_REMEMBER_TOOL_APPROVALS. |
 | `ui.render_mermaid` | `auto / on / off` | `yes` | `user` | How mermaid fences render: clickable open row or raw source. |
-| `ui.screen_mode` | `fullscreen / minimal` | `yes` | `user` | Default render mode for plain `grok`. Restart required. |
+| `ui.screen_mode` | `fullscreen / minimal` | `yes` | `user` | Default render mode for plain `chutes-build`. Restart required. |
 | `ui.scroll_lines` | `integer` | `yes` | `user` | Lines per scroll tick (1–10). Also CHUTES_BUILD_SCROLL_LINES. |
 | `ui.scroll_mode` | `auto / wheel / trackpad` | `yes` | `user` | Scroll input classification. Also CHUTES_BUILD_SCROLL_MODE. |
 | `ui.scroll_speed` | `integer` | `yes` | `user` | Mouse/trackpad scroll speed multiplier (1–100). Also CHUTES_BUILD_SCROLL_SPEED. |
@@ -670,7 +674,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `voice.api_base` | `string` | `yes` | `user` | HTTPS API root for speech-to-text. Unset inherits `[endpoints].xai_api_base_url`. |
+| `voice.api_base` | `string` | `yes` | `user` | HTTPS API root for speech-to-text. Unset inherits `[endpoints].public_api_base_url`. |
 | `voice.language` | `string` | `yes` | `user` | Preferred STT language catalog code or `auto`. |
 | `voice.sample_rate` | `number` | `yes` | `user` | STT capture rate in Hz. |
 

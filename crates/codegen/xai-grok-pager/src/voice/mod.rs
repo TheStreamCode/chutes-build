@@ -3,13 +3,13 @@
 //! Layering (pager-owned):
 //! - **Voice gate**: on by default in GA. Remote `voice_mode_enabled: false` is a kill switch that hides voice everywhere and shows no toast.
 //!   An absent remote value falls through to on. `CHUTES_BUILD_VOICE_MODE` overrides for local dev; the env var beats the remote flag, which beats the default.
-//!   Free/X Basic still get the SuperGrok upsell via tier gates, not this flag.
+//!   Free/X Basic still get the paid-plan upsell via tier gates, not this flag.
 //! - **Session mode** (`voice_ui_active`): this CLI run only; shows the mic.
 //! - **Capture chord**: `/voice` or `Ctrl+Space` start dictation, and Esc or Enter stops it.
 //!   `Ctrl+Space` decodes identically on every terminal, so the cheatsheet shows it whenever voice is enabled.
 //! - **Hold-to-talk**: on terminals that report key releases (Kitty protocol), hold `Ctrl+Space` to record and release to stop.
 //!   Elsewhere the same chord toggles: press starts, press again stops. Handled in `app::event_loop`.
-//! - **STT route**: streaming when the account has a bearer `api.x.ai` accepts; otherwise, on a build with a clip
+//! - **STT route**: streaming when the account has a bearer `api.chutes.ai` accepts; otherwise, on a build with a clip
 //!   transcriber, the clip so far is re-transcribed every few seconds for the same partials, the whole recording is
 //!   uploaded on stop, and one final replaces the interim words.
 //!

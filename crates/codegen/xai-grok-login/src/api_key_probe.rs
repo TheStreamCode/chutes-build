@@ -1,8 +1,8 @@
-//! Probes the first-party env key (`GET {xai_api_base_url}/api-key`) before `initialize` advertises `chutes.api_key`.
+//! Probes the first-party env key (`GET {public_api_base_url}/api-key`) before `initialize` advertises `chutes.api_key`.
 //! BYOK keys are never probed.
 //!
-//! The base URL is the caller's effective `endpoints.xai_api_base_url`, so the probe hits the same host turn traffic uses.
-//! That value comes from `CHUTES_BUILD_XAI_API_BASE_URL` or `[endpoints] xai_api_base_url`.
+//! The base URL is the caller's effective `endpoints.public_api_base_url`, so the probe hits the same host turn traffic uses.
+//! That value comes from `CHUTES_BUILD_PUBLIC_API_BASE_URL` (or the legacy `CHUTES_BUILD_XAI_API_BASE_URL`) or `[endpoints] public_api_base_url`.
 //!
 //! Unusable (an auth error, or a 200 with a blocked, disabled, or team_blocked flag) means the key is not advertised.
 //! Unknown (a timeout, a network error, or exhausted retries) fails open and the key is still advertised.
@@ -115,14 +115,22 @@ fn classify_probe_response(status: u16, body: &[u8]) -> ApiKeyProbeVerdict {
 
 /// Fails open on a timeout or transport error after retries; the raw key is never logged.
 ///
-/// `api_base_url` must be the endpoint the env key is actually sent to (`endpoints.xai_api_base_url`), not a hardcoded public default.
-async fn probe_xai_api_key(key: &str, api_base_url: &str, timeout: Duration) -> ApiKeyProbeVerdict {
+/// `api_base_url` must be the endpoint the env key is actually sent to (`endpoints.public_api_base_url`), not a hardcoded public default.
+async fn probe_chutes_api_key(
+    key: &str,
+    api_base_url: &str,
+    timeout: Duration,
+) -> ApiKeyProbeVerdict {
     let url = api_key_info_url(api_base_url);
-    probe_xai_api_key_at_url(key, &url, timeout).await
+    probe_chutes_api_key_at_url(key, &url, timeout).await
 }
 
 /// Takes the full URL so tests can point the probe at a local server.
-async fn probe_xai_api_key_at_url(key: &str, url: &str, timeout: Duration) -> ApiKeyProbeVerdict {
+async fn probe_chutes_api_key_at_url(
+    key: &str,
+    url: &str,
+    timeout: Duration,
+) -> ApiKeyProbeVerdict {
     if key.trim().is_empty() {
         return ApiKeyProbeVerdict::Unusable;
     }
@@ -193,13 +201,13 @@ async fn probe_xai_api_key_at_url(key: &str, url: &str, timeout: Duration) -> Ap
 }
 
 /// Probes the env key when one is set; without an env key this returns false and the caller combines the result with BYOK.
-/// `api_base_url` is the caller's effective `endpoints.xai_api_base_url`, so the probe follows the same endpoint as turn traffic.
+/// `api_base_url` is the caller's effective `endpoints.public_api_base_url`, so the probe follows the same endpoint as turn traffic.
 /// In tests that is the mock server the fixtures already set via `CHUTES_BUILD_XAI_API_BASE_URL`.
 pub async fn first_party_env_key_allows_advertise(api_base_url: &str, timeout: Duration) -> bool {
     let Ok(key) = crate::auth_method::read_chutes_api_key_env() else {
         return false;
     };
-    probe_xai_api_key(&key, api_base_url, timeout)
+    probe_chutes_api_key(&key, api_base_url, timeout)
         .await
         .allows_advertise()
 }
@@ -224,12 +232,12 @@ mod tests {
     #[test]
     fn joins_api_key_path_onto_base() {
         assert_eq!(
-            api_key_info_url("https://api.x.ai/v1"),
-            "https://api.x.ai/v1/api-key"
+            api_key_info_url("https://api.chutes.ai/v1"),
+            "https://api.chutes.ai/v1/api-key"
         );
         assert_eq!(
-            api_key_info_url("https://api.x.ai/v1/"),
-            "https://api.x.ai/v1/api-key"
+            api_key_info_url("https://api.chutes.ai/v1/"),
+            "https://api.chutes.ai/v1/api-key"
         );
         assert_eq!(
             api_key_info_url("https://enterprise-api.acme.com/v1"),
@@ -313,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn empty_key_is_unusable_without_network() {
         assert_eq!(
-            probe_xai_api_key(
+            probe_chutes_api_key(
                 "   ",
                 "https://example.invalid/v1",
                 Duration::from_millis(50)
@@ -354,7 +362,7 @@ mod tests {
             "HTTP/1.1 400 Bad Request",
             br#"{"error":"Incorrect API key"}"#,
         );
-        let v = probe_xai_api_key_at_url("xai-bad", &url, Duration::from_secs(2)).await;
+        let v = probe_chutes_api_key_at_url("chutes-bad", &url, Duration::from_secs(2)).await;
         assert_eq!(v, ApiKeyProbeVerdict::Unusable);
     }
 
@@ -364,7 +372,7 @@ mod tests {
             "HTTP/1.1 200 OK",
             br#"{"api_key_blocked":true,"api_key_disabled":false}"#,
         );
-        let v = probe_xai_api_key_at_url("xai-blocked", &url, Duration::from_secs(2)).await;
+        let v = probe_chutes_api_key_at_url("chutes-blocked", &url, Duration::from_secs(2)).await;
         assert_eq!(v, ApiKeyProbeVerdict::Unusable);
     }
 
@@ -374,7 +382,7 @@ mod tests {
             "HTTP/1.1 200 OK",
             br#"{"api_key_id":"abc","api_key_blocked":false,"api_key_disabled":false}"#,
         );
-        let v = probe_xai_api_key_at_url("xai-good", &url, Duration::from_secs(2)).await;
+        let v = probe_chutes_api_key_at_url("chutes-good", &url, Duration::from_secs(2)).await;
         assert_eq!(v, ApiKeyProbeVerdict::Usable);
     }
 
@@ -386,7 +394,7 @@ mod tests {
         );
         // serve_sequence returns the full .../v1/api-key URL; strip it back to the base the way config stores it
         let base = url.trim_end_matches("/api-key");
-        let v = probe_xai_api_key("xai-good", base, Duration::from_secs(2)).await;
+        let v = probe_chutes_api_key("chutes-good", base, Duration::from_secs(2)).await;
         assert_eq!(v, ApiKeyProbeVerdict::Usable);
     }
 
@@ -402,7 +410,7 @@ mod tests {
                 br#"{"api_key_id":"ok","api_key_blocked":false,"api_key_disabled":false}"#.to_vec(),
             ),
         ]);
-        let v = probe_xai_api_key_at_url("xai-retry", &url, Duration::from_secs(2)).await;
+        let v = probe_chutes_api_key_at_url("chutes-retry", &url, Duration::from_secs(2)).await;
         assert_eq!(v, ApiKeyProbeVerdict::Usable);
     }
 
@@ -420,7 +428,7 @@ mod tests {
         });
 
         let url = format!("http://{addr}/v1/api-key");
-        let v = probe_xai_api_key_at_url("xai-slow", &url, Duration::from_millis(80)).await;
+        let v = probe_chutes_api_key_at_url("chutes-slow", &url, Duration::from_millis(80)).await;
         assert_eq!(v, ApiKeyProbeVerdict::Unknown);
         assert!(v.allows_advertise());
     }

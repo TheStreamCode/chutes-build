@@ -167,7 +167,7 @@ If the user and project files define the same custom profile differently, Chutes
 
 ## How It Works
 
-The sandbox is applied to the **entire grok process** at startup using kernel primitives -- not per-command wrapping. This means all tool operations are covered:
+The sandbox is applied to the **entire chutes-build process** at startup using kernel primitives -- not per-command wrapping. This means all tool operations are covered:
 
 - `read_file`, `search_replace`, `list_dir` -- restricted by Landlock/Seatbelt in-process
 - `bash` commands, `grep` (rg) -- child processes inherit FS restrictions automatically
@@ -177,7 +177,7 @@ When a non-`off` sandbox profile is **requested** (CLI, `CHUTES_BUILD_SANDBOX`, 
 
 - The agent runs **in-process**, not through the shared leader, so tool calls stay in this process when the profile is enforced. If leader mode would otherwise have been on, a one-line note at startup says so
 - If a built-in profile fails to apply, Chutes Build warns and continues without enforcement (see [Platform Support](#platform-support)), but still refuses the leader so tools are not delegated elsewhere
-- `grok workspace start`, `restart`, and `resume` are unavailable; `pause`, `stop`, and `status` still work
+- `chutes-build workspace start` and `restart` are unavailable; `stop` and `status` still work
 
 Disable the profile at the source that selected it to use the refused commands.
 

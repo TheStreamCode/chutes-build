@@ -17,7 +17,10 @@ pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_b
 /// TUI dispatch, headless dispatch, and the session-load ACP barrier all share this list.
 /// A new method thus cannot be handled in one path and classified `Unrelated` in another.
 pub(crate) fn is_session_update_ext_method(method: &str) -> bool {
-    matches!(method, "chutes.ai/session_notification" | "chutes.ai/session/update")
+    matches!(
+        method,
+        "chutes.ai/session_notification" | "chutes.ai/session/update"
+    )
 }
 use crate::client_identity::{HEADLESS_CLIENT_TYPE, PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
 use agent_client_protocol as acp;
@@ -757,7 +760,9 @@ mod tests {
     use super::*;
     #[test]
     fn is_session_update_ext_method_covers_both_carriers() {
-        assert!(is_session_update_ext_method("chutes.ai/session_notification"));
+        assert!(is_session_update_ext_method(
+            "chutes.ai/session_notification"
+        ));
         assert!(is_session_update_ext_method("chutes.ai/session/update"));
         assert!(!is_session_update_ext_method("chutes.ai/task_completed"));
         assert!(!is_session_update_ext_method("session/update"));
@@ -903,7 +908,9 @@ mod tests {
     /// on a meaningful new code path.
     #[test]
     fn startup_auth_xai_api_key_not_first_still_requires_login() {
-        use xai_grok_shell::agent::auth_method::{CHUTES_BUILD_COM_METHOD_ID, XAI_API_KEY_METHOD_ID};
+        use xai_grok_shell::agent::auth_method::{
+            CHUTES_BUILD_COM_METHOD_ID, XAI_API_KEY_METHOD_ID,
+        };
         let methods = vec![
             make_auth_method(CHUTES_BUILD_COM_METHOD_ID, "Chutes Build", None),
             make_auth_method(XAI_API_KEY_METHOD_ID, "chutes.api_key", None),

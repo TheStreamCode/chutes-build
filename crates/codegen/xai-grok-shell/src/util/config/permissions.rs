@@ -456,7 +456,11 @@ mod tests {
                 "ask",
             ),
             // No permission keys fall back to Ask
-            ("[ui]\ntheme = \"chutesnight\"\n", PermissionMode::Ask, "ask"),
+            (
+                "[ui]\ntheme = \"chutesnight\"\n",
+                PermissionMode::Ask,
+                "ask",
+            ),
         ];
         for (toml_str, expected_mode, expected_canonical) in cases {
             let root: TomlValue = toml::from_str(toml_str).unwrap();

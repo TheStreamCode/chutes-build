@@ -88,7 +88,7 @@ This is a server you run yourself — Chutes Build's hosted cloud sandboxes do n
 To reach the agent over the internet, connect the agent to a relay and point browsers at the same relay:
 
 ```bash
-chutes-build agent --always-approve headless --grok-ws-url wss://your-relay.example.com/ws
+chutes-build agent --always-approve headless --ws-url wss://your-relay.example.com/ws
 ```
 
 ---

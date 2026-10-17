@@ -138,7 +138,9 @@ impl NextStep {
     fn text(self) -> &'static str {
         match self {
             Self::Retry => "Start Chutes Build again.",
-            Self::CheckNetworkThenRetry => "Check your network connection, then start Chutes Build again.",
+            Self::CheckNetworkThenRetry => {
+                "Check your network connection, then start Chutes Build again."
+            }
             Self::RestartSharedLeader => {
                 "Stop it with the command below, which also stops any other Chutes Build \
                  session using it, then start Chutes Build again."

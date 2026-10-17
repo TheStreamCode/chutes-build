@@ -82,8 +82,8 @@ impl Distribution {
         }
         match capability {
             Capability::AccountLogin => Some(
-                "This build has no account sign-in: set the CHUTES_API_KEY environment variable to \
-                 your Chutes API key and restart.",
+                "This build has no account sign-in: run `chutes-build login` to save your Chutes API key, \
+                 or set the CHUTES_API_KEY environment variable.",
             ),
             Capability::RemoteControl => Some("Remote Control is off in this build."),
             Capability::Voice => Some("Voice dictation is off in this build."),

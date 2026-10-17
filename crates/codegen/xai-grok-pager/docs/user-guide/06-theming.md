@@ -10,8 +10,8 @@ Chutes Build includes six built-in themes, plus an `auto` option that follows yo
 
 | Theme | Config Names | Description | Truecolor Required |
 |-------|-------------|-------------|--------------------|
-| **ChutesNight** | `chutesnight`, `grok-night`, `dark` | Neutral dark base with a magenta accent. Default theme. Survives quantization cleanly on 256-color and 16-color terminals. | No |
-| **ChutesDay** | `chutesday`, `grok-day`, `light`, `day` | Light theme for bright terminal backgrounds. | No |
+| **ChutesNight** | `chutesnight`, `dark` | Neutral dark base with a magenta accent. Default theme. Survives quantization cleanly on 256-color and 16-color terminals. | No |
+| **ChutesDay** | `chutesday`, `light`, `day` | Light theme for bright terminal backgrounds. | No |
 | **TokyoNight** | `tokyonight`, `tokyo-night`, `tokyo` | Dark, blue-tinted backgrounds from the Tokyo Night palette. Loses its character when quantized. | Yes |
 | **RosePineMoon** | `rosepine`, `rose-pine`, `rosepine-moon`, `rose-pine-moon` | Muted dark palette with mauve accents, from the Rosé Pine family. | Yes |
 | **OscuraMidnight** | `oscura`, `oscura-midnight` | Deep dark base with purple accents. | Yes |
@@ -165,8 +165,8 @@ Use compact mode on small screens to maximize content area.
 
 Chutes Build bundles three `.tmTheme` files for code-block syntax highlighting and selects one based on the active theme:
 
-- `grok-night.tmTheme` -- ChutesNight, RosePineMoon, and OscuraMidnight
-- `grok-day.tmTheme` -- ChutesDay
+- `chutes-night.tmTheme` -- ChutesNight, RosePineMoon, and OscuraMidnight
+- `chutes-day.tmTheme` -- ChutesDay
 - `tokyo-night.tmTheme` -- TokyoNight
 
 Chutes Build selects the matching file automatically when you switch themes. The `.tmTheme` files are built into the binary, so you cannot replace them with your own.

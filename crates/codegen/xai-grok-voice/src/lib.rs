@@ -103,7 +103,10 @@ mod intercept_tests {
 
     #[test]
     fn capture_subcommand_matches_only_argv1() {
-        assert!(is_capture_subcommand(&argv(&["chutes-build", "__mic-capture"])));
+        assert!(is_capture_subcommand(&argv(&[
+            "chutes-build",
+            "__mic-capture"
+        ])));
         assert!(is_capture_subcommand(&argv(&[
             "chutes-build",
             "__mic-capture",

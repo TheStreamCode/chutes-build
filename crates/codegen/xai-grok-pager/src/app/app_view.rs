@@ -334,6 +334,8 @@ pub enum AuthMode {
     Loopback,
     /// RFC 8628 device flow: device code and copyable URL, no paste box.
     Device,
+    /// API-key-only builds: user pastes a Chutes API key (masked input, validated over the network).
+    ApiKeyEntry,
 }
 /// Folder-trust state for the welcome screen.
 /// Mirrors [`AuthState`]: a welcome sub-state that drives the "Do you trust the contents of this directory?" question.
@@ -947,6 +949,10 @@ pub struct AppView {
     pub auth_start_mode: AuthMode,
     /// Text buffer for manual auth token paste (loopback mode).
     pub(crate) auth_code_input: LineEditor,
+    /// Last API-key entry failure, shown under the masked input (`AuthMode::ApiKeyEntry` only).
+    pub api_key_entry_error: Option<String>,
+    /// An API-key validation request is in flight; the entry screen shows "Validating…".
+    pub api_key_entry_validating: bool,
     /// Monotonically increasing sequence number for auth requests.
     pub next_auth_request_seq: u64,
     /// Abort handle for the in-flight `PollAuthUrl` task (with its request_seq).
@@ -1514,6 +1520,8 @@ impl AppView {
             login_method_id: None,
             auth_start_mode: AuthMode::Pending,
             auth_code_input: LineEditor::default(),
+            api_key_entry_error: None,
+            api_key_entry_validating: false,
             next_auth_request_seq: 1,
             auth_url_poll_handle: None,
             deferred_startup: Default::default(),
@@ -2337,6 +2345,7 @@ impl AppView {
                     cwd: &self.cwd,
                     mid_session_login: self.auth_return_view.is_some(),
                     auth_code_input: &mut self.auth_code_input,
+                    api_key_entry_validating: self.api_key_entry_validating,
                     prompt: &mut self.welcome_prompt,
                     prompt_focused: &mut self.welcome_prompt_focused,
                     new_worktree_dialog: &mut self.new_worktree_dialog,
@@ -2994,6 +3003,7 @@ struct WelcomeInputCtx<'a> {
     /// Esc / `q` then cancel the login and return to the session rather than quitting the app.
     mid_session_login: bool,
     auth_code_input: &'a mut LineEditor,
+    api_key_entry_validating: bool,
     prompt: &'a mut PromptWidget,
     prompt_focused: &'a mut bool,
     new_worktree_dialog: &'a mut Option<NewWorktreeDialogState>,
@@ -3679,6 +3689,18 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                     }
                     return InputOutcome::Action(Action::QuitConfirmed);
                 }
+                // Same gate as the welcome render: API-key-only builds offer key
+                // entry where STOCK offers login (`l`/Enter keep working for that
+                // muscle memory; `k` is the advertised shortcut).
+                let api_key_only = !xai_grok_config::Distribution::current()
+                    .allows(xai_grok_config::Capability::AccountLogin);
+                if api_key_only
+                    && (key!('k').matches(key)
+                        || key!('l').matches(key)
+                        || key!(Enter).matches(key))
+                {
+                    return InputOutcome::Action(Action::EnterApiKey);
+                }
                 if key!('l').matches(key) || key!(Enter).matches(key) {
                     return InputOutcome::Action(Action::Login);
                 }
@@ -3692,22 +3714,46 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             AuthState::Authenticating {
                 mode: AuthMode::Loopback,
                 ..
+            }
+            | AuthState::Authenticating {
+                mode: AuthMode::ApiKeyEntry,
+                ..
             } => {
+                let api_key_entry = matches!(
+                    ctx.auth_state,
+                    AuthState::Authenticating {
+                        mode: AuthMode::ApiKeyEntry,
+                        ..
+                    }
+                );
                 if key!(Esc).matches(key)
                     || key!('q', CONTROL).matches(key)
                     || key!('c', CONTROL).matches(key)
                 {
+                    if api_key_entry && key!(Esc).matches(key) {
+                        return InputOutcome::Action(Action::CancelApiKeyEntry);
+                    }
                     if ctx.mid_session_login {
                         return InputOutcome::Action(Action::CancelLogin);
                     }
                     return InputOutcome::Action(Action::QuitConfirmed);
                 }
+                // While a key validates, the input freezes: the accept path
+                // saves the buffer, so it must still hold the validated key.
+                if api_key_entry && ctx.api_key_entry_validating {
+                    return InputOutcome::Unchanged;
+                }
                 if key!(Enter).matches(key) {
                     let trimmed = ctx.auth_code_input.text().trim().to_string();
-                    if !trimmed.is_empty() {
-                        return InputOutcome::Action(Action::SubmitAuthCode(trimmed));
+                    if trimmed.is_empty() {
+                        return InputOutcome::Unchanged;
                     }
-                    return InputOutcome::Unchanged;
+                    if api_key_entry {
+                        return InputOutcome::Action(Action::SubmitApiKey(
+                            crate::app::actions::RedactedSecret::new(trimmed),
+                        ));
+                    }
+                    return InputOutcome::Action(Action::SubmitAuthCode(trimmed));
                 }
                 let outcome = if crate::input::key::is_paste_key(key) {
                     let Some(text) = crate::clipboard::system_clipboard_get() else {
@@ -4018,11 +4064,17 @@ fn handle_menu_nav(
     }
 }
 /// Dispatch an action for a welcome menu item when not yet authenticated.
-/// Menu layout: item 0 is Login, item 1 is Quit.
+/// STOCK layout: item 0 is Login, item 1 is Quit. API-key-only layout: item 0
+/// is Enter API key, item 1 is Quit (same gate as the render, so a click can
+/// never land on a row that is not painted).
 fn dispatch_pending_menu_action(index: usize) -> InputOutcome {
-    match index {
-        0 => InputOutcome::Action(Action::Login),
-        1 => InputOutcome::Action(Action::Quit),
+    let api_key_only =
+        !xai_grok_config::Distribution::current().allows(xai_grok_config::Capability::AccountLogin);
+    match (api_key_only, index) {
+        (true, 0) => InputOutcome::Action(Action::EnterApiKey),
+        (true, 1) => InputOutcome::Action(Action::Quit),
+        (false, 0) => InputOutcome::Action(Action::Login),
+        (false, 1) => InputOutcome::Action(Action::Quit),
         _ => InputOutcome::Unchanged,
     }
 }
@@ -4420,6 +4472,8 @@ impl AppView {
                                 login_label: self.login_label.as_deref(),
                                 auth_code_input: self.auth_code_input.text(),
                                 auth_code_cursor_byte: self.auth_code_input.cursor_byte(),
+                                api_key_entry_error: self.api_key_entry_error.as_deref(),
+                                api_key_entry_validating: self.api_key_entry_validating,
                                 clipboard_delivery: self.auth_clipboard_delivery,
                                 show_raw_url: self.auth_show_raw_url,
                                 announcement: hero_announcement,

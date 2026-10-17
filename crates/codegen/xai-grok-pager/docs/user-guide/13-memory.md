@@ -468,6 +468,6 @@ $EDITOR ~/.chutes-build/memory/MEMORY.md
 ### Debug Logging
 
 ```bash
-RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/grok.log chutes-build
-grep "memory" /tmp/grok.log
+RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/chutes-build.log chutes-build
+grep "memory" /tmp/chutes-build.log
 ```

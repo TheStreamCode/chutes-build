@@ -36,7 +36,7 @@ impl AuthBackend for GrokAuthBackend {
     }
 
     fn login_host(&self, config: &GrokComConfig) -> String {
-        super::host_of(&config.grok_ws_origin)
+        super::host_of(&config.ws_origin)
     }
 
     fn is_xai_authority(&self) -> bool {

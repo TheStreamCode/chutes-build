@@ -690,6 +690,8 @@ pub struct WelcomeRenderParams<'a> {
     pub login_label: Option<&'a str>,
     pub auth_code_input: &'a str,
     pub auth_code_cursor_byte: usize,
+    pub api_key_entry_error: Option<&'a str>,
+    pub api_key_entry_validating: bool,
     pub clipboard_delivery: Option<crate::clipboard::ClipboardDelivery>,
     pub show_raw_url: bool,
     pub announcement: Option<&'a xai_grok_announcements::RemoteAnnouncement>,
@@ -800,20 +802,23 @@ pub fn render_welcome(
             let label = params.login_label.unwrap_or("chutes.ai");
             let login_text = format!("Login with {}", label);
             let login_menu = [("l", login_text.as_str()), ("q", "Quit")];
-            let key_only_menu = [("q", "Quit")];
+            let key_only_menu = [("k", "Enter API key"), ("q", "Quit")];
             let menu: &[(&str, &str)] = if api_key_only {
                 &key_only_menu
             } else {
                 &login_menu
             };
-            let msg = error.as_deref().map(|e| (e, theme.accent_error)).or(if api_key_only {
-                Some((
-                    "Set the CHUTES_API_KEY environment variable to your Chutes API key, then restart.",
-                    theme.text_primary,
-                ))
-            } else {
-                None
-            });
+            let msg = error
+                .as_deref()
+                .map(|e| (e, theme.accent_error))
+                .or(if api_key_only {
+                    Some((
+                        "No API key found. Enter it here, or set CHUTES_API_KEY and restart.",
+                        theme.text_primary,
+                    ))
+                } else {
+                    None
+                });
             let info = PromptInfo {
                 model_name: params.model_name,
                 flags: params.flags,
@@ -851,6 +856,8 @@ pub fn render_welcome(
                 params.auth_code_cursor_byte,
                 params.clipboard_delivery,
                 params.show_raw_url,
+                params.api_key_entry_error,
+                params.api_key_entry_validating,
             );
             WelcomeRenderResult {
                 auth_url_rect: url_rect,
@@ -1436,6 +1443,8 @@ fn render_welcome_authenticating(
     auth_code_cursor_byte: usize,
     clipboard_delivery: Option<crate::clipboard::ClipboardDelivery>,
     show_raw_url: bool,
+    api_key_entry_error: Option<&str>,
+    api_key_entry_validating: bool,
 ) -> (Option<Rect>, Option<Rect>) {
     let top_pad = content_area.height.saturating_sub(logo_line_count) / 10;
 
@@ -1566,6 +1575,18 @@ fn render_welcome_authenticating(
             BrowserStatusKind::Device,
         ),
 
+        AuthMode::ApiKeyEntry => render_api_key_entry_arm(
+            content_area,
+            buf,
+            theme,
+            top_pad,
+            logo_line_count,
+            auth_code_input,
+            auth_code_cursor_byte,
+            api_key_entry_error,
+            api_key_entry_validating,
+        ),
+
         AuthMode::Pending => {
             // Connecting: status text
             let [_, logo_area, _, msg_area, _, hint_area, _] = Layout::vertical([
@@ -1594,6 +1615,89 @@ fn render_welcome_authenticating(
             (None, None)
         }
     }
+}
+
+/// API-key entry screen (API-key-only builds): masked input, an instruction,
+/// and a status line (`Validating…` or the last honest failure).
+#[allow(clippy::too_many_arguments)]
+fn render_api_key_entry_arm(
+    content_area: Rect,
+    buf: &mut Buffer,
+    theme: &Theme,
+    top_pad: u16,
+    logo_line_count: u16,
+    auth_code_input: &str,
+    auth_code_cursor_byte: usize,
+    api_key_entry_error: Option<&str>,
+    api_key_entry_validating: bool,
+) -> (Option<Rect>, Option<Rect>) {
+    let h_pad: u16 = content_area.width / 6;
+    let [_, logo_area, _, msg_area, _, prompt_area, _, hint_area, _] = Layout::vertical([
+        Constraint::Length(top_pad),
+        Constraint::Length(logo_line_count),
+        Constraint::Length(1), // gap
+        Constraint::Length(3), // instruction + status
+        Constraint::Min(1),    // gap
+        Constraint::Length(5), // prompt box
+        Constraint::Length(1), // gap
+        Constraint::Length(1), // hints
+        Constraint::Min(0),
+    ])
+    .areas(content_area);
+
+    render_logo(logo_area, buf, theme, content_area.height);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Paste your Chutes API key below. It is validated, then saved for future runs.",
+            Style::default().fg(theme.gray_bright),
+        ))
+        .alignment(Alignment::Center),
+    ];
+    if let Some(error) = api_key_entry_error {
+        lines.push(
+            Line::from(Span::styled(error, Style::default().fg(theme.accent_error)))
+                .alignment(Alignment::Center),
+        );
+    } else if api_key_entry_validating {
+        lines.push(
+            Line::from(Span::styled("Validating…", Style::default().fg(theme.gray)))
+                .alignment(Alignment::Center),
+        );
+    }
+    Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(Block::default().padding(Padding::horizontal(h_pad)))
+        .render(msg_area, buf);
+
+    render_auth_input_box(
+        prompt_area,
+        buf,
+        theme,
+        auth_code_input,
+        auth_code_cursor_byte,
+    );
+
+    let hints = Line::from(vec![
+        Span::styled(
+            "enter",
+            Style::default()
+                .fg(theme.accent_user)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  submit    ", Style::default().fg(theme.gray)),
+        Span::styled(
+            "esc",
+            Style::default()
+                .fg(theme.accent_user)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  back", Style::default().fg(theme.gray)),
+    ])
+    .alignment(Alignment::Center);
+    Paragraph::new(hints).render(hint_area, buf);
+
+    (None, None)
 }
 
 /// Shrink a rect by `inset` columns on the left and right (clamped at 0).
@@ -2105,7 +2209,7 @@ fn render_welcome_done(
         let gate_text = p
             .gate
             .map(|g| g.message.as_str())
-            .unwrap_or("SuperGrok subscription required");
+            .unwrap_or("Subscription required");
         let msg = Line::from(Span::styled(
             gate_text,
             Style::default().fg(theme.gray_bright),
@@ -2129,7 +2233,7 @@ fn render_welcome_done(
             let gate_link = p
                 .gate
                 .and_then(|g| g.url.as_deref())
-                .unwrap_or("https://chutes.ai/supergrok?referrer=chutes-build");
+                .unwrap_or("https://chutes.ai/?_s=usage");
             let url = Line::from(Span::styled(
                 gate_link,
                 Style::default()
@@ -2907,6 +3011,8 @@ mod tests {
             login_label: None,
             auth_code_input: "",
             auth_code_cursor_byte: 0,
+            api_key_entry_error: None,
+            api_key_entry_validating: false,
             clipboard_delivery: None,
             show_raw_url: false,
             announcement: None,
@@ -3850,6 +3956,73 @@ mod tests {
             !text.contains("Login with"),
             "blocked screen must offer no login:\n{text}"
         );
+        assert!(
+            text.contains("Enter API key"),
+            "blocked screen must offer key entry:\n{text}"
+        );
+    }
+
+    /// API-key-only build: the entry screen masks the pasted key, shows the
+    /// instruction, and surfaces failures without ever echoing the key.
+    #[test]
+    fn api_key_entry_masks_input_and_shows_status() {
+        let auth = AuthState::Authenticating {
+            request_seq: 1,
+            handle: None,
+            auth_url: None,
+            mode: AuthMode::ApiKeyEntry,
+        };
+        let trust = TrustState::Done;
+        let area = Rect::new(0, 0, 100, 40);
+
+        let mut params = render_params(&auth, &trust, None);
+        params.auth_code_input = "cpk-very-long-test-key";
+        params.auth_code_cursor_byte = 0;
+        let mut picker = PickerState::default();
+        let mut prompt = PromptWidget::new();
+        let mut buf = Buffer::empty(area);
+        let _ = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Paste your Chutes API key"),
+            "entry screen must instruct:\n{text}"
+        );
+        assert!(
+            !text.contains("cpk-very-long-test-key"),
+            "entry screen must mask the key:\n{text}"
+        );
+        assert!(
+            text.contains("submit") && text.contains("back"),
+            "entry screen must hint submit/back:\n{text}"
+        );
+
+        // Failure status renders; the key stays masked.
+        let mut params = render_params(&auth, &trust, None);
+        params.auth_code_input = "cpk-very-long-test-key";
+        params.auth_code_cursor_byte = 0;
+        params.api_key_entry_error = Some("Invalid API key: Chutes rejected it.");
+        let mut buf = Buffer::empty(area);
+        let _ = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Invalid API key"),
+            "entry screen must show the failure:\n{text}"
+        );
+        assert!(
+            !text.contains("cpk-very-long-test-key"),
+            "failure must not echo the key:\n{text}"
+        );
+
+        // In-flight validation renders instead of the (absent) error.
+        let mut params = render_params(&auth, &trust, None);
+        params.api_key_entry_validating = true;
+        let mut buf = Buffer::empty(area);
+        let _ = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("Validating"),
+            "entry screen must show progress:\n{text}"
+        );
     }
 
     /// Rows of the painted buffer that hold braille logo art.
@@ -4230,7 +4403,10 @@ mod tests {
         // No code param, empty code, and unexpected characters all yield None.
         assert_eq!(extract_user_code("https://chutes.ai/oauth2/device"), None);
         assert_eq!(extract_user_code("https://chutes.ai/d?user_code="), None);
-        assert_eq!(extract_user_code("https://chutes.ai/d?user_code=AB%20CD"), None);
+        assert_eq!(
+            extract_user_code("https://chutes.ai/d?user_code=AB%20CD"),
+            None
+        );
     }
 
     #[test]
@@ -4251,6 +4427,8 @@ mod tests {
             0,
             None,  // clipboard_delivery
             false, // show_raw_url
+            None,  // api_key_entry_error
+            false, // api_key_entry_validating
         );
 
         let text = buffer_text(&buf);
@@ -4305,7 +4483,9 @@ mod tests {
             "",
             0,
             None,
-            true, // show_raw_url
+            true,  // show_raw_url
+            None,  // api_key_entry_error
+            false, // api_key_entry_validating
         );
 
         let text = buffer_text(&buf);
@@ -4332,7 +4512,9 @@ mod tests {
             "",
             0,
             None,
-            true, // show_raw_url
+            true,  // show_raw_url
+            None,  // api_key_entry_error
+            false, // api_key_entry_validating
         );
 
         let text = buffer_text(&buf);
@@ -4369,7 +4551,9 @@ mod tests {
             "",
             0,
             None,
-            true, // show_raw_url
+            true,  // show_raw_url
+            None,  // api_key_entry_error
+            false, // api_key_entry_validating
         );
 
         let text = buffer_text(&buf);
@@ -4409,6 +4593,8 @@ mod tests {
             0,
             None,  // clipboard_delivery
             false, // show_raw_url
+            None,  // api_key_entry_error
+            false, // api_key_entry_validating
         );
 
         let text = buffer_text(&buf);
@@ -4459,7 +4645,7 @@ the usual channels. "
         let area = Rect::new(0, 0, 100, 32);
         let ann = xai_grok_announcements::RemoteAnnouncement {
             title: Some("Upgrade".into()),
-            message: Some("SuperGrok Heavy is available for your team today.".into()),
+            message: Some("Chutes Pro is available for your team today.".into()),
             ..Default::default()
         };
         let input = |prompt_height| WelcomeLayoutInput {

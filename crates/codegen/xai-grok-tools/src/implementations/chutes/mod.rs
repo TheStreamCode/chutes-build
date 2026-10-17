@@ -14,12 +14,12 @@ pub use browser::{BrowserClient, BrowserInput, BrowserTool};
 pub use context7::{Context7DocsInput, Context7DocsTool, Context7SearchInput, Context7SearchTool};
 pub use document::{ExtractDocumentInput, ExtractDocumentTool};
 pub use embed::{EmbedTextsInput, EmbedTextsTool};
-pub use speech::{TranscribeAudioInput, TranscribeAudioTool};
 pub use media::{
     DescribeMediaModelInput, DescribeMediaModelTool, GenerateMediaInput, GenerateMediaTool,
     ListMediaModelsInput, ListMediaModelsTool,
 };
 pub use ocr::{OcrPageInput, OcrPageTool};
+pub use speech::{TranscribeAudioInput, TranscribeAudioTool};
 /// Canonical tool name, shared with the pager so `/imagine` and
 /// `/imagine-video` gate on the tool that actually exists here.
 pub const GENERATE_MEDIA_TOOL_NAME: &str = "generate_media";

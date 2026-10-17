@@ -136,7 +136,7 @@ fn build_resource(cfg: &ExternalOtelConfig) -> opentelemetry_sdk::Resource {
         opentelemetry::KeyValue::new("service.version", cfg.client.service_version.clone()),
         opentelemetry::KeyValue::new("client.version", cfg.client.client_version.clone()),
         opentelemetry::KeyValue::new("app.entrypoint", cfg.client.app_entrypoint.clone()),
-        opentelemetry::KeyValue::new("grok_code.schema.version", super::schema::SCHEMA_VERSION),
+        opentelemetry::KeyValue::new("chutes_build.schema.version", super::schema::SCHEMA_VERSION),
     ];
     // terminal.type: emulator brand (TERM_PROGRAM) or terminfo type (TERM).
     if let Some(terminal_type) = std::env::var("TERM_PROGRAM")

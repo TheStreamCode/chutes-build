@@ -309,7 +309,10 @@ mod tests {
     fn isolated_home() -> (std::sync::MutexGuard<'static, ()>, TempHome, EnvVar, EnvVar) {
         let lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let home = TempHome::new();
-        let home_var = EnvVar::set("CHUTES_BUILD_HOME", home.0.to_str().expect("temp home is utf-8"));
+        let home_var = EnvVar::set(
+            "CHUTES_BUILD_HOME",
+            home.0.to_str().expect("temp home is utf-8"),
+        );
         let flag = EnvVar::unset("CHUTES_BUILD_FOLDER_TRUST");
         (lock, home, home_var, flag)
     }
@@ -350,7 +353,10 @@ mod tests {
     fn local_build_ignores_explicit_env_optin() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let home = TempHome::new();
-        let _home_var = EnvVar::set("CHUTES_BUILD_HOME", home.0.to_str().expect("temp home is utf-8"));
+        let _home_var = EnvVar::set(
+            "CHUTES_BUILD_HOME",
+            home.0.to_str().expect("temp home is utf-8"),
+        );
         let _flag = EnvVar::set("CHUTES_BUILD_FOLDER_TRUST", "1");
         assert!(!super::feature_enabled_for_build(None, true));
     }

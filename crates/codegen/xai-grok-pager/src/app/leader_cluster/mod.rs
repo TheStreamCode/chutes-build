@@ -317,7 +317,10 @@ impl PagerLeaderCluster {
 
         let env = vec![
             crate::test_util::EnvVarGuard::set("CHUTES_BUILD_HOME", grok_home.path()),
-            crate::test_util::EnvVarGuard::set("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL", server.url()),
+            crate::test_util::EnvVarGuard::set(
+                "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+                server.url(),
+            ),
             crate::test_util::EnvVarGuard::set("CHUTES_BUILD_XAI_API_BASE_URL", server.url()),
             crate::test_util::EnvVarGuard::set("CHUTES_API_KEY", "test-key-for-ci"),
             crate::test_util::EnvVarGuard::set("CHUTES_BUILD_TELEMETRY_ENABLED", "false"),
@@ -464,8 +467,8 @@ impl PagerLeaderCluster {
                 name,
                 ClientMode::Stdio,
                 LeaderEnvUrls {
-                    grok_ws_url: String::new(),
-                    grok_ws_origin: String::new(),
+                    ws_url: String::new(),
+                    ws_origin: String::new(),
                 },
                 LeaderClientCapabilities {
                     client_version: Some("0.0.0-test".to_string()),

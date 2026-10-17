@@ -838,3 +838,229 @@ fn auth_complete_preserves_show_resolved_model_when_absent() {
 
     assert!(!app.show_resolved_model);
 }
+
+fn pending_app() -> AppView {
+    let mut app = test_app_with_agent();
+    app.auth_state = AuthState::Pending { error: None };
+    app
+}
+
+fn entry_seq(app: &AppView) -> u64 {
+    match &app.auth_state {
+        AuthState::Authenticating { request_seq, .. } => *request_seq,
+        other => panic!("expected entry mode, got {other:?}"),
+    }
+}
+
+#[test]
+fn enter_api_key_opens_entry_mode_from_pending() {
+    let mut app = pending_app();
+    let effects = dispatch(Action::EnterApiKey, &mut app);
+    assert!(effects.is_empty());
+    assert!(matches!(
+        app.auth_state,
+        AuthState::Authenticating {
+            mode: AuthMode::ApiKeyEntry,
+            ..
+        }
+    ));
+    assert!(app.auth_code_input.text().is_empty());
+    assert_eq!(app.api_key_entry_error, None);
+    assert!(!app.api_key_entry_validating);
+}
+
+#[test]
+fn enter_api_key_ignores_non_pending_states() {
+    let mut app = test_app_with_agent();
+    assert!(matches!(app.auth_state, AuthState::Done));
+    assert!(dispatch(Action::EnterApiKey, &mut app).is_empty());
+    assert!(matches!(app.auth_state, AuthState::Done));
+}
+
+#[test]
+fn submit_api_key_emits_validation_effect() {
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let effects = dispatch(
+        Action::SubmitApiKey(crate::app::actions::RedactedSecret::new(
+            "cpk-test-key".to_string(),
+        )),
+        &mut app,
+    );
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::ValidateApiKey { request_seq, key }]
+                if *request_seq == entry_seq(&app) && key.expose() == "cpk-test-key"
+        ),
+        "unexpected effects: {effects:?}"
+    );
+    assert!(app.api_key_entry_validating);
+}
+
+#[test]
+fn submit_api_key_ignores_blank_key_and_wrong_mode() {
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let blank = dispatch(
+        Action::SubmitApiKey(crate::app::actions::RedactedSecret::new("  ".to_string())),
+        &mut app,
+    );
+    assert!(blank.is_empty());
+    assert!(!app.api_key_entry_validating);
+
+    let mut app = test_app_with_agent();
+    let effects = dispatch(
+        Action::SubmitApiKey(crate::app::actions::RedactedSecret::new(
+            "cpk-test-key".to_string(),
+        )),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn cancel_api_key_entry_returns_to_pending_and_bumps_seq() {
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let seq = entry_seq(&app);
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let effects = dispatch(Action::CancelApiKeyEntry, &mut app);
+    assert!(effects.is_empty());
+    assert!(matches!(app.auth_state, AuthState::Pending { error: None }));
+    assert!(app.auth_code_input.text().is_empty());
+    // A late validation result for the cancelled attempt must not apply.
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyAccepted { request_seq: seq }),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+    assert!(matches!(app.auth_state, AuthState::Pending { .. }));
+}
+
+#[test]
+fn redacted_secret_debug_hides_the_key() {
+    let action = Action::SubmitApiKey(crate::app::actions::RedactedSecret::new(
+        "cpk-super-secret".to_string(),
+    ));
+    let debug = format!("{action:?}");
+    assert!(debug.contains("[REDACTED]"), "{debug}");
+    assert!(!debug.contains("cpk-super-secret"), "{debug}");
+}
+
+#[serial_test::serial(CHUTES_BUILD_HOME)]
+#[test]
+fn api_key_accepted_saves_and_finishes_startup_auth() {
+    let home = tempfile::tempdir().expect("temp home");
+    let _home_guard = xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+    let prior_key = std::env::var_os("CHUTES_API_KEY");
+    // SAFETY: serialized via `serial_test`; restored below.
+    unsafe { std::env::remove_var("CHUTES_API_KEY") };
+
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let seq = entry_seq(&app);
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyAccepted { request_seq: seq }),
+        &mut app,
+    );
+    assert!(effects.is_empty(), "unexpected effects: {effects:?}");
+
+    assert!(matches!(app.auth_state, AuthState::Done));
+    assert!(app.is_api_key_auth);
+    assert_eq!(app.auth_methods.len(), 1);
+    assert_eq!(
+        app.auth_methods[0].id().0.as_ref(),
+        xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID
+    );
+    assert!(!app.usage_visible, "startup-with-key hides billing");
+    assert!(
+        app.welcome_toast
+            .as_ref()
+            .is_some_and(|(message, _)| message.contains("API key saved")),
+        "expected a saved-key toast"
+    );
+    assert_eq!(
+        chutes_build_core::api_key_store::load(home.path()).as_deref(),
+        Some("cpk-test-key")
+    );
+    assert_eq!(
+        std::env::var("CHUTES_API_KEY").as_deref(),
+        Ok("cpk-test-key")
+    );
+
+    // SAFETY: serialized via `serial_test`; restore the env for other tests.
+    unsafe {
+        match prior_key {
+            Some(value) => std::env::set_var("CHUTES_API_KEY", value),
+            None => std::env::remove_var("CHUTES_API_KEY"),
+        }
+    }
+}
+
+#[test]
+fn api_key_accepted_drops_stale_seq() {
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyAccepted {
+            request_seq: entry_seq(&app) + 100,
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+    assert!(matches!(app.auth_state, AuthState::Authenticating { .. }));
+}
+
+#[test]
+fn api_key_rejected_shows_error_and_stays_in_entry_mode() {
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let _ = dispatch(
+        Action::SubmitApiKey(crate::app::actions::RedactedSecret::new(
+            "cpk-test-key".to_string(),
+        )),
+        &mut app,
+    );
+    assert!(app.api_key_entry_validating);
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyRejected {
+            request_seq: entry_seq(&app),
+            error: "Invalid API key: Chutes rejected it.".to_string(),
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+    assert!(!app.api_key_entry_validating);
+    assert_eq!(
+        app.api_key_entry_error.as_deref(),
+        Some("Invalid API key: Chutes rejected it.")
+    );
+    assert!(matches!(
+        app.auth_state,
+        AuthState::Authenticating {
+            mode: AuthMode::ApiKeyEntry,
+            ..
+        }
+    ));
+    // The typed key survives so the user can fix and resubmit it.
+    assert_eq!(app.auth_code_input.text(), "cpk-test-key");
+}
+
+#[test]
+fn api_key_rejected_drops_stale_seq() {
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyRejected {
+            request_seq: entry_seq(&app) + 100,
+            error: "late".to_string(),
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+    assert_eq!(app.api_key_entry_error, None);
+}

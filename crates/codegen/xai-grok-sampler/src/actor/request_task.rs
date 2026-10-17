@@ -581,11 +581,8 @@ async fn maybe_fallback_to_equivalent_model(
             Ok(Some(false)) => false,
             _ => true,
         };
-    let replacement = chutes_build_core::catalog::find_equivalent_chat_model(
-        &config.model,
-        require_image,
-    )
-    .await;
+    let replacement =
+        chutes_build_core::catalog::find_equivalent_chat_model(&config.model, require_image).await;
     let new_model = match replacement {
         Ok(Some(model)) => model,
         Ok(None) => {
@@ -1714,7 +1711,10 @@ mod tests {
 
     #[test]
     fn fallback_note_appends_to_api_message() {
-        match with_fallback_note(api_error("model gone"), Some("no equivalent model available")) {
+        match with_fallback_note(
+            api_error("model gone"),
+            Some("no equivalent model available"),
+        ) {
             SamplingError::Api { message, .. } => {
                 assert_eq!(message, "model gone (no equivalent model available)");
             }

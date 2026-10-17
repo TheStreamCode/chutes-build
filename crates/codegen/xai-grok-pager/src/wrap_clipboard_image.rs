@@ -238,7 +238,10 @@ mod tests {
     fn garbage_is_not_wrap_paste() {
         assert_eq!(try_decode_wrap_host_image_paste("hello world"), None);
         assert_eq!(try_decode_wrap_host_image_paste(""), None);
-        assert_eq!(try_decode_wrap_host_image_paste("CHUTES_BUILD_WRAP_IM"), None);
+        assert_eq!(
+            try_decode_wrap_host_image_paste("CHUTES_BUILD_WRAP_IM"),
+            None
+        );
     }
 
     #[test]

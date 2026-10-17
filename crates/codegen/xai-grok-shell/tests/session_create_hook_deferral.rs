@@ -10,7 +10,9 @@ use acp_harness::{AutoApproveClient, connect_and_auth, new_session, prompt_turn,
 #[test]
 fn session_create_does_not_wait_for_session_start_hooks() {
     run_agent_test(|cwd, _server| async move {
-        let grok_home = std::path::PathBuf::from(std::env::var("CHUTES_BUILD_HOME").expect("CHUTES_BUILD_HOME"));
+        let grok_home = std::path::PathBuf::from(
+            std::env::var("CHUTES_BUILD_HOME").expect("CHUTES_BUILD_HOME"),
+        );
         let release = grok_home.join("session_start_hook_release");
         let done = grok_home.join("session_start_hook_done");
         let hooks_dir = grok_home.join("hooks");

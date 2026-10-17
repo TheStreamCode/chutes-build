@@ -1611,8 +1611,8 @@ mod tests {
                 .is_some_and(|u| u.contains("cc-deep-research.rhai")),
         );
 
-        let block =
-            EditToolCallBlock::new(".chutes-build/workflows/triage.rhai", vec![]).with_prefix("Creating ");
+        let block = EditToolCallBlock::new(".chutes-build/workflows/triage.rhai", vec![])
+            .with_prefix("Creating ");
         let header = block.header_line(
             &theme,
             false,

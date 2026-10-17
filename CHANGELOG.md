@@ -4,6 +4,81 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-17
+
+### Added
+
+- **Interactive API-key entry, no dead ends.** The welcome setup screen
+  accepts the key inline (paste and submit validates it live against the
+  Chutes API, saves it to the key store, and resumes the session);
+  `chutes-build login` validates then saves (`logout` removes), and
+  `/apikey` explains mid-session rotation (restart to take effect).
+  A rejected key reports the HTTP 401 honestly and is never stored.
+- **Tag-driven direct publish.** Pushing a version tag builds once and
+  publishes npm plus the GitHub release in the same run — no manual
+  dispatch, no second CI pass (see `docs/releasing.md`).
+- **Project spec.** `docs/product-spec.md` pins the product contract that
+  regressions kept violating: identity/copy rules, the API-key-only auth
+  contract, privacy (no telemetry, `Distribution`-withheld), ecosystem
+  capabilities (delegation, fallback, honest errors), the dormant-code
+  list, and the spec-to-test map.
+
+### Changed
+
+- **Media routes through Chutes-native `generate_media`.** `/imagine` and
+  `/imagine-video` gate on `generate_media` (live-catalog resolution with
+  equivalent-model fallback); the legacy `image_gen`/`image_edit`/
+  `image_to_video`/`reference_to_video` tools default off (re-enable only
+  via `CHUTES_BUILD_IMAGE_GEN=1`, `CHUTES_BUILD_IMAGE_EDIT=1`,
+  `CHUTES_BUILD_VIDEO_GEN=1`, `[features]`, or remote flags, for
+  xAI-compatible hosts). `generate_media` takes the image budget (8) by
+  name for all its calls.
+- **Copy purge.** All user-facing strings (TUI, CLI help/errors, docs,
+  splash, titles) are free of `grok`/`xai`/`SuperGrok` references; legal,
+  upsell, key-management, rate-limit, and managed-config links point at
+  live Chutes pages only (`chutes.ai/terms`, `chutes.ai/privacy`,
+  `chutes.ai/?_s=usage`, `chutes.ai/app/settings/api-keys`).
+- Agent profile names are canonical `chutes-build-*` end to end (pager
+  emission, agent registry, `BuiltinAgentName`); legacy `grok-build-*`
+  spellings are still accepted as input, never emitted.
+- External OTLP taxonomy is `chutes_build.*` under scope
+  `ai.chutes.build`; internal `SuperGrokUpsell*` events keep no external
+  mapping. Sentry has no DSN baked in and error reporting stays withheld
+  by `Distribution`, so no crash/error report can leave the machine.
+- Endpoint/config renames with back-compat aliases: `public_api_base_url`
+  (+ `CHUTES_BUILD_PUBLIC_API_BASE_URL`), leader `ws_url`/`ws_origin`,
+  `TitleItem::AppName` (alias `grok`), `du` schema 3 with `chutes_home`,
+  themes `chutesnight`/`chutesday`, user-agent `chutes-build`.
+
+### Fixed
+
+- CLI identity pins: `chutes-build` command name, help header, and zsh
+  completions generated for the public binary name.
+- Billing PAYG upsell URL unified to the canonical usage page; team
+  rate-limit copy points at plan/credits instead of a dead docs URL.
+- Settings docs footer: restored the MEDIUM one-example variant the
+  upstream rebase dropped, so the tip keeps its worked example at 120
+  columns.
+- `cargo fmt --all` is clean tree-wide (toolchain-style drift fixed,
+  unblocking the CI format gate) and clippy `-D warnings` passes for
+  `chutes-build`, `chutes-build-core`, and `xai-grok-pager --lib`.
+
+### Tests
+
+- New/updated pins: CLI name/header/completions, auth-meta media tools,
+  billing URLs, agent-profile emission + enum round-trip, rate-limit
+  copy (both auth modes), settings footer, key-store save/validate/remove.
+- Known pre-existing (verified by stash comparison or untouched files,
+  unrelated to this release): the pager `--lib` suite has Windows-only
+  failures (paths, separators, `PlatformUnsupported` doctor flows) and a
+  `STATUS_ACCESS_VIOLATION` crash; `xai-grok-agent --lib` has 4
+  Windows path/lock failures; `xai-grok-tools` clippy carries 25
+  toolchain-lint findings; `xai-grok-extra-ca`, `xai-hunk-tracker`,
+  `xai-grok-test-support`, and `xai-fast-worktree` test targets do not
+  compile on Windows; `test_active_sessions_smoke` and `pty_e2e_minimal`
+  are stale on every platform. Debug binaries also need a larger stack
+  on Windows (`/STACK:8388608`); release builds are unaffected.
+
 ## [1.6.0] - 2026-10-16
 
 ### Added

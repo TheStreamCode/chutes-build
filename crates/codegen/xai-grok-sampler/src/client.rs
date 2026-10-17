@@ -2624,8 +2624,11 @@ mod tests {
                 );
                 // cli-chat-proxy rejects a zstd body it cannot attribute from headers.
                 assert!(
-                    header(&headers, HeaderName::from_static("x-chutes-build-model-override"))
-                        .is_some_and(|model| !model.is_empty()),
+                    header(
+                        &headers,
+                        HeaderName::from_static("x-chutes-build-model-override")
+                    )
+                    .is_some_and(|model| !model.is_empty()),
                     "{route}: a compressed body must carry the model override"
                 );
                 assert!(

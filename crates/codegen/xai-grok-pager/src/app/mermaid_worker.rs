@@ -1903,8 +1903,12 @@ mod tests {
             80,
             MermaidRenderQuality::Terminal,
         );
-        let light_key =
-            MermaidCacheKey::derive(src, ThemeKind::ChutesDay, 80, MermaidRenderQuality::Terminal);
+        let light_key = MermaidCacheKey::derive(
+            src,
+            ThemeKind::ChutesDay,
+            80,
+            MermaidRenderQuality::Terminal,
+        );
         assert_ne!(
             dark_key.cache_filename(),
             light_key.cache_filename(),

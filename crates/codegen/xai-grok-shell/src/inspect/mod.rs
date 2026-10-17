@@ -1730,7 +1730,10 @@ fn print_human(r: &InspectReport, out: &mut impl Write) -> std::io::Result<()> {
     if r.mcp_servers.is_empty() {
         writeln!(out)?;
         writeln!(out, "  MCP Servers (0)")?;
-        writeln!(out, "  {TREE} (none) \u{2014} see `chutes-build mcp add --help`")?;
+        writeln!(
+            out,
+            "  {TREE} (none) \u{2014} see `chutes-build mcp add --help`"
+        )?;
     } else {
         print_columns(
             out,
@@ -2014,7 +2017,8 @@ mod tests {
             ("claude", "/repo/.claude/rules/team.md"),
             ("claude", r"C:\repo\.claude\rules\team.md"),
         ] {
-            let file_type = instruction_file_type(path, Path::new("/home/user/.chutes-build"), false);
+            let file_type =
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), false);
             assert_eq!(file_type, "rules");
             assert_eq!(
                 instruction_compat_status(&Some(vendor.to_owned()), file_type, &report),
@@ -2022,7 +2026,10 @@ mod tests {
             );
         }
 
-        for path in ["/repo/.chutes-build/rules/team.md", r"C:\repo\.chutes-build\rules\team.md"] {
+        for path in [
+            "/repo/.chutes-build/rules/team.md",
+            r"C:\repo\.chutes-build\rules\team.md",
+        ] {
             assert_eq!(
                 instruction_file_type(path, Path::new("/home/user/.chutes-build"), false),
                 "rules"
@@ -2041,7 +2048,8 @@ mod tests {
             "/repo/.claude/rules/team.md",
             r"C:\repo\.claude\rules\team.md",
         ] {
-            let file_type = instruction_file_type(path, Path::new("/home/user/.chutes-build"), true);
+            let file_type =
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), true);
             assert_eq!(file_type, "agents_md");
             assert_eq!(
                 instruction_compat_status(&Some("claude".to_owned()), file_type, &report),
@@ -2551,19 +2559,31 @@ mod tests {
 
     #[test]
     fn skill_entry_source_maps_scopes() {
-        let s = skill_fixture("a", "/repo/.chutes-build/skills/a/SKILL.md", SkillScope::Local);
+        let s = skill_fixture(
+            "a",
+            "/repo/.chutes-build/skills/a/SKILL.md",
+            SkillScope::Local,
+        );
         assert!(matches!(
             skill_entry_source(&s),
             ConfigSource::Project { .. }
         ));
 
-        let s = skill_fixture("b", "/repo/.chutes-build/skills/b/SKILL.md", SkillScope::Repo);
+        let s = skill_fixture(
+            "b",
+            "/repo/.chutes-build/skills/b/SKILL.md",
+            SkillScope::Repo,
+        );
         assert!(matches!(
             skill_entry_source(&s),
             ConfigSource::Project { .. }
         ));
 
-        let s = skill_fixture("c", "/home/u/.chutes-build/skills/c/SKILL.md", SkillScope::User);
+        let s = skill_fixture(
+            "c",
+            "/home/u/.chutes-build/skills/c/SKILL.md",
+            SkillScope::User,
+        );
         assert!(matches!(skill_entry_source(&s), ConfigSource::User { .. }));
 
         let s = skill_fixture(
@@ -2576,7 +2596,11 @@ mod tests {
             ConfigSource::Server { .. }
         ));
 
-        let s = skill_fixture("e", "/home/u/.chutes-build/bundled/e/SKILL.md", SkillScope::Bundled);
+        let s = skill_fixture(
+            "e",
+            "/home/u/.chutes-build/bundled/e/SKILL.md",
+            SkillScope::Bundled,
+        );
         assert!(matches!(
             skill_entry_source(&s),
             ConfigSource::Bundled { .. }

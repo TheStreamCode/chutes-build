@@ -213,10 +213,12 @@ impl Tool {
             Tool::List => GrokBuildRow::new("list_dir"),
             Tool::MemorySearch => GrokBuildRow::new("memory_search"),
             Tool::MemoryGet => GrokBuildRow::new("memory_get"),
-            Tool::Task => GrokBuildRow::new(CHUTES_BUILD_BUILD_SPAWN_TOOL).with_fills(&[FieldFill {
-                field: "description",
-                source: "prompt",
-            }]),
+            Tool::Task => {
+                GrokBuildRow::new(CHUTES_BUILD_BUILD_SPAWN_TOOL).with_fills(&[FieldFill {
+                    field: "description",
+                    source: "prompt",
+                }])
+            }
             Tool::Skill => GrokBuildRow::new("skill"),
             Tool::SendMessage => GrokBuildRow::new("send_subagent_message"),
             Tool::EnterPlanMode => GrokBuildRow::new("enter_plan_mode"),

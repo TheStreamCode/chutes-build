@@ -115,7 +115,11 @@ fn parse_slash_command_tags_json(raw: Option<&str>) -> std::collections::HashMap
 }
 
 fn slash_command_tags_from_env() -> std::collections::HashMap<String, String> {
-    parse_slash_command_tags_json(std::env::var("CHUTES_BUILD_SLASH_COMMAND_TAGS").ok().as_deref())
+    parse_slash_command_tags_json(
+        std::env::var("CHUTES_BUILD_SLASH_COMMAND_TAGS")
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// Remote is the base, local `[slash_command_tags]` overrides it, and env wins.

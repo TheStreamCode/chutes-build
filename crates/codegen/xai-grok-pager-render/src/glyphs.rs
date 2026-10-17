@@ -387,7 +387,11 @@ pub fn is_legacy_windows_console() -> bool {
 
 /// Read the `CHUTES_BUILD_FORCE_LEGACY_CONSOLE` escape hatch from the environment.
 fn forced_legacy_console_override() -> Option<bool> {
-    parse_forced_legacy_console(std::env::var("CHUTES_BUILD_FORCE_LEGACY_CONSOLE").ok().as_deref())
+    parse_forced_legacy_console(
+        std::env::var("CHUTES_BUILD_FORCE_LEGACY_CONSOLE")
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// Pure parse of the override value so tests don't touch the environment.

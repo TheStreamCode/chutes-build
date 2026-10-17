@@ -86,8 +86,8 @@ fn external_stream_grpc_over_tls_end_to_end() {
         .expect("log records must arrive over TLS");
     let names = recorder.event_names();
     assert!(
-        names.iter().any(|n| n == "grok_code.session_start"),
-        "expected grok_code.session_start in {names:?}"
+        names.iter().any(|n| n == "chutes_build.session_start"),
+        "expected chutes_build.session_start in {names:?}"
     );
 
     // Metrics ride the same TLS channel config; make sure at least one periodic export lands too

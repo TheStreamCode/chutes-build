@@ -3726,7 +3726,7 @@ fn docs_footer_renders_for_browse_and_picker() {
         );
         assert!(
             all_text.contains("change theme to chutesday"),
-            "[{fixture_label}] docs footer must include the example phrasing"
+            "[{fixture_label}] docs footer must include the example phrasing:\n{all_text}"
         );
     }
 }

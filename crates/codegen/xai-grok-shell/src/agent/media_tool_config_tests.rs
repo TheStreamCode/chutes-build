@@ -17,7 +17,7 @@ fn credentials(static_bearer: Option<&str>) -> MediaToolCredentials {
 
 #[test]
 fn the_static_bearer_is_the_configured_key_and_nothing_else() {
-    let cfg = config("[endpoints]\nxai_api_base_url = \"https://api.x.ai/v1\"\n");
+    let cfg = config("[endpoints]\npublic_api_base_url = \"https://llm.chutes.ai/v1\"\n");
 
     let ImageGenConfig::Enabled {
         api_key, base_url, ..
@@ -26,7 +26,7 @@ fn the_static_bearer_is_the_configured_key_and_nothing_else() {
         panic!("image tools are enabled by default");
     };
     assert_eq!(None, api_key);
-    assert_eq!("https://api.x.ai/v1", base_url);
+    assert_eq!("https://llm.chutes.ai/v1", base_url);
 
     let ImageGenConfig::Enabled { api_key, .. } =
         image_gen_config(&cfg, &credentials(Some("xai-key")))
@@ -40,7 +40,9 @@ fn the_static_bearer_is_the_configured_key_and_nothing_else() {
 /// video download locally.
 #[test]
 fn a_zdr_config_without_a_bucket_restricts_video_on_every_host() {
-    let cfg = config("[tools]\ndisable_zdr_incompatible_tools = true\n");
+    // Legacy video tools default off; opt in explicitly so the ZDR guard is what restricts them.
+    let cfg =
+        config("[tools]\ndisable_zdr_incompatible_tools = true\n[features]\nvideo_gen = true\n");
 
     let VideoGenConfig::Enabled {
         zdr_restricted,

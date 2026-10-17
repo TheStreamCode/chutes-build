@@ -305,12 +305,15 @@ fn resolve_voice_mode_enabled_as(
     if !distribution.allows(xai_grok_config::Capability::Voice) {
         return false;
     }
-    let resolved = Feature::VoiceMode.resolve_as(distribution, FeatureSources {
-        pin: requirement,
-        config,
-        remote,
-        ..FeatureSources::from_process_env(Feature::VoiceMode)
-    });
+    let resolved = Feature::VoiceMode.resolve_as(
+        distribution,
+        FeatureSources {
+            pin: requirement,
+            config,
+            remote,
+            ..FeatureSources::from_process_env(Feature::VoiceMode)
+        },
+    );
     if resolved.value {
         return true;
     }
@@ -318,11 +321,7 @@ fn resolve_voice_mode_enabled_as(
 }
 /// Resolve from live policy, env, remote, and API-key state.
 pub(crate) fn resolve_voice_mode_live(remote: Option<bool>, is_api_key: bool) -> bool {
-    resolve_voice_mode_live_as(
-        xai_grok_config::Distribution::current(),
-        remote,
-        is_api_key,
-    )
+    resolve_voice_mode_live_as(xai_grok_config::Distribution::current(), remote, is_api_key)
 }
 pub(crate) fn resolve_voice_mode_live_as(
     distribution: xai_grok_config::Distribution,
@@ -1450,11 +1449,11 @@ pub(crate) mod win_native_selection {
             let Ok(saved) = u32::try_from(saved) else {
                 return;
             };
-            if let Some((handle, current)) = stdin_console_mode() {
-                if current != saved {
-                    unsafe {
-                        let _ = SetConsoleMode(handle, saved);
-                    }
+            if let Some((handle, current)) = stdin_console_mode()
+                && current != saved
+            {
+                unsafe {
+                    let _ = SetConsoleMode(handle, saved);
                 }
             }
         }
@@ -2315,9 +2314,9 @@ mod tests {
         assert!(!args.no_alt_screen);
     }
     #[test]
-    fn cli_command_name_is_grok() {
+    fn cli_command_name_is_chutes_build() {
         use clap::CommandFactory;
-        assert_eq!(PagerArgs::command().get_name(), "grok");
+        assert_eq!(PagerArgs::command().get_name(), "chutes-build");
     }
     #[test]
     fn cli_help_output_header() {
@@ -2329,7 +2328,7 @@ mod tests {
             vec![
                 "Chutes Build TUI",
                 "",
-                "Usage: grok [OPTIONS] [PROMPT] [COMMAND]",
+                "Usage: chutes-build [OPTIONS] [PROMPT] [COMMAND]",
                 "",
                 "Arguments:",
             ]

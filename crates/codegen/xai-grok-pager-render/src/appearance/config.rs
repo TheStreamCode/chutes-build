@@ -1865,7 +1865,8 @@ mod tests {
     #[serial_test::serial]
     fn persist_respect_manual_folds_writes_through_symlink() {
         let dir = tempfile::tempdir().unwrap();
-        let _home = xai_grok_env::EnvVarGuard::set("CHUTES_BUILD_HOME", dir.path().to_str().unwrap());
+        let _home =
+            xai_grok_env::EnvVarGuard::set("CHUTES_BUILD_HOME", dir.path().to_str().unwrap());
         let target = dir.path().join("dotfiles").join("pager.toml");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "[scrollback.scroll]\nanchor_on_fold = false\n").unwrap();

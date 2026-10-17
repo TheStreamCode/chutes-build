@@ -84,6 +84,20 @@ impl MediaGenOverCap {
     }
 }
 
+/// Per-call budget: `generate_media` is polymorphic (image, video, and music
+/// share one tool name), so it takes the image budget by name; every other
+/// tool resolves its budget from its [`ToolKind`].
+fn budget_for_call(
+    name: &str,
+    kind: Option<ToolKind>,
+    limits: &MediaGenBatchLimits,
+) -> Option<usize> {
+    if name == crate::implementations::chutes::GENERATE_MEDIA_TOOL_NAME {
+        return Some(limits.max_image);
+    }
+    kind.and_then(|k| max_calls_per_batch(k, limits))
+}
+
 /// Names (with totals) that exceed their per-name cap. Empty = admit the batch.
 pub fn over_cap_by_name<'a>(
     calls: impl IntoIterator<Item = (&'a str, Option<ToolKind>)>,
@@ -91,7 +105,7 @@ pub fn over_cap_by_name<'a>(
 ) -> Vec<MediaGenOverCap> {
     let mut total_by_name: HashMap<String, (usize, usize)> = HashMap::new();
     for (name, kind) in calls {
-        let Some(max) = kind.and_then(|k| max_calls_per_batch(k, limits)) else {
+        let Some(max) = budget_for_call(name, kind, limits) else {
             continue;
         };
         let entry = total_by_name.entry(name.to_owned()).or_insert((0, max));
@@ -173,10 +187,7 @@ pub fn partition_media_gen_batch<T>(
 
     let mut total_by_name: HashMap<String, usize> = HashMap::new();
     for call in &calls {
-        if tool_kind(call)
-            .and_then(|k| max_calls_per_batch(k, limits))
-            .is_none()
-        {
+        if budget_for_call(tool_name(call), tool_kind(call), limits).is_none() {
             continue;
         }
         *total_by_name.entry(tool_name(call).to_owned()).or_default() += 1;
@@ -187,7 +198,7 @@ pub fn partition_media_gen_batch<T>(
     let mut rejected = Vec::new();
 
     for call in calls {
-        let Some(max) = tool_kind(&call).and_then(|k| max_calls_per_batch(k, limits)) else {
+        let Some(max) = budget_for_call(tool_name(&call), tool_kind(&call), limits) else {
             allowed.push(call);
             continue;
         };
@@ -238,6 +249,34 @@ mod tests {
         limits: &MediaGenBatchLimits,
     ) -> (Vec<Call>, Vec<(Call, String)>) {
         partition_media_gen_batch(calls, |c| c.name, |c| kind_for(c.name), limits)
+    }
+
+    #[test]
+    fn generate_media_takes_image_budget_by_name() {
+        // The native tool reports ToolKind::Other (it spans image/video/music);
+        // the per-name budget still caps it at max_image.
+        let limits = MediaGenBatchLimits::default();
+        let total = limits.max_image + 1;
+        let calls: Vec<Call> = (0..total as u32)
+            .map(|id| Call {
+                name: "generate_media",
+                id,
+            })
+            .collect();
+        assert_eq!(kind_for("generate_media"), None);
+        let (allowed, rejected) = partition(calls, &limits);
+        assert_eq!(allowed.len(), limits.max_image);
+        assert_eq!(rejected.len(), 1);
+        assert!(rejected[0].1.contains("at most 8 `generate_media`"));
+        let over = over_cap_by_name((0..total).map(|_| ("generate_media", None)), &limits);
+        assert_eq!(
+            over,
+            vec![MediaGenOverCap {
+                name: "generate_media".to_owned(),
+                total,
+                max: limits.max_image,
+            }]
+        );
     }
 
     #[test]

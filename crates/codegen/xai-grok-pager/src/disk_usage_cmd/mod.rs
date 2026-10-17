@@ -17,7 +17,7 @@ use xai_fast_worktree::{
     managed_worktree_roots, path_under_worktree_roots, resolve_grok_home,
 };
 /// Bump when a field changes meaning or is removed. Additions are free.
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 #[derive(Clone, Debug, clap::Args)]
 #[command(
     after_help = "Lists every top-level directory in the Chutes Build home, largest first, then every \
@@ -48,13 +48,13 @@ fn run_inner(args: DiskUsageArgs) -> Result<()> {
     if args.clean || args.clean_orphaned {
         anyhow::bail!("redirect cleanup is not available in this build");
     }
-    let grok_home = resolve_grok_home()?;
+    let chutes_home = resolve_grok_home()?;
     let mut out = std::io::stdout().lock();
-    let present = grok_home
+    let present = chutes_home
         .try_exists()
-        .with_context(|| format!("cannot stat {}", grok_home.display()))?;
+        .with_context(|| format!("cannot stat {}", chutes_home.display()))?;
     if !present {
-        let report = empty_report(&grok_home);
+        let report = empty_report(&chutes_home);
         if args.json {
             return write_report(&report, args.json, &mut out);
         }
@@ -62,8 +62,8 @@ fn run_inner(args: DiskUsageArgs) -> Result<()> {
             display::print_missing_home_report(&report, &mut out),
         )?);
     }
-    let grok_home = dunce::canonicalize(&grok_home).unwrap_or(grok_home);
-    write_report(&collect_report(&grok_home)?, args.json, &mut out)
+    let chutes_home = dunce::canonicalize(&chutes_home).unwrap_or(chutes_home);
+    write_report(&collect_report(&chutes_home)?, args.json, &mut out)
 }
 fn write_report(report: &DiskUsageReport, json: bool, out: &mut impl Write) -> Result<()> {
     let rendered = if json {
@@ -77,9 +77,9 @@ fn write_report(report: &DiskUsageReport, json: bool, out: &mut impl Write) -> R
     };
     Ok(crate::util::ignore_broken_pipe(written)?)
 }
-fn empty_report(grok_home: &Path) -> DiskUsageReport {
+fn empty_report(chutes_home: &Path) -> DiskUsageReport {
     DiskUsageReport {
-        grok_home: grok_home.to_string_lossy().into_owned(),
+        chutes_home: chutes_home.to_string_lossy().into_owned(),
         ..DiskUsageReport::default()
     }
 }
@@ -123,7 +123,7 @@ pub(crate) struct UnattributedRedirectDir {
 #[derive(Debug, Serialize)]
 pub(crate) struct DiskUsageReport {
     schema_version: u32,
-    grok_home: String,
+    chutes_home: String,
     total_bytes: u64,
     /// Capacity less available is at least the used bytes (`f_bavail` withholds the root reserve).
     /// A larger `total_bytes` therefore proves blocks were counted more than once.
@@ -152,7 +152,7 @@ impl Default for DiskUsageReport {
     fn default() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
-            grok_home: String::new(),
+            chutes_home: String::new(),
             total_bytes: 0,
             volume_capacity_bytes: None,
             volume_available_bytes: None,
@@ -301,24 +301,24 @@ impl WorktreeUsage {
         }
     }
 }
-fn collect_report(grok_home: &Path) -> Result<DiskUsageReport> {
-    collect_report_in(grok_home, &[])
+fn collect_report(chutes_home: &Path) -> Result<DiskUsageReport> {
+    collect_report_in(chutes_home, &[])
 }
-fn collect_report_in(grok_home: &Path, data_dirs: &[PathBuf]) -> Result<DiskUsageReport> {
+fn collect_report_in(chutes_home: &Path, data_dirs: &[PathBuf]) -> Result<DiskUsageReport> {
     let _ = data_dirs;
     let mut top_level_dirs = Vec::new();
     let mut root_files_bytes = 0u64;
     let mut issues = WalkIssues::default();
     let mut unfollowed_dir_symlinks = 0u64;
-    let volume = Volume::of(grok_home);
+    let volume = Volume::of(chutes_home);
     let mut worktree_sizes: HashMap<PathBuf, Measure> = HashMap::new();
-    let children = std::fs::read_dir(grok_home)
-        .with_context(|| format!("cannot read {}", grok_home.display()))?;
+    let children = std::fs::read_dir(chutes_home)
+        .with_context(|| format!("cannot read {}", chutes_home.display()))?;
     for child in children {
         let child = match child {
             Ok(child) => child,
             Err(e) => {
-                tracing::debug!(path = %grok_home.display(), error = %e, "du: home entry could not be read");
+                tracing::debug!(path = %chutes_home.display(), error = %e, "du: home entry could not be read");
                 issues.unreadable_dirs += 1;
                 continue;
             }
@@ -366,13 +366,13 @@ fn collect_report_in(grok_home: &Path, data_dirs: &[PathBuf]) -> Result<DiskUsag
         .iter()
         .filter_map(|e| e.bytes)
         .fold(root_files_bytes, u64::saturating_add);
-    let (registry, records, registry_path) = load_registry(grok_home);
-    let rows = collect_worktrees(grok_home, records, &worktree_sizes, volume);
+    let (registry, records, registry_path) = load_registry(chutes_home);
+    let rows = collect_worktrees(chutes_home, records, &worktree_sizes, volume);
     issues.merge(rows.issues);
-    let (volume_capacity_bytes, volume_available_bytes) = volume_bytes(grok_home).unzip();
+    let (volume_capacity_bytes, volume_available_bytes) = volume_bytes(chutes_home).unzip();
     Ok(DiskUsageReport {
         schema_version: SCHEMA_VERSION,
-        grok_home: grok_home.to_string_lossy().into_owned(),
+        chutes_home: chutes_home.to_string_lossy().into_owned(),
         total_bytes,
         volume_capacity_bytes,
         volume_available_bytes,
@@ -389,8 +389,8 @@ fn collect_report_in(grok_home: &Path, data_dirs: &[PathBuf]) -> Result<DiskUsag
         worktrees: rows.rows,
     })
 }
-fn load_registry(grok_home: &Path) -> (RegistryState, Vec<WorktreeRecord>, PathBuf) {
-    classify(WorktreeDb::open_read_only(grok_home))
+fn load_registry(chutes_home: &Path) -> (RegistryState, Vec<WorktreeRecord>, PathBuf) {
+    classify(WorktreeDb::open_read_only(chutes_home))
 }
 /// The arm an open failed on decides nothing: a busy writer, an IO blip, and file damage all fail the same call.
 /// The error code alone decides `Corrupt`.
@@ -437,14 +437,14 @@ struct WorktreeRows {
     outside_managed_roots: u64,
 }
 fn collect_worktrees(
-    grok_home: &Path,
+    chutes_home: &Path,
     registered: Vec<WorktreeRecord>,
     sizes: &HashMap<PathBuf, Measure>,
     volume: Volume,
 ) -> WorktreeRows {
     let mut out = WorktreeRows::default();
     let mut known: HashSet<PathBuf> = HashSet::new();
-    let roots = managed_worktree_roots(grok_home);
+    let roots = managed_worktree_roots(chutes_home);
     for rec in registered {
         let path = match dunce::canonicalize(&rec.path) {
             Ok(path) => path,
@@ -468,7 +468,7 @@ fn collect_worktrees(
             out.outside_managed_roots += 1;
         }
     }
-    for found in discover_worktrees(grok_home).found {
+    for found in discover_worktrees(chutes_home).found {
         let path = dunce::canonicalize(&found.path).unwrap_or(found.path);
         if !known.insert(path.clone()) {
             continue;

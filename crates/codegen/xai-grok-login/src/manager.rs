@@ -354,7 +354,9 @@ impl AuthManager {
                     None,
                 );
             }
-            tracing::warn!("CHUTES_BUILD_AUTH set but failed to parse as JSON, falling back to file");
+            tracing::warn!(
+                "CHUTES_BUILD_AUTH set but failed to parse as JSON, falling back to file"
+            );
         }
         let (auth, auth_read_detail, initial_disk_state) = match read_auth_json(&path) {
             Ok(map) => {

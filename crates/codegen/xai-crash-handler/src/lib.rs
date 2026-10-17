@@ -193,14 +193,14 @@ mod tests {
 
     #[test]
     fn check_previous_crash_returns_none_when_no_file() {
-        let dir = PathBuf::from("/tmp/xai-crash-handler-test-nonexistent");
+        let dir = PathBuf::from("/tmp/chutes-build-crash-handler-test-nonexistent");
         assert!(check_previous_crash(&dir).is_none());
     }
 
     #[cfg(unix)]
     fn unique_tmp_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "xai-crash-handler-{label}-{}-{}",
+            "chutes-build-crash-handler-{label}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -2458,7 +2458,11 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
         for (policy, rel_path, expected) in [
             (skill_only, ".chutes-build/skills/s/SKILL.md", whole),
             (skill_only, "sub/AGENTS.md", windowed),
-            (instruction_only, ".chutes-build/skills/s/SKILL.md", windowed),
+            (
+                instruction_only,
+                ".chutes-build/skills/s/SKILL.md",
+                windowed,
+            ),
             (instruction_only, "sub/AGENTS.md", whole),
         ] {
             let mut resources = test_resources(tmp.path());

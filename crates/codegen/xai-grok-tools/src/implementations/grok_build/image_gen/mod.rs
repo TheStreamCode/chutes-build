@@ -43,9 +43,9 @@ pub use xai_grok_tools_api::slash_commands::{
 };
 
 /// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user calls `image_gen` or
-/// `image_edit`. The model relays it to the user. The deliberate `/imagine` slash command shows the richer SuperGrok
-/// upsell modal instead; this covers the natural-language path.
-pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://chutes.ai/supergrok?referrer=grok. Do not retry this tool.";
+/// `image_edit`. The model relays it to the user. The deliberate `/imagine` slash command shows the richer
+/// paid-plan upsell modal instead; this covers the natural-language path.
+pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation isn't available on the current plan. Let the user know they can unlock image and video generation by upgrading their Chutes plan: https://chutes.ai/?_s=usage. Do not retry this tool.";
 
 /// HTTP client for xAI Imagine API. Cloned per-request; shares `Arc` state.
 #[derive(Clone)]
@@ -590,7 +590,11 @@ mod tests {
             .unwrap()
             .with_session_id("sess-42");
         let req = client
-            .post_json("https://api.chutes.ai/v1/images", &serde_json::json!({}), "tok")
+            .post_json(
+                "https://api.chutes.ai/v1/images",
+                &serde_json::json!({}),
+                "tok",
+            )
             .build()
             .unwrap();
         assert_eq!(
@@ -718,8 +722,8 @@ mod tests {
 
         match result {
             ToolOutput::Text(t) => {
-                assert!(t.text.contains("SuperGrok"), "got: {}", t.text);
-                assert!(t.text.contains("supergrok?referrer=chutes-build"));
+                assert!(t.text.contains("Chutes plan"), "got: {}", t.text);
+                assert!(t.text.contains("_s=usage"), "got: {}", t.text);
             }
             other => panic!("expected Text upsell, got {other:?}"),
         }

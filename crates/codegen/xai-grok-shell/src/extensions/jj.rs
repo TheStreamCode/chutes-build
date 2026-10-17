@@ -23,7 +23,9 @@ pub(crate) async fn try_handle(
 
         // jj has no staging area: stage/unstage are no-ops
         "chutes.ai/git/stage" => Some(to_ext_response(Ok(StageData { paths: Vec::new() }))),
-        "chutes.ai/git/stage/content" | "chutes.ai/git/unstage" => Some(to_ext_response(Ok(Empty {}))),
+        "chutes.ai/git/stage/content" | "chutes.ai/git/unstage" => {
+            Some(to_ext_response(Ok(Empty {})))
+        }
 
         "chutes.ai/git/discard" => {
             #[derive(serde::Deserialize)]

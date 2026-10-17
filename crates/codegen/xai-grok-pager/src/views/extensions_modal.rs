@@ -2528,7 +2528,8 @@ fn classify_hook_source(source_dir: &str) -> HookSourceMeta {
         };
     }
     // Project hooks
-    if source_dir.ends_with("/.chutes-build/hooks") || source_dir.contains("/.chutes-build/hooks/") {
+    if source_dir.ends_with("/.chutes-build/hooks") || source_dir.contains("/.chutes-build/hooks/")
+    {
         return HookSourceMeta {
             label: "Project hooks".into(),
             kind: HookSourceKind::Project,
@@ -4304,7 +4305,8 @@ mod tests {
     fn derive_source_label_detects_project_scoped_plugins() {
         // Regression: project-scoped `{cwd}/.chutes-build/plugins/<name>/` must label as a (non-removable) plugin, not a removable "Custom" source
         // The user grok-home branch is CHUTES_BUILD_HOME-aware; this covers the project fallback
-        let (label, is_custom) = derive_source_label("/repo/work/.chutes-build/plugins/my-plugin/hooks");
+        let (label, is_custom) =
+            derive_source_label("/repo/work/.chutes-build/plugins/my-plugin/hooks");
         assert_eq!(label, "Plugin: my-plugin");
         assert!(!is_custom);
 

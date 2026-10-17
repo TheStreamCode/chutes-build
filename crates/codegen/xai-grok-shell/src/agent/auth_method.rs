@@ -20,7 +20,8 @@ pub(crate) fn new_shared_auth_method_id(initial: Option<acp::AuthMethodId>) -> S
 // (auth needs them without pulling in shell's `ModelEntry`); re-exported here so
 // `crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, ..}` call sites keep resolving.
 pub use xai_grok_login::auth_method::{
-    LEGACY_CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_ENV_VAR, has_chutes_api_key_env, read_chutes_api_key_env,
+    CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR, has_chutes_api_key_env,
+    read_chutes_api_key_env,
 };
 
 /// Whether `chutes.api_key` should be advertised (and pushed FIRST) when building the `auth_methods` list at `initialize()` time.
@@ -342,7 +343,9 @@ pub const PREFERRED_OIDC_UNAVAILABLE: &str =
     "preferred_method=oidc but no session is available. Run `chutes-build login` to authenticate.";
 
 pub const XAI_API_KEY_METHOD_ID: &str = "chutes.api_key";
-pub(crate) fn xai_api_key_auth_method() -> acp::AuthMethod {
+/// Public so the pager can re-advertise the exact method after an interactive
+/// key entry, mirroring startup-with-key without duplicating the constructor.
+pub fn xai_api_key_auth_method() -> acp::AuthMethod {
     acp::AuthMethod::Agent(
         acp::AuthMethodAgent::new(
             acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID),
@@ -361,7 +364,9 @@ pub(crate) fn cached_token_auth_method() -> acp::AuthMethod {
             acp::AuthMethodId::new(CACHED_TOKEN_AUTH_METHOD_ID),
             "cached_token".to_string(),
         )
-        .description(Some("Cached token from ~/.chutes-build/auth.json".to_string())),
+        .description(Some(
+            "Cached token from ~/.chutes-build/auth.json".to_string(),
+        )),
     )
 }
 
@@ -381,9 +386,12 @@ pub(crate) fn grok_com_auth_method(
         None
     };
     acp::AuthMethod::Agent(
-        acp::AuthMethodAgent::new(acp::AuthMethodId::new(CHUTES_BUILD_COM_METHOD_ID), name.to_string())
-            .description(Some(format!("Sign in with {name}")))
-            .meta(meta),
+        acp::AuthMethodAgent::new(
+            acp::AuthMethodId::new(CHUTES_BUILD_COM_METHOD_ID),
+            name.to_string(),
+        )
+        .description(Some(format!("Sign in with {name}")))
+        .meta(meta),
     )
 }
 

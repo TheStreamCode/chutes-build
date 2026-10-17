@@ -73,13 +73,13 @@ impl ExporterSelection {
 /// They may only **tighten** post-init: a remote policy can force them off, never on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ContentGates {
-    /// `OTEL_LOG_USER_PROMPTS=1`: prompt text on `grok_code.user_prompt` (60 KB cap, secret-scrubbed).
+    /// `OTEL_LOG_USER_PROMPTS=1`: prompt text on `chutes_build.user_prompt` (60 KB cap, secret-scrubbed).
     pub log_user_prompts: bool,
     /// `OTEL_LOG_TOOL_DETAILS=1`: gated tool params preview / full paths / verbatim
     /// MCP, skill, and plugin names. Does **not** include full bodies.
     pub log_tool_details: bool,
     /// `OTEL_LOG_ASSISTANT_RESPONSES`: gated `response` on
-    /// `grok_code.assistant_response`. Unset follows `log_user_prompts`;
+    /// `chutes_build.assistant_response`. Unset follows `log_user_prompts`;
     /// explicit `0` keeps responses redacted while prompts stay on.
     pub log_assistant_responses: bool,
     /// `OTEL_LOG_TOOL_CONTENT=1`: full bodies (`tool_input`, `tool_output`,
@@ -731,7 +731,8 @@ mod tests {
     #[test]
     fn master_switch_alone_enables_nothing() {
         assert!(
-            ExternalOtelConfig::resolve_with(env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1")]), None).is_none()
+            ExternalOtelConfig::resolve_with(env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1")]), None)
+                .is_none()
         );
     }
 
@@ -1080,7 +1081,10 @@ mod tests {
     #[test]
     fn ca_certificate_defaults_to_none() {
         let cfg = ExternalOtelConfig::resolve_with(
-            env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp")]),
+            env(&[
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
+                ("OTEL_LOGS_EXPORTER", "otlp"),
+            ]),
             None,
         )
         .unwrap();
@@ -1240,8 +1244,10 @@ mod tests {
         assert!(!cfg.gates.log_user_prompts);
 
         // Env master switch off wins over file `enabled = true`.
-        let cfg =
-            ExternalOtelConfig::resolve_with(env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "0")]), Some(&file));
+        let cfg = ExternalOtelConfig::resolve_with(
+            env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "0")]),
+            Some(&file),
+        );
         assert!(cfg.is_none());
     }
 
@@ -1265,7 +1271,10 @@ mod tests {
     #[test]
     fn client_identity_defaults_to_none() {
         let cfg = ExternalOtelConfig::resolve_with(
-            env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp")]),
+            env(&[
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
+                ("OTEL_LOGS_EXPORTER", "otlp"),
+            ]),
             None,
         )
         .unwrap();

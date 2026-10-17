@@ -59,7 +59,10 @@ fn suggests_unique_registered_path_for_wrong_root() {
 
 #[test]
 fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
-    let mut retired = skill("retired", "/home/user/.chutes-build/skills/retired/SKILL.md");
+    let mut retired = skill(
+        "retired",
+        "/home/user/.chutes-build/skills/retired/SKILL.md",
+    );
     retired.enabled = false;
     let manager = seeded_manager(vec![
         skill("review", "/repo/.chutes-build/skills/review/SKILL.md"),
@@ -149,7 +152,10 @@ fn baseline_reload_updates_lookup_but_not_snapshot_names() {
     manager.seed(
         None,
         None,
-        vec![skill("initial", "/repo/.chutes-build/skills/initial/SKILL.md")],
+        vec![skill(
+            "initial",
+            "/repo/.chutes-build/skills/initial/SKILL.md",
+        )],
         None,
         None,
         None,
@@ -253,8 +259,14 @@ fn deduplicates_discovered_and_baseline_copies() {
 #[test]
 fn rewrites_worktree_paths_to_display_cwd_but_preserves_external_paths() {
     let mut manager = seeded_manager(vec![
-        skill("review", "/real/worktree/.chutes-build/skills/review/SKILL.md"),
-        skill("external", "/home/user/.chutes-build/skills/external/SKILL.md"),
+        skill(
+            "review",
+            "/real/worktree/.chutes-build/skills/review/SKILL.md",
+        ),
+        skill(
+            "external",
+            "/home/user/.chutes-build/skills/external/SKILL.md",
+        ),
     ]);
     manager.real_cwd_prefix = Some("/real/worktree".to_owned());
     manager.display_cwd = Some("/display/project".to_owned());

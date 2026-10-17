@@ -584,7 +584,9 @@ fn runtime_findings_merge_before_single_formatter_orders_issues_before_recommend
         },
     );
 
-    let issue = output.find("Chutes Build is using the terminal bell").unwrap();
+    let issue = output
+        .find("Chutes Build is using the terminal bell")
+        .unwrap();
     let recommendation = output.find("Recommendations").unwrap();
     assert!(issue < recommendation);
     assert!(!output.contains("No issues found."));

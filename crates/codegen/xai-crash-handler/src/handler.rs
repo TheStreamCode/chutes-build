@@ -920,7 +920,7 @@ mod tests {
             sa.sa_sigaction
         };
 
-        let dir = std::env::temp_dir().join("xai-crash-handler-test-replace");
+        let dir = std::env::temp_dir().join("chutes-build-crash-handler-test-replace");
         let _ = std::fs::create_dir_all(&dir);
         super::install(&dir, "test-version");
 
@@ -942,7 +942,7 @@ mod tests {
 
         let _guard = SIGNAL_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
-            "xai-crash-handler-test-0600-{}",
+            "chutes-build-crash-handler-test-0600-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -961,7 +961,7 @@ mod tests {
 
         let _guard = SIGNAL_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
-            "xai-crash-handler-test-tighten-{}",
+            "chutes-build-crash-handler-test-tighten-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

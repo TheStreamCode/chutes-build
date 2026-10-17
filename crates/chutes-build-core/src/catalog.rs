@@ -224,7 +224,10 @@ async fn refresh_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError
 }
 
 fn chat_model_ids(body: &CatalogResponse) -> Vec<String> {
-    chat_models(body).into_iter().map(|model| model.id).collect()
+    chat_models(body)
+        .into_iter()
+        .map(|model| model.id)
+        .collect()
 }
 
 async fn fetch_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
@@ -491,6 +494,9 @@ mod tests {
             data: vec![serde_json::json!({"id": "only"})],
         };
         assert_eq!(equivalent_model(&solo, "only", false), None);
-        assert_eq!(equivalent_model(&solo, "other", false), Some("only".to_owned()));
+        assert_eq!(
+            equivalent_model(&solo, "other", false),
+            Some("only".to_owned())
+        );
     }
 }

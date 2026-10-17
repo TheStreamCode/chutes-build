@@ -2063,7 +2063,8 @@ mod tests {
     #[test]
     fn memory_session_saved_roundtrips() {
         let update = SessionUpdate::MemorySessionSaved {
-            path: "/home/user/.chutes-build/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md".into(),
+            path: "/home/user/.chutes-build/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md"
+                .into(),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();

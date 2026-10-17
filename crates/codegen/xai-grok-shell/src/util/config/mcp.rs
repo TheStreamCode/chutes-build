@@ -1203,7 +1203,10 @@ ignore = ["~/.chutes-build/skills/noisy/SKILL.md"]
             .unwrap_or_default();
         assert_eq!(
             cfg.paths,
-            vec!["~/.chutes-build/skills", "~/.chutes-build/skills/special/SKILL.md"]
+            vec![
+                "~/.chutes-build/skills",
+                "~/.chutes-build/skills/special/SKILL.md"
+            ]
         );
         assert_eq!(cfg.ignore, vec!["~/.chutes-build/skills/noisy/SKILL.md"]);
     }

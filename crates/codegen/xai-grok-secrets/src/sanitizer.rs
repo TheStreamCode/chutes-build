@@ -470,7 +470,8 @@ mod tests {
 
     #[test]
     fn redacts_sensitive_url_query_params() {
-        let out = redact_secrets("callback https://chutes.ai/cb?code=ABC123XYZ&state=xyz789 failed");
+        let out =
+            redact_secrets("callback https://chutes.ai/cb?code=ABC123XYZ&state=xyz789 failed");
         assert!(!out.contains("ABC123XYZ"), "OAuth code leaked: {out}");
         assert!(!out.contains("xyz789"), "state leaked: {out}");
     }

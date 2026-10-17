@@ -27,8 +27,8 @@ const DROP_BATCH_SIZE: usize = 64;
 /// Build the share URL for a session.
 /// Format: https://chutes.ai/build/{sessionId}
 pub(crate) fn build_share_url(session_id: &str) -> String {
-    let base_url =
-        std::env::var("CHUTES_BUILD_CODE_WEB_URL").unwrap_or_else(|_| "https://chutes.ai".to_string());
+    let base_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
+        .unwrap_or_else(|_| "https://chutes.ai".to_string());
     format!("{}/build/{}", base_url, session_id)
 }
 

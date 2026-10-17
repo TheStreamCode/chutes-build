@@ -30,7 +30,7 @@ enum StructuredOutputStep {
     Proceed,
 }
 const TASK_ABORTED_CANCELLATION_CATEGORY: &str = "task_aborted";
-/// Outcome-specific fields of a `grok_code.turn_completed` row.
+/// Outcome-specific fields of a `chutes_build.turn_completed` row.
 struct TurnTelemetryOutcome {
     outcome: xai_grok_telemetry::events::Outcome,
     cancellation_category: Option<String>,
@@ -105,7 +105,7 @@ impl TurnTelemetryOutcome {
         }
     }
 }
-/// Emits exactly one `grok_code.turn_completed` per turn task: [`emit`](Self::emit) once the outcome
+/// Emits exactly one `chutes_build.turn_completed` per turn task: [`emit`](Self::emit) once the outcome
 /// is known, else a `task_aborted` fallback on [`Drop`] when the turn future is aborted first.
 struct TurnCompletionEmitter {
     session: Arc<SessionActor>,

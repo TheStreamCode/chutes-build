@@ -374,16 +374,18 @@ mod tests {
         // Managed floor; an env ceiling below it would make the range contradictory and naively drop both
         // The managed floor must survive
         let l = layers("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
-        let low_ceiling =
-            |var: &str| (var == "CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION").then(|| "0.2.50".to_string());
+        let low_ceiling = |var: &str| {
+            (var == "CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION").then(|| "0.2.50".to_string())
+        };
         let p = VersionPolicy::from_layers(&l, &low_ceiling);
         assert_eq!(p.required_minimum, Some(v("0.2.100")));
         assert_eq!(p.required_maximum, None);
 
         // Symmetric: a user floor can't cancel a managed ceiling.
         let l = layers("[cli]\nrequired_maximum_version = \"0.2.100\"\n", "", "");
-        let high_floor =
-            |var: &str| (var == "CHUTES_BUILD_REQUIRED_MINIMUM_VERSION").then(|| "0.2.200".to_string());
+        let high_floor = |var: &str| {
+            (var == "CHUTES_BUILD_REQUIRED_MINIMUM_VERSION").then(|| "0.2.200".to_string())
+        };
         let p = VersionPolicy::from_layers(&l, &high_floor);
         assert_eq!(p.required_maximum, Some(v("0.2.100")));
         assert_eq!(p.required_minimum, None);

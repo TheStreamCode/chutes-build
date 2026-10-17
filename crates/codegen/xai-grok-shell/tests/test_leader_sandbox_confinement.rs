@@ -12,8 +12,8 @@ async fn connect_or_spawn_refuses_when_sandbox_confinement_requested() {
 
     let env_urls = LeaderEnvUrls {
         // Guard returns before LeaderLock / socket paths touch the filesystem.
-        grok_ws_url: "wss://test.invalid/sandbox-confinement".into(),
-        grok_ws_origin: "https://test.invalid".into(),
+        ws_url: "wss://test.invalid/sandbox-confinement".into(),
+        ws_origin: "https://test.invalid".into(),
     };
 
     let err = match connect_or_spawn(

@@ -1,6 +1,6 @@
 //! Counts the tokens each context category occupies when a session starts.
 //!
-//! Token counts come from `POST {xai_api_base_url}/tokenize-text` (the model's tokenizer), not the bytes/4 `/context` heuristic.
+//! Token counts come from `POST {public_api_base_url}/tokenize-text` (the model's tokenizer), not the bytes/4 `/context` heuristic.
 //! Category texts are sent in parallel; the session-metrics event only receives the resulting counts.
 
 use super::*;
@@ -25,7 +25,7 @@ impl SessionActor {
         let texts = self.snapshot_texts().await;
         let counts = texts.item_counts();
         let tokens = tokenize_texts_parallel(
-            &tokenize_text_url(&xai_api_base_url()),
+            &tokenize_text_url(&public_api_base_url()),
             &api_key,
             model,
             texts.jobs(),
@@ -215,13 +215,13 @@ impl TokenCounts {
     }
 }
 
-fn xai_api_base_url() -> String {
+fn public_api_base_url() -> String {
     crate::config::load_effective_config()
         .ok()
         .and_then(|effective| crate::agent::config::Config::new_from_toml_cfg(&effective).ok())
-        .map(|cfg| cfg.endpoints.xai_api_base_url)
+        .map(|cfg| cfg.endpoints.public_api_base_url)
         .filter(|url| !url.is_empty())
-        .unwrap_or_else(|| crate::agent::config::EndpointsConfig::default().xai_api_base_url)
+        .unwrap_or_else(|| crate::agent::config::EndpointsConfig::default().public_api_base_url)
 }
 
 fn tokenize_text_url(base_url: &str) -> String {

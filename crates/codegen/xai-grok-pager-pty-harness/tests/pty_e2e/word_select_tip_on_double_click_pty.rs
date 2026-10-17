@@ -218,7 +218,8 @@ async fn word_select_tip_skipped_when_contextual_hint_disabled() {
 
     let binary = pager_binary().expect("resolve pager binary");
     // Pin CHUTES_BUILD_CONTEXTUAL_HINTS to empty (parsed as unset) so a value inherited from the runner's shell can't force tips on
-    let overrides: Vec<(String, String)> = vec![("CHUTES_BUILD_CONTEXTUAL_HINTS".into(), String::new())];
+    let overrides: Vec<(String, String)> =
+        vec![("CHUTES_BUILD_CONTEXTUAL_HINTS".into(), String::new())];
     let env_refs: Vec<(&str, &str)> = overrides
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))

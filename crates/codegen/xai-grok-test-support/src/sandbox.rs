@@ -529,7 +529,13 @@ fn diagnostic_value_is_sensitive(key: &OsStr) -> bool {
         || is_endpoint_key(&key)
         || matches!(
             key.to_ascii_uppercase().as_str(),
-            "HOME" | "USERPROFILE" | "CHUTES_BUILD_HOME" | "TMPDIR" | "TMP" | "TEMP" | "GIT_CONFIG_GLOBAL"
+            "HOME"
+                | "USERPROFILE"
+                | "CHUTES_BUILD_HOME"
+                | "TMPDIR"
+                | "TMP"
+                | "TEMP"
+                | "GIT_CONFIG_GLOBAL"
         )
 }
 
@@ -900,7 +906,10 @@ mod tests {
             env_value(&sandbox, "NO_PROXY").as_deref(),
             Some(OsStr::new("override.invalid"))
         );
-        assert_eq!(env_value(&sandbox, "CHUTES_BUILD_DISABLE_AUTOUPDATER"), None);
+        assert_eq!(
+            env_value(&sandbox, "CHUTES_BUILD_DISABLE_AUTOUPDATER"),
+            None
+        );
     }
 
     #[test]

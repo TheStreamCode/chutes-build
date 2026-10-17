@@ -843,7 +843,11 @@ mod tests {
         fs::write(nested.join("rules/home.md"), "nested-home-rule").unwrap();
         fs::write(repo.join("AGENTS.md"), "repo-named").unwrap();
         fs::write(nested.join("AGENTS.md"), "nested-named").unwrap();
-        fs::write(nested.join(".chutes-build/rules/project.md"), "nested-project-rule").unwrap();
+        fs::write(
+            nested.join(".chutes-build/rules/project.md"),
+            "nested-project-rule",
+        )
+        .unwrap();
 
         let configs = read_agents_config_with_roots(
             nested.to_str().unwrap(),
@@ -878,10 +882,18 @@ mod tests {
         fs::create_dir_all(repo.join(".claude/rules")).unwrap();
         init_git_repo(&repo);
         fs::write(repo.join("rules/home.md"), "home-rule").unwrap();
-        fs::write(repo.join(".chutes-build/rules/project.md"), "project-grok-rule").unwrap();
+        fs::write(
+            repo.join(".chutes-build/rules/project.md"),
+            "project-grok-rule",
+        )
+        .unwrap();
         fs::write(repo.join(".claude/rules/project.md"), "project-claude-rule").unwrap();
         fs::create_dir_all(repo.join(".chutes-build/.chutes-build/rules")).unwrap();
-        fs::write(repo.join(".chutes-build/.chutes-build/rules/doubled.md"), "doubled").unwrap();
+        fs::write(
+            repo.join(".chutes-build/.chutes-build/rules/doubled.md"),
+            "doubled",
+        )
+        .unwrap();
 
         let configs = read_agents_config_with_roots(
             repo.to_str().unwrap(),
@@ -1178,7 +1190,10 @@ mod tests {
             (grok_home.join("rules/global.md"), "custom-home-body"),
             (home.join(".claude/rules/global.md"), "claude-body"),
             (home.join(".cursor/rules/global.md"), "cursor-body"),
-            (repo.join(".chutes-build/rules/project.md"), "grok-project-body"),
+            (
+                repo.join(".chutes-build/rules/project.md"),
+                "grok-project-body",
+            ),
             (repo.join(".claude/rules/project.md"), "claude-project-body"),
             (repo.join(".cursor/rules/project.md"), "cursor-project-body"),
         ] {

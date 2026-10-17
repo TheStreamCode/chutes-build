@@ -1752,7 +1752,14 @@ mod tests {
             crate::scrollback::text_selection::ResolvedSelectionBoundaries::default();
         for (entry_idx, text, hit_col, prefix, suffix, expected) in [
             (0, "foo rest", 0, "   ", "", "foo"),
-            (1, "rest https://chutes.ai", 5, "", "   ", "https://chutes.ai"),
+            (
+                1,
+                "rest https://chutes.ai",
+                5,
+                "",
+                "   ",
+                "https://chutes.ai",
+            ),
         ] {
             let line = ResolvedSelectableLine {
                 entry_idx,

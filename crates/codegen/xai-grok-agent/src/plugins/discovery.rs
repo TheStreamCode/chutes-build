@@ -1541,7 +1541,11 @@ mod tests {
         // The plugin is trusted iff the folder-trust verdict (project_trusted) allows it
         // The plugin is found by name so any user-scoped plugins on the test host are irrelevant
         let tmp = tempfile::tempdir().unwrap();
-        let plugin_dir = tmp.path().join(".chutes-build").join("plugins").join("proj-mcp");
+        let plugin_dir = tmp
+            .path()
+            .join(".chutes-build")
+            .join("plugins")
+            .join("proj-mcp");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         std::fs::write(plugin_dir.join("plugin.json"), r#"{"name": "proj-mcp"}"#).unwrap();
         std::fs::write(plugin_dir.join(".mcp.json"), r#"{"mcpServers":{}}"#).unwrap();

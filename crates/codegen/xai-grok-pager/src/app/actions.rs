@@ -12,6 +12,28 @@ use agent_client_protocol as acp;
 use std::num::NonZeroU64;
 use xai_grok_shell::sampling::types::ReasoningEffort;
 use xai_grok_shell::session::unified_list::SessionKind;
+
+/// A secret payload inside [`Action`]/[`Effect`]: `Debug` renders
+/// `[REDACTED]` so a pasted API key never lands in logs or panic output.
+/// Read it through [`RedactedSecret::expose`] at the single use site.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RedactedSecret(String);
+
+impl RedactedSecret {
+    pub fn new(secret: String) -> Self {
+        Self(secret)
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for RedactedSecret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
 /// Typed error for model switch failures.
 /// Replaces the raw `String` in `TaskResult::SwitchModelComplete` so dispatch can match on the variant instead of parsing strings.
 #[derive(Debug, Clone)]
@@ -80,7 +102,7 @@ pub enum Action {
     DeleteCurrentSessionAnswered {
         confirmed: bool,
     },
-    /// Open grok.com in the browser for SuperGrok subscription upsell.
+    /// Open the plan/credits page in the browser for the subscription upsell.
     OpenSupergrokUrl,
     /// Re-check subscription status via the shell's `chutes.ai/auth/check_subscription`.
     CheckSubscription,
@@ -90,7 +112,7 @@ pub enum Action {
     RetryCreditLimitPrompt,
     /// Open a semantic scrollback link.
     OpenLink(crate::render::osc8::LinkTarget),
-    /// Open grok.com managed connectors, appending session teamId when set.
+    /// Open chutes.ai managed connectors, appending session teamId when set.
     OpenManagedConnectors,
     /// Cycle to the next visible link (or highlight the first if none selected).
     OpenNextLink,
@@ -640,6 +662,12 @@ pub enum Action {
     CancelLogin,
     /// User submitted a manually-pasted auth token (loopback mode).
     SubmitAuthCode(String),
+    /// User chose API-key entry on the welcome screen (API-key-only builds).
+    EnterApiKey,
+    /// User submitted a pasted Chutes API key for validation.
+    SubmitApiKey(RedactedSecret),
+    /// User backed out of API-key entry to the welcome menu.
+    CancelApiKeyEntry,
     /// Copy the auth URL to the clipboard during authentication.
     CopyAuthUrl,
     /// Show the raw auth URL with mouse capture disabled for manual copy.
@@ -1792,6 +1820,11 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
+    /// Validate a pasted Chutes API key against the account API.
+    ValidateApiKey {
+        request_seq: u64,
+        key: RedactedSecret,
+    },
     /// Fetch MCP server list from the shell (chutes.ai/mcp/list).
     FetchMcpsList {
         agent_id: AgentId,
@@ -2716,6 +2749,16 @@ pub enum TaskResult {
         request_seq: u64,
         error: String,
     },
+    /// A pasted Chutes API key validated: save it and finish startup auth.
+    ApiKeyAccepted {
+        request_seq: u64,
+    },
+    /// A pasted Chutes API key was rejected (wrong key) or unverifiable
+    /// (network); the message already distinguishes the two.
+    ApiKeyRejected {
+        request_seq: u64,
+        error: String,
+    },
     /// Auth URL is ready (from the provider).
     AuthUrlReady {
         request_seq: u64,
@@ -2959,9 +3002,15 @@ pub enum TaskResult {
         nonce: u64,
     },
     /// `/account` summary fetched. Account data is session-independent: only the agent must exist.
-    AccountComplete { agent_id: AgentId, text: String },
+    AccountComplete {
+        agent_id: AgentId,
+        text: String,
+    },
     /// `/account` fetch failed.
-    AccountFailed { agent_id: AgentId, error: String },
+    AccountFailed {
+        agent_id: AgentId,
+        error: String,
+    },
     /// Feedback submitted successfully (fire-and-forget).
     /// A modal-origin completion only takes the consent parked for its exact submission; anything else is stale and a no-op.
     FeedbackComplete {

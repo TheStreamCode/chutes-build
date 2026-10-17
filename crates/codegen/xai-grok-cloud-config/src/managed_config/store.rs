@@ -578,8 +578,13 @@ pub fn resolve_deployment_key() -> Option<String> {
                 .as_str()
                 .map(str::to_owned)
         });
-    xai_grok_config::resolve_string_flag(None, "CHUTES_BUILD_DEPLOYMENT_KEY", config_val.as_deref(), None)
-        .map(|resolved| resolved.value)
+    xai_grok_config::resolve_string_flag(
+        None,
+        "CHUTES_BUILD_DEPLOYMENT_KEY",
+        config_val.as_deref(),
+        None,
+    )
+    .map(|resolved| resolved.value)
 }
 
 /// Deterministic so the same key matches its marker; the raw key is never written to disk.

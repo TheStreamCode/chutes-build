@@ -121,7 +121,9 @@ impl xai_tool_runtime::Tool for TranscribeAudioTool {
             fs = res.require::<FileSystem>()?.0.clone();
         }
         let joined = resolve_model_path(&cwd, display_cwd.as_deref(), &input.path);
-        let path = crate::util::fs::try_canonicalize(&joined).await.unwrap_or(joined);
+        let path = crate::util::fs::try_canonicalize(&joined)
+            .await
+            .unwrap_or(joined);
         let audio_bytes = fs.read_file(&path).await.map_err(|error| {
             execution_error(
                 "transcribe_audio",
@@ -158,10 +160,8 @@ impl xai_tool_runtime::Tool for TranscribeAudioTool {
             return_timestamps: input.timestamps.unwrap_or(false),
             max_new_tokens: None,
         };
-        let audio_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &audio_bytes,
-        );
+        let audio_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &audio_bytes);
         let result = transcribe(&client, &base_url, &audio_b64, &options)
             .await
             .map_err(|error| execution_error("transcribe_audio", error))?;

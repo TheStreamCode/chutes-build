@@ -636,7 +636,9 @@ fn equivalent_media_models(
                 first_string(record, &["standard_template", "template"])
                     .as_deref()
                     .unwrap_or_default(),
-                first_string(record, &["tagline"]).as_deref().unwrap_or_default(),
+                first_string(record, &["tagline"])
+                    .as_deref()
+                    .unwrap_or_default(),
                 record.get("cords").unwrap_or(&serde_json::Value::Null)
             );
             if infer_kind(&searchable).is_some_and(|found| found == kind.as_str()) {
@@ -1991,8 +1993,6 @@ mod tests {
             equivalent_media_models(&catalog, "missing", MediaKind::Video),
             vec!["clip-video".to_owned()]
         );
-        assert!(
-            equivalent_media_models(&catalog, "new-image", MediaKind::Music).is_empty()
-        );
+        assert!(equivalent_media_models(&catalog, "new-image", MediaKind::Music).is_empty());
     }
 }

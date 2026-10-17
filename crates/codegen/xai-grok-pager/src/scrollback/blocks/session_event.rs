@@ -987,10 +987,7 @@ mod tests {
                 || msg.to_lowercase().contains("credential"),
             "must explain it is an auth problem: {msg}"
         );
-        assert!(
-            msg.contains("key"),
-            "must point at the API key: {msg}"
-        );
+        assert!(msg.contains("key"), "must point at the API key: {msg}");
     }
 
     #[test]

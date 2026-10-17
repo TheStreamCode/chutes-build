@@ -610,7 +610,8 @@ async fn re_mint_hands_the_prior_token_back_to_the_command() {
     let provider = AuthProviderRef::new(
         "test-handback".to_owned(),
         AuthProviderConfig {
-            command: "printf 'seen-%s' \"${CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN:-none}\"".to_owned(),
+            command: "printf 'seen-%s' \"${CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN:-none}\""
+                .to_owned(),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,

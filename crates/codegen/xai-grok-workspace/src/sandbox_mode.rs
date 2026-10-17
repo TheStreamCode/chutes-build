@@ -285,8 +285,8 @@ pub fn write_workspace_sandbox_mode_in(
         path: workspace_root.join(".chutes-build"),
         source,
     };
-    let dir =
-        HeldDir::open(&anchor, &anchor.join(".chutes-build"), FileOwner::Any, true).map_err(create_dir)?;
+    let dir = HeldDir::open(&anchor, &anchor.join(".chutes-build"), FileOwner::Any, true)
+        .map_err(create_dir)?;
     // The root may have been relinked since the check above; the held handle cannot be
     if dir.is(grok_home).map_err(create_dir)? {
         return Err(SandboxModeWriteError::UserLayer { path });

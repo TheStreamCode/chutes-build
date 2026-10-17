@@ -144,7 +144,9 @@ mod tests {
         // SAFETY: process-global env mutation, restored before return.
         let prior = std::env::var("CHUTES_BUILD_MDM_NO_EXPAND_TEST").ok();
         unsafe { std::env::set_var("CHUTES_BUILD_MDM_NO_EXPAND_TEST", "attacker") };
-        let decoded = decode_managed_toml(&b64("base_url = \"${CHUTES_BUILD_MDM_NO_EXPAND_TEST}/v1\"\n"));
+        let decoded = decode_managed_toml(&b64(
+            "base_url = \"${CHUTES_BUILD_MDM_NO_EXPAND_TEST}/v1\"\n",
+        ));
         unsafe {
             match prior {
                 Some(p) => std::env::set_var("CHUTES_BUILD_MDM_NO_EXPAND_TEST", p),

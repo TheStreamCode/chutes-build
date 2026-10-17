@@ -107,8 +107,8 @@ their version-specific value syntax.
 | `export <SESSION_ID> [OUTPUT]` | Export a local transcript as Markdown | `--clipboard` conflicts with an output path |
 | `inspect` | Show resolved configuration | `--json` |
 | `leader` | Manage local shared leader processes | `list [--json]`, `info [--pid PID] [--json]`, `kill` |
-| `login` | Store a Chutes API key | `--api-key-stdin` for protected automation |
-| `logout` | Clear cached Chutes credentials | No subcommands |
+| `login` | Validate and save a Chutes API key | Reads piped stdin for automation; `--oauth`/`--device-auth` refused (no account sign-in) |
+| `logout` | Delete the saved Chutes API key | No subcommands |
 | `mcp` | Manage MCP server configuration | `list`, `add`, `remove`, `doctor` |
 | `memory` | Manage local cross-session memory | `clear [--workspace|--global|--all] [--yes]` |
 | `models` | List the resolved model catalog | `--json` |

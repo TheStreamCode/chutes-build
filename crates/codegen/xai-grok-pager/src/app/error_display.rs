@@ -979,7 +979,7 @@ mod tests {
 
     #[test]
     fn retry_activity_label_uses_request_failure_headline() {
-        let dns = "request error: error sending request for url (https://api.x.ai/v1/responses): client error (Connect): dns error: failed to lookup address information: Temporary failure in name resolution";
+        let dns = "request error: error sending request for url (https://llm.chutes.ai/v1/responses): client error (Connect): dns error: failed to lookup address information: Temporary failure in name resolution";
         assert_eq!(
             format_retry_activity_label(8, 10, dns, None, RetryLabelStyle::Status),
             "Connection failed | Retrying (attempt 8)..."
@@ -1034,7 +1034,7 @@ mod tests {
             format_request_failure(
                 None,
                 Some(WireErrorType::Other),
-                "error sending request for url (https://api.x.ai)"
+                "error sending request for url (https://llm.chutes.ai)"
             )
             .headline,
             "Request failed"

@@ -33,14 +33,15 @@ not fetch an executable from a post-install script.
 
 ### API key
 
-Chutes documents API keys as the fastest way to get started. Create a scoped
-key in the Chutes dashboard and provide it through one of these paths:
+Chutes documents API keys as the fastest way to get started. Create a key
+at <https://chutes.ai/app/settings/api-keys> and provide it through one
+of these paths:
 
-- run `/apikey` in an interactive session for setup instructions; or
-- set `CHUTES_API_KEY` for the current process.
-
-There is no login step: `chutes-build login` only prints this same setup
-guidance.
+- run `chutes-build login` once: it validates the key and saves it for
+  future runs (pipe it via stdin for automation); or
+- paste it on the welcome screen when starting without a key; or
+- set `CHUTES_API_KEY` for the current process (an explicit env key
+  always wins over the saved one).
 
 ```powershell
 $env:CHUTES_API_KEY = "your-api-key"
@@ -48,15 +49,15 @@ chutes-build
 ```
 
 Avoid command-line arguments for secrets because process listings and shell
-history may expose them.
+history may expose them. `chutes-build logout` deletes the saved key.
 
 ### No browser login
 
 There is no account sign-in: no browser or device-code flow, no login
-screen, no session token. `chutes-build login`, `chutes-build logout`, `/login`,
-and `/logout` only print this same setup guidance (the CLI forms exit
-non-zero). Starting without a key shows a setup screen naming `CHUTES_API_KEY`
-instead of a login option.
+screen, no session token. `/login` and `/logout` stay unavailable, and
+`login --oauth` / `login --device-auth` are refused. Starting without a
+key shows a setup screen where you can enter the key inline — never a
+login option that can only fail.
 
 ## First session
 

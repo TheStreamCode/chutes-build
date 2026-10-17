@@ -372,7 +372,7 @@ pub struct RemoteSettings {
     pub subscription_watch_interval_secs: Option<u64>,
     #[serde(default)]
     pub writeback_enabled: Option<bool>,
-    /// OAuth2 provider issuer URL (e.g., "https://auth.x.ai").
+    /// OAuth2 provider issuer URL (e.g., "https://api.chutes.ai").
     /// When present together with `oauth2_client_id`, the client uses the OAuth2 authorization code flow.
     /// Remote settings control it so the rollout can be gradual.
     #[serde(default)]
@@ -380,9 +380,8 @@ pub struct RemoteSettings {
     /// OAuth2 client_id for the CLI. It pairs with `oauth2_issuer`.
     #[serde(default)]
     pub oauth2_client_id: Option<String>,
-    /// When `Some(true)`, enables grok's default OAuth2 (xAI auth.x.ai).
-    /// Enterprise OIDC (user's own IdP via `oidc` config) always wins.
-    /// The `--oauth` CLI flag overrides it.
+    /// Legacy upstream flag; currently unconsumed (kept so older servers' payloads still parse).
+    /// First-party auth is the Chutes API key; enterprise OIDC (user's own IdP via `oidc` config) wins where offered.
     #[serde(default)]
     pub grok_oauth_enabled: Option<bool>,
     #[serde(default)]

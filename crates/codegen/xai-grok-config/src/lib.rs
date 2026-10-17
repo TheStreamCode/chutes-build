@@ -71,7 +71,8 @@ pub use display_refresh::DisplayRefreshSettings;
 pub use distribution::{Capability, Distribution};
 pub use endpoints::{CLI_CHAT_PROXY_BASE_URL_DEFAULT, EndpointsConfig};
 pub use env_overlay::{
-    CHUTES_BUILD_CONFIG_ENV, CHUTES_BUILD_CONFIG_PATH_ENV, OverlaySource, ResolvedOverlay, resolved_env_overlay,
+    CHUTES_BUILD_CONFIG_ENV, CHUTES_BUILD_CONFIG_PATH_ENV, OverlaySource, ResolvedOverlay,
+    resolved_env_overlay,
 };
 
 #[cfg(unix)]

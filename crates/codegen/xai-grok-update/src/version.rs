@@ -10,7 +10,7 @@ use xai_grok_shell::env::GrokBuildEnvironment;
 use xai_grok_shell::util::grok_home::grok_home;
 
 const TTL_SECONDS_BEFORE_AUTO_UPDATE: Duration = Duration::from_secs(60 * 30);
-const NPM_PACKAGE: &str = "@xai-official/grok";
+const NPM_PACKAGE: &str = "chutes-build";
 pub const GH_RELEASE_REPO: &str = "TheStreamCode/chutes-build";
 
 /// Primary CLI base URL: Cloudflare-fronted chutes.ai endpoint with edge caching for binaries and origin-respecting no-cache for channel pointers.

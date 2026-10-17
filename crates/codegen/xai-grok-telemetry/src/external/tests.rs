@@ -223,28 +223,28 @@ fn metric_attr_keys_are_pinned() {
 fn event_names_are_pinned() {
     use schema::ExternalEventName as E;
     let expected: &[(E, &str)] = &[
-        (E::SessionStart, "grok_code.session_start"),
-        (E::SessionEnd, "grok_code.session_end"),
-        (E::UserPrompt, "grok_code.user_prompt"),
-        (E::TurnCompleted, "grok_code.turn_completed"),
-        (E::ApiRequest, "grok_code.api_request"),
-        (E::ApiError, "grok_code.api_error"),
-        (E::ToolResult, "grok_code.tool_result"),
-        (E::ToolDecision, "grok_code.tool_decision"),
-        (E::McpServerConnection, "grok_code.mcp_server_connection"),
+        (E::SessionStart, "chutes_build.session_start"),
+        (E::SessionEnd, "chutes_build.session_end"),
+        (E::UserPrompt, "chutes_build.user_prompt"),
+        (E::TurnCompleted, "chutes_build.turn_completed"),
+        (E::ApiRequest, "chutes_build.api_request"),
+        (E::ApiError, "chutes_build.api_error"),
+        (E::ToolResult, "chutes_build.tool_result"),
+        (E::ToolDecision, "chutes_build.tool_decision"),
+        (E::McpServerConnection, "chutes_build.mcp_server_connection"),
         (
             E::PermissionModeChanged,
-            "grok_code.permission_mode_changed",
+            "chutes_build.permission_mode_changed",
         ),
-        (E::SkillActivated, "grok_code.skill_activated"),
-        (E::PluginLoaded, "grok_code.plugin_loaded"),
-        (E::Compaction, "grok_code.compaction"),
-        (E::Subagent, "grok_code.subagent"),
-        (E::Auth, "grok_code.auth"),
-        (E::InternalError, "grok_code.internal_error"),
-        (E::ModelSwitched, "grok_code.model_switched"),
-        (E::ContextualTip, "grok_code.contextual_tip"),
-        (E::AssistantResponse, "grok_code.assistant_response"),
+        (E::SkillActivated, "chutes_build.skill_activated"),
+        (E::PluginLoaded, "chutes_build.plugin_loaded"),
+        (E::Compaction, "chutes_build.compaction"),
+        (E::Subagent, "chutes_build.subagent"),
+        (E::Auth, "chutes_build.auth"),
+        (E::InternalError, "chutes_build.internal_error"),
+        (E::ModelSwitched, "chutes_build.model_switched"),
+        (E::ContextualTip, "chutes_build.contextual_tip"),
+        (E::AssistantResponse, "chutes_build.assistant_response"),
     ];
     assert_eq!(expected.len(), <E as strum::EnumCount>::COUNT);
     for (variant, name) in expected {
@@ -354,7 +354,7 @@ fn session_start_snapshot_counts_not_names() {
     let Some(ev) = events.first() else {
         panic!("expected an event: {events:?}");
     };
-    assert_eq!(ev.0, "grok_code.session_start");
+    assert_eq!(ev.0, "chutes_build.session_start");
     let mut keys = attr_keys(ev);
     keys.sort();
     assert_eq!(
@@ -396,7 +396,7 @@ fn session_new_increments_session_count_only() {
     );
     assert!(exported_events(&stream).is_empty(), "metric-only mapping");
     let names = exported_metric_names(&stream);
-    assert_eq!(names, vec!["grok_code.session.count".to_owned()]);
+    assert_eq!(names, vec!["chutes_build.session.count".to_owned()]);
 }
 
 #[test]
@@ -412,7 +412,7 @@ fn session_create_timeout_emits_the_timeout_counter() {
     );
     assert!(exported_events(&stream).is_empty(), "metric-only mapping");
     assert_eq!(
-        vec!["grok_code.session.create_timeout".to_owned()],
+        vec!["chutes_build.session.create_timeout".to_owned()],
         exported_metric_names(&stream)
     );
 }
@@ -443,8 +443,8 @@ fn agent_connect_timeout_emits_phase_histogram_and_timeout_counter() {
     assert_eq!(
         names,
         vec![
-            "grok_code.startup.phase_duration".to_owned(),
-            "grok_code.startup.timeout".to_owned(),
+            "chutes_build.startup.phase_duration".to_owned(),
+            "chutes_build.startup.timeout".to_owned(),
         ]
     );
 }
@@ -505,7 +505,7 @@ fn startup_completed_records_the_total_histogram_only() {
     assert!(exported_events(&stream).is_empty());
     assert_eq!(
         exported_metric_names(&stream),
-        vec!["grok_code.startup.total".to_owned()]
+        vec!["chutes_build.startup.total".to_owned()]
     );
 }
 
@@ -538,12 +538,15 @@ fn prompt_latency(ttft_ms: Option<u64>, ttfm_ms: Option<u64>) -> events::PromptL
     }
 }
 
-/// The `model` attribute on the first `grok_code.turn.ttft` histogram datapoint, if present.
+/// The `model` attribute on the first `chutes_build.turn.ttft` histogram datapoint, if present.
 fn turn_ttft_metric_model(stream: &TestStream) -> Option<String> {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     for rm in &stream.metrics.get_finished_metrics().unwrap() {
         for sm in rm.scope_metrics() {
-            for m in sm.metrics().filter(|m| m.name() == "grok_code.turn.ttft") {
+            for m in sm
+                .metrics()
+                .filter(|m| m.name() == "chutes_build.turn.ttft")
+            {
                 if let AggregatedMetrics::U64(MetricData::Histogram(hist)) = m.data() {
                     for dp in hist.data_points() {
                         for kv in dp.attributes() {
@@ -569,8 +572,8 @@ fn prompt_latency_records_ttft_ttfm_histograms_only() {
     assert_eq!(
         names,
         vec![
-            "grok_code.turn.ttfm".to_owned(),
-            "grok_code.turn.ttft".to_owned()
+            "chutes_build.turn.ttfm".to_owned(),
+            "chutes_build.turn.ttft".to_owned()
         ]
     );
     assert_eq!(
@@ -583,14 +586,14 @@ fn prompt_latency_records_ttft_ttfm_histograms_only() {
     emit_event_into(&ttft_only, &prompt_latency(Some(120), None));
     assert_eq!(
         exported_metric_names(&ttft_only),
-        vec!["grok_code.turn.ttft".to_owned()]
+        vec!["chutes_build.turn.ttft".to_owned()]
     );
 
     let ttfm_only = build(gates_off());
     emit_event_into(&ttfm_only, &prompt_latency(None, Some(450)));
     assert_eq!(
         exported_metric_names(&ttfm_only),
-        vec!["grok_code.turn.ttfm".to_owned()]
+        vec!["chutes_build.turn.ttfm".to_owned()]
     );
 
     let neither = build(gates_off());
@@ -624,14 +627,14 @@ fn api_request_snapshot_and_token_usage() {
     let Some(ev) = events.first() else {
         panic!("expected an event: {events:?}");
     };
-    assert_eq!(ev.0, "grok_code.api_request");
+    assert_eq!(ev.0, "chutes_build.api_request");
     assert_eq!(attr(ev, "input_tokens").as_deref(), Some("100"));
     assert_eq!(attr(ev, "output_tokens").as_deref(), Some("50"));
     assert_eq!(attr(ev, "reasoning_tokens").as_deref(), Some("25"));
     assert_eq!(attr(ev, "cache_read_tokens"), None);
     assert_eq!(
         exported_metric_names(&stream),
-        vec!["grok_code.token.usage"]
+        vec!["chutes_build.token.usage"]
     );
 }
 
@@ -658,14 +661,14 @@ fn api_request_cost_and_cache_creation_export_attrs_and_metrics() {
     let Some(ev) = exported.first() else {
         panic!("expected an exported event");
     };
-    assert_eq!(ev.0, "grok_code.api_request");
+    assert_eq!(ev.0, "chutes_build.api_request");
     assert_eq!(attr(ev, "cache_creation_tokens").as_deref(), Some("40"));
     assert_eq!(attr(ev, "cost_usd_micros").as_deref(), Some("500000"));
     let mut names = exported_metric_names(&stream);
     names.sort();
     assert_eq!(
         names,
-        vec!["grok_code.cost.usage", "grok_code.token.usage"],
+        vec!["chutes_build.cost.usage", "chutes_build.token.usage"],
         "cost increments cost.usage; cache_creation rides token.usage"
     );
 }
@@ -715,7 +718,10 @@ fn one_failed_turn_increments_error_count_exactly_once() {
         .map(|e| e.0.clone())
         .collect();
     assert_eq!(
-        names.iter().filter(|n| *n == "grok_code.api_error").count(),
+        names
+            .iter()
+            .filter(|n| *n == "chutes_build.api_error")
+            .count(),
         2
     );
     // error.count is incremented exactly once
@@ -726,7 +732,7 @@ fn one_failed_turn_increments_error_count_exactly_once() {
         .iter()
         .flat_map(|rm| rm.scope_metrics())
         .flat_map(|s| s.metrics())
-        .filter(|m| m.name() == "grok_code.error.count")
+        .filter(|m| m.name() == "chutes_build.error.count")
         .map(|m| match m.data() {
             opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(
                 opentelemetry_sdk::metrics::data::MetricData::Sum(sum),
@@ -758,7 +764,10 @@ fn turn_error_increments_error_count() {
     );
     let mut names = exported_metric_names(&stream);
     names.sort();
-    assert_eq!(names, vec!["grok_code.error.count", "grok_code.turn.count"]);
+    assert_eq!(
+        names,
+        vec!["chutes_build.error.count", "chutes_build.turn.count"]
+    );
 }
 
 #[test]
@@ -784,7 +793,7 @@ fn turn_completed_carries_event_session_id_without_ctx() {
     let events = exported_events(&stream);
     let event = events
         .iter()
-        .find(|(name, _)| name == "grok_code.turn_completed")
+        .find(|(name, _)| name == "chutes_build.turn_completed")
         .expect("turn_completed exported");
     assert_eq!(attr(event, "session.id").as_deref(), Some("sess-abort"));
     assert_eq!(attr(event, "outcome").as_deref(), Some("cancelled"));
@@ -818,12 +827,15 @@ fn tool_result_hook_rewrote_is_content_free() {
     }
 }
 
-/// The `model` attribute on the first `grok_code.tool.usage` datapoint, if present.
+/// The `model` attribute on the first `chutes_build.tool.usage` datapoint, if present.
 fn tool_usage_metric_model(stream: &TestStream) -> Option<String> {
     use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
     for rm in &stream.metrics.get_finished_metrics().unwrap() {
         for sm in rm.scope_metrics() {
-            for m in sm.metrics().filter(|m| m.name() == "grok_code.tool.usage") {
+            for m in sm
+                .metrics()
+                .filter(|m| m.name() == "chutes_build.tool.usage")
+            {
                 if let AggregatedMetrics::U64(MetricData::Sum(sum)) = m.data() {
                     for dp in sum.data_points() {
                         for kv in dp.attributes() {
@@ -853,7 +865,7 @@ fn tool_result_gates_off_collapses_and_reduces() {
     let Some(ev) = events.first() else {
         panic!("expected an event: {events:?}");
     };
-    assert_eq!(ev.0, "grok_code.tool_result");
+    assert_eq!(ev.0, "chutes_build.tool_result");
     assert_eq!(attr(ev, "tool_name").as_deref(), Some("mcp_tool"));
     assert_eq!(attr(ev, "model").as_deref(), Some("grok"));
     assert_eq!(
@@ -941,7 +953,7 @@ fn user_prompt_gates_off_drops_text() {
     let Some(ev) = events.first() else {
         panic!("expected an event: {events:?}");
     };
-    assert_eq!(ev.0, "grok_code.user_prompt");
+    assert_eq!(ev.0, "chutes_build.user_prompt");
     assert_eq!(attr(ev, "prompt_length").as_deref(), Some("26"));
     // screen_mode is ungated session metadata, not prompt content.
     assert_eq!(attr(ev, "screen_mode").as_deref(), Some("minimal"));
@@ -1043,7 +1055,7 @@ fn mcp_connection_collapses_server_name_by_default() {
     let Some(ev) = events.first() else {
         panic!("expected an event: {events:?}");
     };
-    assert_eq!(ev.0, "grok_code.mcp_server_connection");
+    assert_eq!(ev.0, "chutes_build.mcp_server_connection");
     assert_eq!(attr(ev, "status").as_deref(), Some("failed"));
     assert_eq!(attr(ev, "mcp_server.name").as_deref(), Some("mcp_server"));
     assert_eq!(attr(ev, "error_type").as_deref(), Some("timeout"));
@@ -1125,7 +1137,7 @@ fn tool_decision_snapshot() {
     let Some(ev) = events.first() else {
         panic!("expected an event: {events:?}");
     };
-    assert_eq!(ev.0, "grok_code.tool_decision");
+    assert_eq!(ev.0, "chutes_build.tool_decision");
     assert_eq!(attr(ev, "tool_name").as_deref(), Some("run_terminal_cmd"));
     assert_eq!(attr(ev, "decision").as_deref(), Some("deny"));
     assert_eq!(attr(ev, "access_kind").as_deref(), Some("bash"));
@@ -1133,7 +1145,7 @@ fn tool_decision_snapshot() {
     assert_eq!(attr(ev, "source").as_deref(), Some("user_reject"));
     assert_eq!(
         exported_metric_names(&stream),
-        vec!["grok_code.tool.decision"]
+        vec!["chutes_build.tool.decision"]
     );
     for key in [
         "manager_prompt_attempted",
@@ -1262,7 +1274,7 @@ fn contextual_tip_maps_every_tip_and_action() {
         let Some(ev) = events.first() else {
             panic!("expected an event: {events:?}");
         };
-        assert_eq!(ev.0, "grok_code.contextual_tip");
+        assert_eq!(ev.0, "chutes_build.contextual_tip");
         assert_eq!(attr(ev, "tip").as_deref(), Some(tip_label));
         assert_eq!(attr(ev, "action").as_deref(), Some(action_label));
     }
@@ -1783,7 +1795,7 @@ fn assistant_response_tool_only_omits_response() {
     let Some(ev) = exported.first() else {
         panic!("expected an exported event");
     };
-    assert_eq!(ev.0, "grok_code.assistant_response");
+    assert_eq!(ev.0, "chutes_build.assistant_response");
     assert_eq!(attr(ev, "response_length").as_deref(), Some("0"));
     assert_eq!(attr(ev, "response"), None);
 }
@@ -1832,7 +1844,7 @@ fn assistant_response_with_url_does_not_drop_at_validator() {
     let Some(ev) = exported.first() else {
         panic!("expected an exported event");
     };
-    assert_eq!(ev.0, "grok_code.assistant_response");
+    assert_eq!(ev.0, "chutes_build.assistant_response");
     let response = attr(ev, "response").expect("gated response");
     assert!(
         response.contains("https://example.com"),
@@ -1888,7 +1900,7 @@ fn validating_metric_exporter_drops_export_on_bad_attr_key() {
         .as_ref()
         .unwrap()
         .meter(schema::SCOPE_NAME);
-    let rogue = meter.u64_counter("grok_code.session.count").build();
+    let rogue = meter.u64_counter("chutes_build.session.count").build();
     rogue.add(
         1,
         &[opentelemetry::KeyValue::new("prompt", "CANARY_METRIC_LEAK")],
@@ -1923,7 +1935,7 @@ fn redacting_log_exporter_drops_record_with_closed_gate_key() {
     use opentelemetry::logs::{LogRecord as _, Logger as _};
     let logger = stream.ext.logger.as_ref().unwrap();
     let mut record = logger.create_log_record();
-    record.set_event_name("grok_code.user_prompt");
+    record.set_event_name("chutes_build.user_prompt");
     record.add_attribute("prompt", "CANARY_GATED_LEAK");
     logger.emit(record);
     stream
@@ -1946,7 +1958,7 @@ fn redacting_log_exporter_drops_record_with_unknown_key() {
     use opentelemetry::logs::{LogRecord as _, Logger as _};
     let logger = stream.ext.logger.as_ref().unwrap();
     let mut record = logger.create_log_record();
-    record.set_event_name("grok_code.api_request");
+    record.set_event_name("chutes_build.api_request");
     record.add_attribute("command", "echo CANARY_UNKNOWN_KEY");
     logger.emit(record);
     stream
@@ -2100,7 +2112,7 @@ fn metric_increments_pass_model_through_scrub_and_attach_session_id() {
     );
     let exported = stream.metrics.get_finished_metrics().unwrap();
     let blob = format!("{exported:?}");
-    assert!(blob.contains("grok_code.token.usage"));
+    assert!(blob.contains("chutes_build.token.usage"));
     assert!(
         blob.contains("sess-9"),
         "session.id missing from metric: {blob}"

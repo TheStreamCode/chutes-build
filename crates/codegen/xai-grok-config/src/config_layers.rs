@@ -255,7 +255,8 @@ impl ConfigLayers {
 
 /// `CHUTES_BUILD_CAMPAIGNS=0` or `[features] campaigns = false` on pre-campaign base.
 pub fn campaigns_application_disabled(base_effective: &toml::Value) -> bool {
-    crate::env_bool("CHUTES_BUILD_CAMPAIGNS") == Some(false) || campaigns_disabled_in_config(base_effective)
+    crate::env_bool("CHUTES_BUILD_CAMPAIGNS") == Some(false)
+        || campaigns_disabled_in_config(base_effective)
 }
 
 /// `[features] campaigns = false` on pre-campaign base.

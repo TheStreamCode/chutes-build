@@ -368,10 +368,22 @@ mod tests {
         cmd.env("CHUTES_BUILD_APPEARANCE", "light");
         cmd.env("LC_CHUTES_BUILD_APPEARANCE", "light");
         apply_wrap_child_env(&mut cmd, Some(SystemAppearance::Dark));
-        assert_eq!(env_str(&cmd, "CHUTES_BUILD_APPEARANCE").as_deref(), Some("dark"));
-        assert_eq!(env_str(&cmd, "LC_CHUTES_BUILD_APPEARANCE").as_deref(), Some("dark"));
-        assert_eq!(env_str(&cmd, "CHUTES_BUILD_OSC52_SINK").as_deref(), Some("1"));
-        assert_eq!(env_str(&cmd, "LC_CHUTES_BUILD_OSC52_SINK").as_deref(), Some("1"));
+        assert_eq!(
+            env_str(&cmd, "CHUTES_BUILD_APPEARANCE").as_deref(),
+            Some("dark")
+        );
+        assert_eq!(
+            env_str(&cmd, "LC_CHUTES_BUILD_APPEARANCE").as_deref(),
+            Some("dark")
+        );
+        assert_eq!(
+            env_str(&cmd, "CHUTES_BUILD_OSC52_SINK").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            env_str(&cmd, "LC_CHUTES_BUILD_OSC52_SINK").as_deref(),
+            Some("1")
+        );
     }
 
     #[test]
@@ -380,7 +392,10 @@ mod tests {
         cmd.env("CHUTES_BUILD_APPEARANCE", "dark");
         cmd.env("LC_CHUTES_BUILD_APPEARANCE", "dark");
         apply_wrap_child_env(&mut cmd, Some(SystemAppearance::Light));
-        assert_eq!(env_str(&cmd, "CHUTES_BUILD_APPEARANCE").as_deref(), Some("light"));
+        assert_eq!(
+            env_str(&cmd, "CHUTES_BUILD_APPEARANCE").as_deref(),
+            Some("light")
+        );
         assert_eq!(
             env_str(&cmd, "LC_CHUTES_BUILD_APPEARANCE").as_deref(),
             Some("light")
@@ -393,8 +408,14 @@ mod tests {
         cmd.env("CHUTES_BUILD_APPEARANCE", "dark");
         cmd.env_remove("LC_CHUTES_BUILD_APPEARANCE");
         apply_wrap_child_env(&mut cmd, None);
-        assert_eq!(env_str(&cmd, "CHUTES_BUILD_APPEARANCE").as_deref(), Some("dark"));
+        assert_eq!(
+            env_str(&cmd, "CHUTES_BUILD_APPEARANCE").as_deref(),
+            Some("dark")
+        );
         assert_eq!(env_str(&cmd, "LC_CHUTES_BUILD_APPEARANCE"), None);
-        assert_eq!(env_str(&cmd, "CHUTES_BUILD_OSC52_SINK").as_deref(), Some("1"));
+        assert_eq!(
+            env_str(&cmd, "CHUTES_BUILD_OSC52_SINK").as_deref(),
+            Some("1")
+        );
     }
 }

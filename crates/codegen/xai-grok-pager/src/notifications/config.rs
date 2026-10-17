@@ -78,7 +78,7 @@ impl Default for TitleConfig {
                 TitleItem::Spinner,
                 TitleItem::Activity,
                 TitleItem::SessionName,
-                TitleItem::Grok,
+                TitleItem::AppName,
             ],
         }
     }
@@ -93,7 +93,9 @@ pub enum TitleItem {
     Cwd,
     Model,
     TurnTimer,
-    Grok,
+    /// The application name (`chutes-build`). `grok` still parses as a deprecated alias.
+    #[serde(alias = "grok")]
+    AppName,
     ActionRequired,
 }
 
@@ -200,7 +202,7 @@ mod tests {
             session_recap_threshold_secs: 90,
             title: TitleConfig {
                 enabled: false,
-                items: vec![TitleItem::Grok, TitleItem::Cwd],
+                items: vec![TitleItem::AppName, TitleItem::Cwd],
             },
             hooks: vec![NotificationHook {
                 command: "notify-send".into(),

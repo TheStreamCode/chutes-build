@@ -141,7 +141,8 @@ mod tests {
 
     #[test]
     fn valid_object_is_returned() {
-        let parsed = parse_params_json(0, "ChutesBuild:grep", Some(r#"{"max_results":50}"#)).unwrap();
+        let parsed =
+            parse_params_json(0, "ChutesBuild:grep", Some(r#"{"max_results":50}"#)).unwrap();
         assert_eq!(
             parsed,
             Some(
@@ -227,7 +228,11 @@ mod tests {
     #[test]
     fn all_ids_present_returns_none() {
         let entries = [entry("ChutesBuild:grep"), entry("ChutesBuild:read_file")];
-        let allowed = allowed(&["ChutesBuild:grep", "ChutesBuild:read_file", "ChutesBuild:bash"]);
+        let allowed = allowed(&[
+            "ChutesBuild:grep",
+            "ChutesBuild:read_file",
+            "ChutesBuild:bash",
+        ]);
         assert_eq!(first_unknown_tool_id(&entries, &allowed), None);
     }
 

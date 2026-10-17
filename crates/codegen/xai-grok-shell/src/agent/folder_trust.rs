@@ -810,7 +810,13 @@ mod tests {
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
         let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("plugins").join("evil")).unwrap();
+        std::fs::create_dir_all(
+            tmp.path()
+                .join(".chutes-build")
+                .join("plugins")
+                .join("evil"),
+        )
+        .unwrap();
         assert!(
             !project_scope_allowed(tmp.path()),
             "plugin-only untrusted repo must be denied"
@@ -975,7 +981,11 @@ mod tests {
         let tmp = repo_tmp();
         // A project plugin
         // Project scope is default-disabled, so name it in the `enabled` list to isolate the TRUST gate (not the enable gate)
-        let plugin = tmp.path().join(".chutes-build").join("plugins").join("trustgate");
+        let plugin = tmp
+            .path()
+            .join(".chutes-build")
+            .join("plugins")
+            .join("trustgate");
         std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(plugin.join("plugin.json"), r#"{"name":"trustgate"}"#).unwrap();
         let cfg = DiscoveryConfig {

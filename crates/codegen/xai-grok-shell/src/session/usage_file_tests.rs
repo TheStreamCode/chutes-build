@@ -262,10 +262,7 @@ fn tokens_per_second_derives_from_duration_and_survives_deltas() {
     assert_eq!(first.tokens_per_second, Some(2000.0));
     let mut file = SessionUsageFile::new("sess-1");
     file.apply_turn(1, "t1", &first, None);
-    let second = live(&[
-        ("grok-4", 100, 20, Some(50)),
-        ("grok-4", 40, 10, Some(20)),
-    ]);
+    let second = live(&[("grok-4", 100, 20, Some(50)), ("grok-4", 40, 10, Some(20))]);
     file.apply_turn(2, "t2", &second, Some(&first));
     let turn = file.turn(2).expect("turn 2");
     assert_eq!(turn.usage.output_tokens, 10);

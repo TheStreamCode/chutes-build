@@ -429,8 +429,13 @@ pub(super) fn render_row_list_with_search_bar(
 pub(super) fn render_docs_footer(buf: &mut Buffer, area: Rect, theme: &Theme) {
     const LONG: &str =
         "Tip · Ask Chutes Build: \"change theme to chutesday\" or \"what does compact mode do?\"";
+    // The product name is 8 cells wider than upstream's, which pushed LONG past
+    // the modal footer at a 120-column terminal and dropped straight to SHORT —
+    // losing the worked example, which is the whole point of the tip. One
+    // example survives in far less room than two.
+    const MEDIUM: &str = "Tip · Ask Chutes Build: \"change theme to chutesday\"";
     const SHORT: &str = "Tip · Ask Chutes Build to change a setting";
-    let text = modal_window::fit_tip_line(&[LONG, SHORT], area.width as usize);
+    let text = modal_window::fit_tip_line(&[LONG, MEDIUM, SHORT], area.width as usize);
     modal_window::render_centered_tip_footer(buf, area, theme, text.as_ref());
 }
 

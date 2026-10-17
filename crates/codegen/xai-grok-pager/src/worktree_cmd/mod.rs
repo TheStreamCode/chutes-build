@@ -315,7 +315,8 @@ async fn cmd_db(tx: &xai_acp_lib::AcpAgentTx, command: WorktreeDbCommand) -> Res
             Ok(())
         }
         WorktreeDbCommand::Rebuild => {
-            let report: RebuildReport = ext_call(tx, "chutes.ai/git/worktree/db/rebuild", &()).await?;
+            let report: RebuildReport =
+                ext_call(tx, "chutes.ai/git/worktree/db/rebuild", &()).await?;
             let written = display::print_rebuild(&report, &mut std::io::stdout().lock());
             Ok(crate::util::ignore_broken_pipe(written)?)
         }
@@ -543,7 +544,8 @@ mod tests {
     }
     #[test]
     fn ext_envelope_unwraps_success_result() {
-        let json = r#"{"result": {"path": "/home/user/.chutes-build/worktrees.db"}, "error": null}"#;
+        let json =
+            r#"{"result": {"path": "/home/user/.chutes-build/worktrees.db"}, "error": null}"#;
         #[derive(serde::Deserialize)]
         struct PathResp {
             path: String,

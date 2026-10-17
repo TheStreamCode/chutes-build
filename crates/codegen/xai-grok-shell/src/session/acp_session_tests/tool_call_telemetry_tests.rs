@@ -340,7 +340,11 @@ fn assert_grep(
         Some(invocation),
         "{call_id}"
     );
-    assert_eq!(field(span, "tool_id"), Some("ChutesBuild:grep"), "{call_id}");
+    assert_eq!(
+        field(span, "tool_id"),
+        Some("ChutesBuild:grep"),
+        "{call_id}"
+    );
     assert_eq!(
         meta_str(metadata, "tool_id"),
         Some("ChutesBuild:grep"),
@@ -595,7 +599,10 @@ async fn execute_tool_calls_records_the_product_row_and_execution_span() {
             let blank_row = row_metadata(&rows, blank_id);
             assert_eq!(blank_row.get("path_scope"), None);
             assert_eq!(meta_str(blank_row, "tool_name"), Some("read_note"));
-            assert_eq!(meta_str(blank_row, "tool_id"), Some("ChutesBuild:read_file"));
+            assert_eq!(
+                meta_str(blank_row, "tool_id"),
+                Some("ChutesBuild:read_file")
+            );
             assert!(!blank_event.to_string().contains("secret-project"));
             let _ = std::fs::remove_dir_all(scratch);
             let _ = std::fs::remove_dir_all(repo);

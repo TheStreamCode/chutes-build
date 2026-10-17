@@ -340,7 +340,11 @@ mod max_mcp_output_bytes_tests {
         assert_eq!(super::project_max_mcp_output_bytes(&sub), Some(50_000));
 
         // A deeper file *without* the key does not mask the root value.
-        std::fs::write(sub.join(".chutes-build/config.toml"), "[ui]\nvim_mode = true\n").unwrap();
+        std::fs::write(
+            sub.join(".chutes-build/config.toml"),
+            "[ui]\nvim_mode = true\n",
+        )
+        .unwrap();
         assert_eq!(super::project_max_mcp_output_bytes(&sub), Some(30_000));
 
         // No .chutes-build file sets the key anywhere, so the walk returns None

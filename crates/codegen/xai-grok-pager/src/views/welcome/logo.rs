@@ -285,9 +285,18 @@ mod tests {
     fn tier_api_matches_height_tiers() {
         // The LogoTier API the stacked layout uses must agree with the
         // height-based selection, and step down Full -> Compact -> Hidden.
-        assert_eq!(LogoTier::for_height(SMALL_LOGO_MIN_HEIGHT - 1), LogoTier::Hidden);
-        assert_eq!(LogoTier::for_height(SMALL_LOGO_MIN_HEIGHT), LogoTier::Compact);
-        assert_eq!(LogoTier::for_height(FULL_LOGO_MIN_HEIGHT - 1), LogoTier::Compact);
+        assert_eq!(
+            LogoTier::for_height(SMALL_LOGO_MIN_HEIGHT - 1),
+            LogoTier::Hidden
+        );
+        assert_eq!(
+            LogoTier::for_height(SMALL_LOGO_MIN_HEIGHT),
+            LogoTier::Compact
+        );
+        assert_eq!(
+            LogoTier::for_height(FULL_LOGO_MIN_HEIGHT - 1),
+            LogoTier::Compact
+        );
         assert_eq!(LogoTier::for_height(FULL_LOGO_MIN_HEIGHT), LogoTier::Full);
         assert_eq!(LogoTier::Full.step_down(), Some(LogoTier::Compact));
         assert_eq!(LogoTier::Compact.step_down(), Some(LogoTier::Hidden));

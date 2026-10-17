@@ -103,8 +103,8 @@ fn external_stream_http_mtls_end_to_end() {
         .expect("log records must arrive over HTTP mTLS");
     let names = recorder.event_names();
     assert!(
-        names.iter().any(|n| n == "grok_code.session_start"),
-        "expected grok_code.session_start in {names:?}"
+        names.iter().any(|n| n == "chutes_build.session_start"),
+        "expected chutes_build.session_start in {names:?}"
     );
 
     col::block_on(recorder.wait_for_signals(Duration::from_secs(10), &[OtelSignal::Metrics]))

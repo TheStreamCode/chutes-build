@@ -477,7 +477,9 @@ pub(crate) struct GrokHomeFixture {
 #[cfg(test)]
 impl GrokHomeFixture {
     pub(crate) fn new() -> Self {
-        let lock = CHUTES_BUILD_HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = CHUTES_BUILD_HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().join("grok-home");
         std::fs::create_dir_all(&home).unwrap();

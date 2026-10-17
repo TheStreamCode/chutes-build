@@ -1078,7 +1078,8 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(tmp.path().join("notes.md"), "").unwrap();
 
-        let _env = xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_SUGGEST_TEST_DIR", tmp.path());
+        let _env =
+            xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_SUGGEST_TEST_DIR", tmp.path());
         let ctx = SuggestContext::new(
             "cat $CHUTES_BUILD_SUGGEST_TEST_DIR/no".into(),
             "cat $CHUTES_BUILD_SUGGEST_TEST_DIR/no".len(),

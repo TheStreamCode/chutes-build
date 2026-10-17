@@ -547,7 +547,9 @@ fn fix_preview_contains_exact_change_and_caveats() {
             "# >>> chutes-build doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='chutes-build wrap ssh'"
         )
     );
-    assert!(preview.contains("To use once without changing config: `chutes-build wrap ssh <host>`"));
+    assert!(
+        preview.contains("To use once without changing config: `chutes-build wrap ssh <host>`")
+    );
     assert!(preview.contains("Use `command ssh ...` to bypass the alias."));
     assert!(preview.contains("ssh -f"));
     assert!(preview.contains("ControlPersist"));
@@ -858,7 +860,7 @@ fn stable_mapping_tables_are_complete() {
             "rio",
             "foot",
             "jetbrains",
-            "grok_desktop",
+            "unknown",
             "vte",
             "terminator",
             "windows_terminal",

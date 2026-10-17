@@ -449,7 +449,10 @@ mod tests {
     #[test]
     fn default_tool_ids_are_a_prefix_of_shared_ids() {
         for id in CHUTES_BUILD_BOT_DEFAULT_TOOL_IDS {
-            assert!(is_grok_bot_tool(id), "{id} is not in CHUTES_BUILD_BOT_TOOL_IDS");
+            assert!(
+                is_grok_bot_tool(id),
+                "{id} is not in CHUTES_BUILD_BOT_TOOL_IDS"
+            );
         }
         assert_eq!(
             CHUTES_BUILD_BOT_DEFAULT_TOOL_IDS.len(),

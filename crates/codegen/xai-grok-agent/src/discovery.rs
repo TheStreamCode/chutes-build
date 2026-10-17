@@ -906,9 +906,13 @@ mod tests {
             "Bundled only",
         );
 
-        let def =
-            by_name_in_cwd_with_home("bundled-only", &cwd, Some(&home), Some(&home.join(".chutes-build")))
-                .unwrap();
+        let def = by_name_in_cwd_with_home(
+            "bundled-only",
+            &cwd,
+            Some(&home),
+            Some(&home.join(".chutes-build")),
+        )
+        .unwrap();
         assert_eq!(def.scope, AgentScope::Bundled);
         assert_eq!(def.description, "Bundled only");
     }
@@ -927,9 +931,13 @@ mod tests {
         write_agent_file(&user_dir, "reviewer.md", "reviewer", "User reviewer");
         write_agent_file(&bundled_dir, "reviewer.md", "reviewer", "Bundled reviewer");
 
-        let def =
-            by_name_in_cwd_with_home("reviewer", &cwd, Some(&home), Some(&home.join(".chutes-build")))
-                .unwrap();
+        let def = by_name_in_cwd_with_home(
+            "reviewer",
+            &cwd,
+            Some(&home),
+            Some(&home.join(".chutes-build")),
+        )
+        .unwrap();
         assert_eq!(def.scope, AgentScope::User);
         assert_eq!(def.description, "User reviewer");
     }
@@ -945,8 +953,13 @@ mod tests {
 
         write_agent_file(&bundled_dir, "explore.md", "explore", "Bundled explore");
 
-        let def = by_name_in_cwd_with_home("explore", &cwd, Some(&home), Some(&home.join(".chutes-build")))
-            .unwrap();
+        let def = by_name_in_cwd_with_home(
+            "explore",
+            &cwd,
+            Some(&home),
+            Some(&home.join(".chutes-build")),
+        )
+        .unwrap();
         assert_eq!(def.scope, AgentScope::BuiltIn);
         assert_ne!(def.description, "Bundled explore");
     }
@@ -964,9 +977,13 @@ mod tests {
         write_agent_file(&project_dir, "reviewer.md", "reviewer", "Project reviewer");
         write_agent_file(&bundled_dir, "reviewer.md", "reviewer", "Bundled reviewer");
 
-        let def =
-            by_name_in_cwd_with_home("reviewer", &cwd, Some(&home), Some(&home.join(".chutes-build")))
-                .unwrap();
+        let def = by_name_in_cwd_with_home(
+            "reviewer",
+            &cwd,
+            Some(&home),
+            Some(&home.join(".chutes-build")),
+        )
+        .unwrap();
         assert_eq!(def.scope, AgentScope::Project);
         assert_eq!(def.description, "Project reviewer");
     }

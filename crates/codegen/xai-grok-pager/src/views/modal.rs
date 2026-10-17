@@ -1027,8 +1027,9 @@ fn fit_docs_ask_grok_tip(docs_path: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
-    let long =
-        format!("Tip · Ask Chutes Build about the docs ({docs_path}), e.g. \"how do I set up MCP?\"");
+    let long = format!(
+        "Tip · Ask Chutes Build about the docs ({docs_path}), e.g. \"how do I set up MCP?\""
+    );
     if long.width() <= width {
         return long;
     }
@@ -1520,7 +1521,9 @@ mod doc_picker_tip_tests {
     #[test]
     fn fit_docs_tip_prefers_path_and_never_overflows() {
         let path = crate::util::display_user_grok_path(DOCS_USER_GUIDE_REL);
-        let long = format!("Tip · Ask Chutes Build about the docs ({path}), e.g. \"how do I set up MCP?\"");
+        let long = format!(
+            "Tip · Ask Chutes Build about the docs ({path}), e.g. \"how do I set up MCP?\""
+        );
         let short = format!("Tip · Ask Chutes Build about the docs · {path}");
         let path_only = format!("Tip · {path}");
         assert_eq!(fit_docs_ask_grok_tip(&path, long.width()), long);

@@ -12,7 +12,7 @@ type = "builtin"
 items = ["cwd", "model", "context"]   # default when omitted
 ```
 
-This renders, for example, `grok-shell-status-line │ Grok 4.5 │ 12% ctx`. Items appear in the order you list them, and long ones are elided with `…`: the directory and session name at 40 columns, the model at 30.
+This renders, for example, `demo-project │ Chutes Auto │ 12% ctx`. Items appear in the order you list them, and long ones are elided with `…`: the directory and session name at 40 columns, the model at 30.
 
 | Item | Shows |
 | --- | --- |
@@ -128,7 +128,7 @@ printf '%b\n' "${DIR##*/} │ $MODEL │ ${PCT}% ctx │ \033[32m$BRANCH\033[0m 
 
 ## Tips
 
-- Test with mock input: `echo '{"session_id":"t","workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Grok 4.5"},"context_window":{"used_percentage":25}}' | ./statusline.sh`
+- Test with mock input: `echo '{"session_id":"t","workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Chutes Auto"},"context_window":{"used_percentage":25}}' | ./statusline.sh`
 - Cache slow commands such as `git status` to a temp file keyed on `session_id`, refreshed every few seconds. `session_id` is stable per session and unique across sessions.
 - Use `printf '%b'` rather than `echo -e` for reliable escapes.
 
@@ -136,7 +136,7 @@ printf '%b\n' "${DIR##*/} │ $MODEL │ ${PCT}% ctx │ \033[32m$BRANCH\033[0m 
 
 - **Nothing shows.** Chutes Build reads `[ui.status_line]` at startup, so restart it after editing `config.toml`. Restarting is enough: when the new client attaches, the agent switches the row on for a session that is still running. The row only renders once the agent view is active, so not on the welcome screen or while a subagent view is open full screen. Check that `type` is not `disabled`, and that a command script is executable and writes to stdout.
 - **A message in the row.** A row beginning `[ui.status_line]` means Chutes Build could not use that section as written: it either names the key it could not read, or names what the mode you chose still needs. `chutes-build inspect` lists the same problems, including keys this version does not know, which is where to look when the row is switched off. Everything it could read still applies, and Chutes Build leaves the section as you wrote it rather than rewriting one it cannot read. Setting `type = "disabled"` removes the row and the message.
-- **A blank row that never fills.** The agent is not sending status updates, which usually means a `grok` or leader process older than this client. Restart the leader or update Chutes Build.
+- **A blank row that never fills.** The agent is not sending status updates, which usually means an agent or leader process older than this client. Restart the leader or update Chutes Build.
 - **Only your own config can set this.** A `command` row runs a program, so it is read from your `~/.chutes-build/config.toml` and from configuration your administrator manages. A repository cannot set one: a repo-local `.chutes-build/config.toml` is read for MCP servers only, and `[ui.status_line]` is not among the keys any project-scoped layer can supply, so cloning a repo cannot make Chutes Build run its script.
 - **A pushed config had no effect.** `[ui.status_line]` is stripped from campaign and version-override patches, because a status line can name a command your machine would run. Set it in your own `config.toml`.
 - **Errors.** Anything your script prints is shown, even when it exits non-zero, so `printf …; [[ -n $dirty ]]` behaves as you would expect. A script that prints nothing and fails shows `[status line: exit N]`, and that stays until the next run succeeds — for a run triggered by session state, which reports its failure at once; a timer run's failure keeps the last output instead (see [Refresh runs](#refresh-runs)). Your script's stderr is never painted, so a debugging `echo` will not disturb the row; run Chutes Build with `--debug` to read it. A script Chutes Build could not start at all shows `[status line: could not start the script: …]`, which is what a file without the execute bit produces, and one the system kills shows `[status line: killed by signal]`. A `#!` line naming a missing interpreter is retried under `sh` instead, so it shows an exit code.

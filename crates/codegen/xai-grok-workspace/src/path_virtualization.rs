@@ -626,9 +626,12 @@ pub(crate) fn grok_files_live_check(mountpoint: &str) -> String {
     )
 }
 
-const CHUTES_BUILD_FILES_LIVE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-const CHUTES_BUILD_FILES_READY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
-const CHUTES_BUILD_FILES_REMOUNT_SPAWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const CHUTES_BUILD_FILES_LIVE_CHECK_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
+const CHUTES_BUILD_FILES_READY_PROBE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(20);
+const CHUTES_BUILD_FILES_REMOUNT_SPAWN_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(15);
 const CHUTES_BUILD_FILES_MKDIR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn grok_files_sh(
@@ -672,8 +675,11 @@ fn grok_files_mount_live(root: &Path) -> bool {
     let Some(mp) = root.to_str() else {
         return false;
     };
-    grok_files_sh(&grok_files_live_check(mp), CHUTES_BUILD_FILES_LIVE_CHECK_TIMEOUT)
-        .is_ok_and(|s| s.success())
+    grok_files_sh(
+        &grok_files_live_check(mp),
+        CHUTES_BUILD_FILES_LIVE_CHECK_TIMEOUT,
+    )
+    .is_ok_and(|s| s.success())
 }
 
 /// Bind dest replaces any dest baked into `mount_command`, or is inserted
@@ -732,8 +738,11 @@ fn grok_files_remount(root: &Path, mount_command: &str) -> Result<(), BindMountE
             "grok-files remount exited {status} at {mp}"
         )));
     }
-    let ready = grok_files_sh(&grok_files_ready_probe(mp), CHUTES_BUILD_FILES_READY_PROBE_TIMEOUT)
-        .map_err(|e| BindMountError(format!("grok-files ready probe: {e}")))?;
+    let ready = grok_files_sh(
+        &grok_files_ready_probe(mp),
+        CHUTES_BUILD_FILES_READY_PROBE_TIMEOUT,
+    )
+    .map_err(|e| BindMountError(format!("grok-files ready probe: {e}")))?;
     if ready.success() {
         Ok(())
     } else {

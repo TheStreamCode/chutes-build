@@ -3370,7 +3370,10 @@ fn set_auto_dark_theme_does_not_apply_when_system_is_light() {
             crate::theme::ThemeKind::ChutesDay,
             "auto_dark_theme commit must NOT change live display when system=Light",
         );
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("chutesnight"),);
+        assert_eq!(
+            app.current_ui.auto_dark_theme.as_deref(),
+            Some("chutesnight"),
+        );
     });
 }
 /// Symmetric to the dark test: `set_auto_light_theme` applies only when the theme is auto and the system is Light.
@@ -3543,7 +3546,10 @@ fn rollback_auto_dark_theme_reverts_current_ui() {
             }),
             &mut app,
         );
-        assert_eq!(app.current_ui.auto_dark_theme.as_deref(), Some("chutesnight"),);
+        assert_eq!(
+            app.current_ui.auto_dark_theme.as_deref(),
+            Some("chutesnight"),
+        );
     });
 }
 #[test]
@@ -3564,7 +3570,10 @@ fn rollback_auto_light_theme_reverts_current_ui() {
             }),
             &mut app,
         );
-        assert_eq!(app.current_ui.auto_light_theme.as_deref(), Some("chutesday"));
+        assert_eq!(
+            app.current_ui.auto_light_theme.as_deref(),
+            Some("chutesday")
+        );
     });
 }
 /// Edge case: if the rollback value is `"auto"` (corrupted hand-edit), `apply_setting_rollback` clears `app.current_ui.auto_dark_theme` to `None`.

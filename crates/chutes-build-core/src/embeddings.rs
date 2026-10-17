@@ -38,11 +38,18 @@ pub fn embed_body(texts: &[String], model: &str, dimensions: Option<u32>) -> ser
         body.insert(
             "input".to_owned(),
             serde_json::Value::Array(
-                texts.iter().cloned().map(serde_json::Value::String).collect(),
+                texts
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
             ),
         );
     }
-    body.insert("model".to_owned(), serde_json::Value::String(model.to_owned()));
+    body.insert(
+        "model".to_owned(),
+        serde_json::Value::String(model.to_owned()),
+    );
     body.insert(
         "encoding_format".to_owned(),
         serde_json::Value::String("float".to_owned()),
@@ -72,15 +79,19 @@ pub fn parse_embeddings(value: &serde_json::Value) -> Result<EmbeddingsOutput, S
         let vector = item
             .get("embedding")
             .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| format!("embedding response item {position} has no `embedding` array"))?;
+            .ok_or_else(|| {
+                format!("embedding response item {position} has no `embedding` array")
+            })?;
         if vector.is_empty() {
-            return Err(format!("embedding response item {position} has an empty vector"));
+            return Err(format!(
+                "embedding response item {position} has an empty vector"
+            ));
         }
         let mut floats = Vec::with_capacity(vector.len());
         for component in vector {
-            let number = component
-                .as_f64()
-                .ok_or_else(|| format!("embedding response item {position} has a non-numeric component"))?;
+            let number = component.as_f64().ok_or_else(|| {
+                format!("embedding response item {position} has a non-numeric component")
+            })?;
             floats.push(number as f32);
         }
         embeddings.push(floats);

@@ -55,7 +55,9 @@ pub fn run(args: &WrapArgs) -> Result<()> {
             Ok(code) => std::process::exit(code),
             Err(e) => {
                 // PTY setup failed; keep the chosen route without our PTY so the command still works (just without clipboard forwarding)
-                eprintln!("chutes-build wrap: wrapped mode failed, running without PTY wrapping: {e}");
+                eprintln!(
+                    "chutes-build wrap: wrapped mode failed, running without PTY wrapping: {e}"
+                );
                 exec_command(&fallback.program, &fallback.args)
             }
         }

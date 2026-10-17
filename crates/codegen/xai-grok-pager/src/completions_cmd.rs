@@ -9,15 +9,15 @@ use crate::app::PagerArgs;
 
 /// Generate and print the completion script for the given shell.
 pub fn run(shell: Shell) {
-    // Ensure the script always uses the public "grok" name (matches historical behavior and what the installers and docs expect)
-    let mut cmd = PagerArgs::command().name("grok");
+    // The script always uses the public binary name, so completions trigger for it.
+    let mut cmd = PagerArgs::command().name("chutes-build");
     if shell != Shell::Zsh {
-        generate(shell, &mut cmd, "grok", &mut std::io::stdout());
+        generate(shell, &mut cmd, "chutes-build", &mut std::io::stdout());
         return;
     }
     // zsh needs post-processing (see fix_zsh_root_prompt_positional).
     let mut buf = Vec::new();
-    generate(shell, &mut cmd, "grok", &mut buf);
+    generate(shell, &mut cmd, "chutes-build", &mut buf);
     match String::from_utf8(buf) {
         Ok(script) => print!("{}", fix_zsh_root_prompt_positional(&script)),
         // clap_complete output is generated from Rust strings, so this arm is unreachable in practice
@@ -48,8 +48,8 @@ fn fix_zsh_root_prompt_positional(script: &str) -> String {
             r#"words=($line[1] "${words[@]}")"#,
         ),
         (
-            r#"curcontext="${curcontext%:*:*}:grok-command-$line[2]:""#,
-            r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#,
+            r#"curcontext="${curcontext%:*:*}:chutes-build-command-$line[2]:""#,
+            r#"curcontext="${curcontext%:*:*}:chutes-build-command-$line[1]:""#,
         ),
         (r#"case $line[2] in"#, r#"case $line[1] in"#),
     ] {
@@ -64,9 +64,9 @@ mod tests {
 
     /// Generate the zsh completion script exactly like `run` does.
     fn zsh_script() -> String {
-        let mut cmd = PagerArgs::command().name("grok");
+        let mut cmd = PagerArgs::command().name("chutes-build");
         let mut buf = Vec::new();
-        generate(Shell::Zsh, &mut cmd, "grok", &mut buf);
+        generate(Shell::Zsh, &mut cmd, "chutes-build", &mut buf);
         String::from_utf8(buf).expect("completion script is UTF-8")
     }
 
@@ -93,15 +93,19 @@ mod tests {
             "root dispatch must be shifted to $line[1]"
         );
         assert!(
-            fixed.contains(r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#),
+            fixed.contains(r#"curcontext="${curcontext%:*:*}:chutes-build-command-$line[1]:""#),
             "root dispatch context must use $line[1]"
         );
         // Subcommand dispatch blocks (already on $line[1]) must survive.
         assert!(
-            fixed.contains("grok-worktree-command-$line[1]"),
+            fixed.contains("chutes-build-worktree-command-$line[1]"),
             "nested subcommand dispatch must be untouched"
         );
         // The subcommand list itself must still be offered at the root.
-        assert!(fixed.contains("_grok_commands"), "root command list intact");
+        // (clap_complete replaces only spaces, so the dash survives.)
+        assert!(
+            fixed.contains("_chutes-build_commands"),
+            "root command list intact"
+        );
     }
 }

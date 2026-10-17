@@ -13,14 +13,16 @@ use std::sync::Arc;
 #[cfg(feature = "audio")]
 use crate::error::VoiceError;
 
-/// Why there is no bearer for `wss://api.x.ai/v1/stt`; neither variant is a cue to try another credential.
+/// Why there is no bearer for `wss://api.chutes.ai/v1/stt`; neither variant is a cue to try another credential.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VoiceAuthError {
     #[error(
-        "voice needs an xAI credential for this account: sign in with an xAI login or set CHUTES_API_KEY"
+        "voice needs a Chutes credential for this account: sign in with a Chutes login or set CHUTES_API_KEY"
     )]
     ForeignSession,
-    #[error("not signed in — run `chutes-build login`, set CHUTES_API_KEY, or set a model api_key/env_key")]
+    #[error(
+        "not signed in — run `chutes-build login`, set CHUTES_API_KEY, or set a model api_key/env_key"
+    )]
     NotSignedIn,
 }
 

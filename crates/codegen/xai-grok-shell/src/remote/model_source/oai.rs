@@ -119,7 +119,7 @@ impl ListModelsEndpoint {
             }
         } else if fetch_auth == ModelFetchAuth::ApiKey {
             Self {
-                url: format!("{}/models", endpoints.xai_api_base_url),
+                url: format!("{}/models", endpoints.public_api_base_url),
                 auth: EndpointAuth::ApiKey,
             }
         } else {
@@ -148,7 +148,7 @@ mod tests {
         let cfg = EndpointsConfig::from_config_value(
             &toml::from_str(
                 r#"[endpoints]
-                    xai_api_base_url = "https://inference.acme-corp.example/xai/v1""#,
+                    public_api_base_url = "https://inference.acme-corp.example/xai/v1""#,
             )
             .unwrap(),
         );

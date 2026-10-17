@@ -1911,7 +1911,10 @@ fn external_provider_login_fetches_models_with_remote_fetch_off() {
         "[features]\nremote_fetch = false\n",
     )
     .expect("write config.toml");
-    let _home = EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().expect("utf-8 temp path"));
+    let _home = EnvGuard::set(
+        "CHUTES_BUILD_HOME",
+        home.path().to_str().expect("utf-8 temp path"),
+    );
     let _no_key = EnvGuard::unset("CHUTES_API_KEY");
     let _no_legacy_key = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let endpoints = config::EndpointsConfig {

@@ -121,7 +121,15 @@ fn is_figma_mcp_matches_name_and_host() {
     assert!(is_figma_mcp("figma", "https://example.com/mcp"));
     assert!(is_figma_mcp("Figma", "https://example.com/mcp"));
     assert!(is_figma_mcp("grok_com_figma", "https://example.com/mcp"));
-    assert!(is_figma_mcp("CHUTES_BUILD_COM_FIGMA", "https://example.com/mcp"));
+    assert!(is_figma_mcp(
+        "CHUTES_BUILD_COM_FIGMA",
+        "https://example.com/mcp"
+    ));
+    assert!(is_figma_mcp(
+        "chutes_build_com_figma",
+        "https://example.com/mcp"
+    ));
+    assert!(is_figma_mcp("chutes_figma", "https://example.com/mcp"));
     assert!(is_figma_mcp("grok_com_FIGMA", "https://example.com/mcp"));
     assert!(is_figma_mcp("other", "https://mcp.figma.com/mcp"));
     assert!(is_figma_mcp("other", "https://figma.com/mcp"));
@@ -134,19 +142,19 @@ fn is_figma_mcp_matches_name_and_host() {
 }
 
 #[test]
-fn ensure_figma_user_agent_sets_grok_cli_when_missing() {
+fn ensure_figma_user_agent_sets_chutes_build_when_missing() {
     let mut headers = reqwest::header::HeaderMap::new();
     ensure_figma_user_agent(&mut headers, "figma", "https://mcp.figma.com/mcp");
     assert_eq!(
         headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
+        "chutes-build"
     );
 
     let mut host_only = reqwest::header::HeaderMap::new();
     ensure_figma_user_agent(&mut host_only, "other", "https://mcp.figma.com/mcp");
     assert_eq!(
         host_only.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
+        "chutes-build"
     );
 }
 
@@ -189,10 +197,10 @@ fn parse_config_headers_skips_invalid_and_keeps_last_duplicate() {
 }
 
 #[test]
-fn apply_user_agent_policy_sets_versioned_grok_cli() {
+fn apply_user_agent_policy_sets_versioned_chutes_build() {
     let mut headers = reqwest::header::HeaderMap::new();
     apply_user_agent_policy(&mut headers, "linear", "https://mcp.linear.app/mcp");
-    let expected = format!("grok-cli/{}", xai_grok_version::VERSION);
+    let expected = format!("chutes-build/{}", xai_grok_version::VERSION);
     assert_eq!(
         headers.get(reqwest::header::USER_AGENT).unwrap(),
         expected.as_str()
@@ -219,7 +227,7 @@ fn apply_user_agent_policy_preserves_figma_attribution() {
     apply_user_agent_policy(&mut headers, "other", "https://mcp.figma.com/mcp");
     assert_eq!(
         headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
+        "chutes-build"
     );
 }
 
@@ -2186,7 +2194,7 @@ async fn http_transport_sends_default_user_agent_on_initialize() {
     client.ensure_initialized().await.expect("handshake");
     assert_eq!(
         *handles.init_user_agents.lock(),
-        vec![format!("grok-cli/{}", xai_grok_version::VERSION)]
+        vec![format!("chutes-build/{}", xai_grok_version::VERSION)]
     );
 }
 
@@ -4736,7 +4744,7 @@ async fn anonymous_access_probe_sends_default_user_agent() {
         .expect("probe POST must reach the fake server");
     assert_eq!(
         header_values(&captured, axum::http::header::USER_AGENT),
-        vec![format!("grok-cli/{}", xai_grok_version::VERSION)]
+        vec![format!("chutes-build/{}", xai_grok_version::VERSION)]
     );
     assert_eq!(
         header_values(&captured, axum::http::header::CONTENT_TYPE),
@@ -4925,7 +4933,11 @@ async fn grok_agent_id_header_rejects_invalid_session_id() {
         Ok(_) => panic!("invalid header value must fail closed"),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("invalid X-Chutes Build-Agent-ID value"));
+    assert!(
+        error
+            .to_string()
+            .contains("invalid X-Chutes Build-Agent-ID value")
+    );
 }
 
 #[test]

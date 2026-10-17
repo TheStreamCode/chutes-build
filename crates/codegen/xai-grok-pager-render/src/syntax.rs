@@ -1,5 +1,5 @@
 //! Provides lazily-initialized `Syntect` instances for code highlighting.
-//! Dark themes (ChutesNight, TokyoNight) share `grok-night.tmTheme`; ChutesDay uses `grok-day.tmTheme` with deepened colors for light backgrounds.
+//! Dark themes (ChutesNight, TokyoNight) share `chutes-night.tmTheme`; ChutesDay uses `chutes-day.tmTheme` with deepened colors for light backgrounds.
 //!
 //! ## Terminal-native palette (minimal lock + `terminal` theme)
 //!
@@ -125,11 +125,11 @@ pub fn get_syntect() -> &'static Syntect {
         // source palette only has to be a full one — polarity is irrelevant.
         | ThemeKind::Terminal
         | ThemeKind::Auto => SYNTECT_GROKNIGHT
-            .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme"))),
+            .get_or_init(|| Syntect::new(include_bytes!("../assets/chutes-night.tmTheme"))),
         ThemeKind::TokyoNight => SYNTECT_TOKYONIGHT
             .get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme"))),
         ThemeKind::ChutesDay => SYNTECT_GROKDAY
-            .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-day.tmTheme"))),
+            .get_or_init(|| Syntect::new(include_bytes!("../assets/chutes-day.tmTheme"))),
     }
 }
 
@@ -297,7 +297,7 @@ mod tests {
     fn markdown_atx_h2_emits_markup_heading_scope_and_theme_color() {
         const LINE: &str = "## Heading\n";
         let night_h2 = (0x61, 0xbd, 0xf2);
-        let night = markdown_atx_tokens(include_bytes!("../assets/grok-night.tmTheme"), LINE);
+        let night = markdown_atx_tokens(include_bytes!("../assets/chutes-night.tmTheme"), LINE);
         let (_, scopes, rgb) = atx_token(&night, "Heading");
         assert!(
             scopes
@@ -314,7 +314,7 @@ mod tests {
                 night_h2,
             ),
             (
-                include_bytes!("../assets/grok-day.tmTheme").as_slice(),
+                include_bytes!("../assets/chutes-day.tmTheme").as_slice(),
                 (0x2f, 0x64, 0xd2),
             ),
         ] {

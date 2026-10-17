@@ -83,7 +83,7 @@ chutes-build update
 
 Chutes Build authenticates with a Chutes API key only. There is no browser
 login, no session store, and no re-authentication flow: get a key from
-[console.chutes.ai](https://console.chutes.ai) and set it before starting:
+[chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys) and set it before starting:
 
 ```bash
 export CHUTES_API_KEY="cpk-..."
@@ -2498,7 +2498,7 @@ The agent persists all session updates automatically. Clients can reconnect and 
 
 | Variable                         | Description                                                                                              |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `CHUTES_API_KEY`         | API key from [console.chutes.ai](https://console.chutes.ai). Used for custom endpoint auth and API key login      |
+| `CHUTES_API_KEY`         | API key from [chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys). Used for custom endpoint auth and API key login      |
 | `CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL`  | Override the cli-chat-proxy URL (default: `https://cli-chat-proxy.chutes.ai/v1`)                          |
 | `CHUTES_BUILD_MODELS_BASE_URL`          | Custom base URL for inference. Model list auto-fetched from `{base_url}/models` (see [Custom Models Endpoint](#custom-models-endpoint)) |
 | `CHUTES_BUILD_MODELS_LIST_URL`          | Override the model list URL if it differs from `{CHUTES_BUILD_MODELS_BASE_URL}/models`                                              |

@@ -355,7 +355,10 @@ async fn mint_provider_token(
             cmd.env("CHUTES_BUILD_AUTH_PROVIDER_REFRESH_TOKEN", refresh);
         }
         if let Some(expires_at) = prev.expires_at {
-            cmd.env("CHUTES_BUILD_AUTH_PROVIDER_EXPIRES_AT", expires_at.to_rfc3339());
+            cmd.env(
+                "CHUTES_BUILD_AUTH_PROVIDER_EXPIRES_AT",
+                expires_at.to_rfc3339(),
+            );
         }
     }
     xai_grok_tools::util::detach_command(&mut cmd);

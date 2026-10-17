@@ -39,7 +39,10 @@ fn try_new_normalizes_both_roots_and_has_no_alias() {
     )
     .expect("distinct roots");
     assert_eq!("/home/dev/repo", v.visible_root());
-    assert_eq!("/home/dev/.chutes-build/worktrees/repo/cursor-1", v.real_root());
+    assert_eq!(
+        "/home/dev/.chutes-build/worktrees/repo/cursor-1",
+        v.real_root()
+    );
     assert_eq!(
         "/home/dev/.chutes-build/worktrees/repo/cursor-1/src/main.rs",
         v.to_guest("/home/dev/repo/src/main.rs")
@@ -65,15 +68,21 @@ fn try_new_rejects_a_real_root_inside_the_visible_root() {
     assert_eq!(None, PathVirtualization::try_new("/home/dev", "/home/dev"));
     assert_eq!(
         None,
-        PathVirtualization::try_new("/home/dev", "/home/dev/.chutes-build/worktrees/repo/cursor-1")
+        PathVirtualization::try_new(
+            "/home/dev",
+            "/home/dev/.chutes-build/worktrees/repo/cursor-1"
+        )
     );
     assert!(
         PathVirtualization::try_new("/home/dev/repo", "/home/dev/repo-2").is_some(),
         "a sibling with a shared string prefix is not nested"
     );
     assert!(
-        PathVirtualization::try_new("/home/dev/.chutes-build/worktrees/repo/cursor-1", "/home/dev")
-            .is_some(),
+        PathVirtualization::try_new(
+            "/home/dev/.chutes-build/worktrees/repo/cursor-1",
+            "/home/dev"
+        )
+        .is_some(),
         "the visible root under the real root is allowed"
     );
     assert_eq!(None, PathVirtualization::try_new("relative", "/real"));

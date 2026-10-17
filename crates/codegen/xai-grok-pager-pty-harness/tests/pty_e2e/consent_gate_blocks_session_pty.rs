@@ -13,7 +13,7 @@ fn consent_settings() -> serde_json::Value {
             "id": "pty-consent",
             "version": 1,
             "title": CONSENT_TITLE,
-            "body": format!("{CONSENT_BODY} [Terms](https://x.ai/legal/tos)."),
+            "body": format!("{CONSENT_BODY} [Terms](https://chutes.ai/terms)."),
             "accept_label": ACCEPT_LABEL,
         },
     })

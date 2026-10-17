@@ -582,7 +582,8 @@ fn parse_after_marker<'a>(output: &'a str, marker: &str) -> &'a str {
 /// (zsh) block, decoded and read back. A name exported without a value is left out, and so is
 /// every command this does not read in full: nothing is guessed.
 pub fn snapshot_exports(snapshot: &str) -> Vec<(OsString, OsString)> {
-    let header = "grok_snap_ENV_VARS_B64=$(command base64 -d <<'CHUTES_BUILD_SNAP_EOF_ENV_VARS_B64'";
+    let header =
+        "grok_snap_ENV_VARS_B64=$(command base64 -d <<'CHUTES_BUILD_SNAP_EOF_ENV_VARS_B64'";
     let Some(payload) = snapshot.lines().skip_while(|line| *line != header).nth(1) else {
         return Vec::new();
     };
@@ -862,7 +863,8 @@ mod tests {
     fn shell_env_overrides_marks_agent_terminal() {
         let env = shell_env_overrides();
         assert_eq!(
-            env.get(crate::util::CHUTES_BUILD_AGENT_ENV).map(String::as_str),
+            env.get(crate::util::CHUTES_BUILD_AGENT_ENV)
+                .map(String::as_str),
             Some(crate::util::CHUTES_BUILD_AGENT_ENV_VALUE)
         );
         assert_eq!(env.get("TERM").map(String::as_str), Some("dumb"));
@@ -924,7 +926,8 @@ mod tests {
 
     #[test]
     fn parse_after_marker_found() {
-        let output = "Welcome to Ubuntu\nMOTD line\n__CHUTES_BUILD_INIT_STATE_MARKER__\nactual data\n";
+        let output =
+            "Welcome to Ubuntu\nMOTD line\n__CHUTES_BUILD_INIT_STATE_MARKER__\nactual data\n";
         let result = parse_after_marker(output, "__CHUTES_BUILD_INIT_STATE_MARKER__");
         assert_eq!(result, "actual data\n");
     }

@@ -247,7 +247,7 @@ Deeper files take precedence. Chutes Build also reads `CLAUDE.md` files for comp
 
 | Document | What You Will Learn |
 |----------|-------------------|
-| [Authentication](02-authentication.md) | Browser login, API keys, OIDC, external auth, device code flow |
+| [Authentication](02-authentication.md) | API keys only: saving, precedence, headless use |
 | [Keyboard Shortcuts](03-keyboard-shortcuts.md) | Complete reference for all key bindings |
 | [Slash Commands](04-slash-commands.md) | All available `/` commands |
 | [Configuration](05-configuration.md) | config.toml, pager.toml, environment variables |

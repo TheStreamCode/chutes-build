@@ -26,6 +26,17 @@ impl ChutesAccountClient {
     // WHY-ALLOW: product-policy client: the SSRF-safe resolver is the security boundary here; extra-CA support for these clients is tracked separately
     #[allow(clippy::disallowed_methods)]
     pub fn from_env() -> Result<Self, AccountError> {
+        Self::from_credentials(ChutesCredentials::from_env()?)
+    }
+
+    /// Client for an explicitly provided key (interactive setup flows).
+    pub fn from_key(key: &str) -> Result<Self, AccountError> {
+        Self::from_credentials(ChutesCredentials::from_key(key)?)
+    }
+
+    // WHY-ALLOW: same client as `from_env`; see the note there.
+    #[allow(clippy::disallowed_methods)]
+    fn from_credentials(credentials: ChutesCredentials) -> Result<Self, AccountError> {
         let endpoints = ChutesEndpoints::default();
         endpoints.validate()?;
         Ok(Self {
@@ -37,15 +48,24 @@ impl ChutesAccountClient {
                 ))
                 .build()?,
             endpoints,
-            credentials: ChutesCredentials::from_env()?,
+            credentials,
         })
+    }
+
+    /// Check the key against `/users/me`: `Ok` when the key is accepted.
+    /// A 401/403 means a wrong key; anything else (network, 5xx) means the
+    /// check itself failed and must not be reported as a bad key.
+    pub async fn validate(&self) -> Result<(), AccountError> {
+        self.get_json("/users/me").await.map(|_| ())
     }
 
     /// Returns the `/users/me` profile payload, or `Null` when the endpoint
     /// fails. User surfaces (CLI, TUI) use it for the credit balance and plan
     /// context; the agent tool deliberately never sees the profile.
     pub async fn profile(&self) -> serde_json::Value {
-        self.get_json("/users/me").await.unwrap_or(serde_json::Value::Null)
+        self.get_json("/users/me")
+            .await
+            .unwrap_or(serde_json::Value::Null)
     }
 
     /// Returns account consumption data without fetching the user profile.

@@ -37,7 +37,7 @@ fn logs_request(record: LogRecord) -> ExportLogsServiceRequest {
             }),
             scope_logs: vec![ScopeLogs {
                 scope: Some(InstrumentationScope {
-                    name: "grok_code".to_owned(),
+                    name: "chutes_build".to_owned(),
                     ..InstrumentationScope::default()
                 }),
                 log_records: vec![record],
@@ -82,7 +82,7 @@ fn events_of(signal: OtelSignal, request: &impl prost::Message) -> Vec<OtelEvent
 #[test]
 fn log_record_decodes_with_attributes_resource_and_scope() {
     let record = LogRecord {
-        event_name: "grok_code.user_prompt".to_owned(),
+        event_name: "chutes_build.user_prompt".to_owned(),
         severity_text: "INFO".to_owned(),
         body: Some(AnyValue {
             value: Some(string("prompt")),
@@ -99,7 +99,7 @@ fn log_record_decodes_with_attributes_resource_and_scope() {
 
     assert_eq!(
         vec![OtelEvent::LogRecord(OtelLogRecord {
-            event_name: "grok_code.user_prompt".to_owned(),
+            event_name: "chutes_build.user_prompt".to_owned(),
             severity_text: "INFO".to_owned(),
             body: Some(Value::from("prompt")),
             attributes: BTreeMap::from([
@@ -108,7 +108,7 @@ fn log_record_decodes_with_attributes_resource_and_scope() {
                 ("prompt.redacted".to_owned(), Value::from(true)),
             ]),
             resource: BTreeMap::from([("service.name".to_owned(), Value::from("grok-cli"))]),
-            scope: "grok_code".to_owned(),
+            scope: "chutes_build".to_owned(),
         })],
         events
     );
@@ -117,7 +117,10 @@ fn log_record_decodes_with_attributes_resource_and_scope() {
 #[test]
 fn event_name_falls_back_to_the_event_name_attribute() {
     let record = LogRecord {
-        attributes: vec![attribute("event.name", string("grok_code.session_start"))],
+        attributes: vec![attribute(
+            "event.name",
+            string("chutes_build.session_start"),
+        )],
         ..LogRecord::default()
     };
 
@@ -126,7 +129,7 @@ fn event_name_falls_back_to_the_event_name_attribute() {
     let [OtelEvent::LogRecord(record)] = events.as_slice() else {
         panic!("expected one log record, got {events:?}");
     };
-    assert_eq!("grok_code.session_start", record.event_name);
+    assert_eq!("chutes_build.session_start", record.event_name);
 }
 
 #[test]
@@ -167,11 +170,11 @@ fn sum_metric_point_carries_temporality_monotonicity_and_value() {
             resource: None,
             scope_metrics: vec![ScopeMetrics {
                 scope: Some(InstrumentationScope {
-                    name: "grok_code".to_owned(),
+                    name: "chutes_build".to_owned(),
                     ..InstrumentationScope::default()
                 }),
                 metrics: vec![Metric {
-                    name: "grok_code.turn.count".to_owned(),
+                    name: "chutes_build.turn.count".to_owned(),
                     data: Some(metric::Data::Sum(Sum {
                         data_points: vec![NumberDataPoint {
                             attributes: vec![attribute("outcome", string("ok"))],
@@ -193,7 +196,7 @@ fn sum_metric_point_carries_temporality_monotonicity_and_value() {
 
     assert_eq!(
         vec![OtelEvent::Metric(OtelMetricPoint {
-            name: "grok_code.turn.count".to_owned(),
+            name: "chutes_build.turn.count".to_owned(),
             data: OtelMetricData::Sum {
                 temporality: OtelTemporality::Delta,
                 is_monotonic: true,
@@ -201,7 +204,7 @@ fn sum_metric_point_carries_temporality_monotonicity_and_value() {
             },
             attributes: BTreeMap::from([("outcome".to_owned(), Value::from("ok"))]),
             resource: BTreeMap::new(),
-            scope: "grok_code".to_owned(),
+            scope: "chutes_build".to_owned(),
         })],
         events
     );

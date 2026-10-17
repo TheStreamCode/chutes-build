@@ -10,7 +10,7 @@ use crate::command::git_config::GitConfigEnv;
 use crate::command::grants::{Expiry, Grant, GrantDecision, GrantId, GrantScope, GrantSubject};
 use crate::command::mode::SandboxMode;
 use crate::command::policy::{
-    DenyEntry, EnvPolicy, CHUTES_BUILD_HOME_SECRET_GLOBS, NetworkPolicy, PolicyInputs, ReadPolicy,
+    CHUTES_BUILD_HOME_SECRET_GLOBS, DenyEntry, EnvPolicy, NetworkPolicy, PolicyInputs, ReadPolicy,
     SECRET_READ_DENY_DIRS, SECRET_READ_DENY_FILES, SandboxPolicy,
 };
 use crate::command::protected::{self, Protected, ProtectedInputs};
@@ -172,7 +172,10 @@ fn enforce_profile_renders_the_design_order_with_every_path_as_a_param() {
             "/opt/ws-fixture/nobody-w1/proj/.chutes-build",
         ),
         ("PROTECTED_0_0", "/opt/ws-fixture/nobody-w1/proj/.git/hooks"),
-        ("PROTECTED_1_0", "/opt/ws-fixture/nobody-w1/proj/.chutes-build"),
+        (
+            "PROTECTED_1_0",
+            "/opt/ws-fixture/nobody-w1/proj/.chutes-build",
+        ),
         ("PROTECTED_2_0", "/opt/ws-fixture/nobody-w1/.zshrc"),
         ("DENY_0_0", "/opt/ws-fixture/nobody-w1/.ssh"),
         ("GIT_DIR_NODE_0", "/opt/ws-fixture/nobody-w1/proj/.git"),
@@ -1014,7 +1017,9 @@ fn the_seam_not_the_backend_refuses_a_hard_linked_protected_file() {
     );
     assert_eq!(Path::new("/usr/bin/true"), cmd.as_std().get_program());
     assert!(
-        cmd.as_std().get_envs().any(|(k, _)| k == "CHUTES_BUILD_W1_MARKER"),
+        cmd.as_std()
+            .get_envs()
+            .any(|(k, _)| k == "CHUTES_BUILD_W1_MARKER"),
         "a refused wrap leaves the command untouched"
     );
 
@@ -1989,7 +1994,10 @@ async fn sandbox_exec_round_trip_confines_writes_to_the_root() {
     let outside = base.join("outside");
     std::fs::create_dir_all(&ws).expect("mkdir ws");
     std::fs::create_dir_all(&outside).expect("mkdir outside");
-    let policy = policy_for(vec![ws.clone()], vec![protected_path(ws.join(".chutes-build"))]);
+    let policy = policy_for(
+        vec![ws.clone()],
+        vec![protected_path(ws.join(".chutes-build"))],
+    );
     let backend = SeatbeltBackend::new();
     let inside = run_touch(&backend, &policy, &ws, &ws.join("inside.txt")).await;
     assert!(inside.status.success(), "{inside:?}");

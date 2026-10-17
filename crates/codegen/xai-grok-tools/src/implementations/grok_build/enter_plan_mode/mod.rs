@@ -632,7 +632,10 @@ mod tests {
         let EnterPlanModeOutput::Entered {
             ref plan_file_path, ..
         } = result;
-        assert_eq!(plan_file_path, "/workspace/my-project/.chutes-build/plan.md");
+        assert_eq!(
+            plan_file_path,
+            "/workspace/my-project/.chutes-build/plan.md"
+        );
     }
 
     #[tokio::test]
@@ -705,7 +708,10 @@ mod tests {
         let EnterPlanModeOutput::Entered {
             ref plan_file_path, ..
         } = result;
-        assert_eq!(plan_file_path, "/home/user/.chutes-build/sessions/xyz/plan.md");
+        assert_eq!(
+            plan_file_path,
+            "/home/user/.chutes-build/sessions/xyz/plan.md"
+        );
         assert!(!plan_file_path.contains(".chutes-build/plan.md"));
     }
 }

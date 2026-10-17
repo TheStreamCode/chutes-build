@@ -2221,7 +2221,7 @@ fn version_mismatch_notification_contains_correct_fields() {
     let payload = make_version_mismatch_notification("0.1.157", "0.1.150")
         .expect("should produce notification");
     let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
-    assert_eq!(j(&json, "/method"), "x.ai/leader/version_mismatch");
+    assert_eq!(j(&json, "/method"), "chutes.ai/leader/version_mismatch");
     assert_eq!(j(&json, "/params/clientVersion"), "0.1.157");
     assert_eq!(j(&json, "/params/leaderVersion"), "0.1.150");
     assert!(
@@ -4471,8 +4471,9 @@ async fn roster_merge_round_trips_namespaced_ids_and_broadcasts_changes() {
     write_message(
         &mut writer_a,
         &ClientMessage::Acp {
-            payload: r#"{"jsonrpc":"2.0","id":41,"method":"_chutes.build/sessions/list","params":{}}"#
-                .to_owned(),
+            payload:
+                r#"{"jsonrpc":"2.0","id":41,"method":"_chutes.build/sessions/list","params":{}}"#
+                    .to_owned(),
         },
     )
     .await
@@ -4546,9 +4547,9 @@ async fn roster_merge_round_trips_namespaced_ids_and_broadcasts_changes() {
     for (name, reader) in [("A", &mut reader_a), ("B", &mut reader_b)] {
         let got = next_acp_payload(reader).await;
         assert!(
-            got.as_deref().is_some_and(
-                |p| p.contains("_chutes.build/sessions/changed") && p.contains("cursor-worker:bc-1")
-            ),
+            got.as_deref()
+                .is_some_and(|p| p.contains("_chutes.build/sessions/changed")
+                    && p.contains("cursor-worker:bc-1")),
             "client {name} must receive the synthesized roster broadcast, got {got:?}"
         );
     }

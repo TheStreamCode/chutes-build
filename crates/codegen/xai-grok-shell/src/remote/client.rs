@@ -13,8 +13,8 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const CHUTES_BUILD_CODE_WEB_URL: &str = "https://chutes.ai";
 
 pub fn share_url(permission_id: &str) -> String {
-    let web_url =
-        std::env::var("CHUTES_BUILD_CODE_WEB_URL").unwrap_or_else(|_| CHUTES_BUILD_CODE_WEB_URL.to_string());
+    let web_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
+        .unwrap_or_else(|_| CHUTES_BUILD_CODE_WEB_URL.to_string());
     format!("{}/build/share/{}", web_url, permission_id)
 }
 

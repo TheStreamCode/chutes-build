@@ -19,9 +19,9 @@ pub const RATE_LIMITED_USER_MESSAGE_OAUTH: &str =
     "You\u{2019}ve hit the rate limit for your plan. Upgrade your account or try again later.";
 
 /// API key / team rate-limit copy.
-/// Personal grok.com upgrades do not raise API team limits; admins purchase credits or a higher spend-based tier.
-/// See https://docs.chutes.ai/developers/rate-limits#rate-limit-tiers
-pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team\u{2019}s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://docs.chutes.ai/developers/rate-limits#rate-limit-tiers";
+/// Personal plan upgrades do not raise API team limits; admins purchase credits or a higher spend-based tier.
+/// See https://chutes.ai/?_s=usage
+pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team\u{2019}s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://chutes.ai/?_s=usage";
 
 /// Well-known free-usage exhaustion code CCP returns on HTTP 429.
 /// Matches `prod_util_well_known_errors::SUBSCRIPTION_FREE_USAGE_EXHAUSTED`.
@@ -30,7 +30,7 @@ pub const FREE_USAGE_EXHAUSTED_ERROR_CODE: &str = "subscription:free-usage-exhau
 
 /// User-facing free-usage exhaustion copy (paywall).
 /// Promises no reset duration; the backend config drives the quota window.
-pub const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your free Chutes Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build";
+pub const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your Chutes Build usage limit for now. Upgrade your plan or add credits for higher limits, or try again later: https://chutes.ai/?_s=usage";
 
 /// Whether flattened server detail is free-usage-quota exhaustion (paywall), not transient throttling.
 /// Sniffs the well-known code embedded by `parse_error_bytes`.
@@ -78,10 +78,12 @@ fn strip_sampling_api_error_prefix(detail: &str) -> &str {
 }
 
 /// IC sometimes reuses OAuth free-tier upsell copy on 429s ("upgrade to a Chutes Build subscription" / grok.com/supergrok).
-/// That is wrong for API-key / team auth: higher limits come from credits and spend-based rate-limit tiers, not a personal SuperGrok plan.
+/// That is wrong for API-key / team auth: higher limits come from credits and spend-based rate-limit tiers, not a personal plan.
 fn pushes_consumer_subscription_upsell(detail: &str) -> bool {
     let d = detail.to_ascii_lowercase();
-    d.contains("grok.com/supergrok") || d.contains("upgrade to a grok subscription")
+    d.contains("grok.com/supergrok")
+        || d.contains("chutes.ai/supergrok")
+        || d.contains("upgrade to a grok subscription")
 }
 
 /// User-facing copy for capacity/overload failures (stream `overloaded_error`, HTTP 529, proxy-wrapped 5xx).
@@ -542,10 +544,7 @@ mod tests {
         assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Upgrade your account"));
         assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("team"));
         assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("credits"));
-        assert!(
-            RATE_LIMITED_USER_MESSAGE_API_KEY
-                .contains("https://docs.chutes.ai/developers/rate-limits#rate-limit-tiers")
-        );
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("https://chutes.ai/?_s=usage"));
         assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("Upgrade your account"));
     }
 
@@ -557,7 +556,7 @@ mod tests {
         assert_eq!(format_rate_limited_user_message(Some(&wire), false), body);
         assert_eq!(format_rate_limited_user_message(Some(&wire), true), body);
 
-        // Team console rate-limit copy has no personal SuperGrok upsell; it passes through as-is
+        // Team console rate-limit copy has no personal-plan upsell; it passes through as-is
         let team = "resource-exhausted: Too many requests for team abc. See https://console.chutes.ai/team/default/rate-limits.";
         let team_wire = format!("API error (status 429 Too Many Requests): {team}");
         assert_eq!(
@@ -578,7 +577,7 @@ mod tests {
         let wire = format!("API error (status 429 Too Many Requests): {body}");
         // OAuth keeps the IC body (personal plan upgrade is correct).
         assert_eq!(format_rate_limited_user_message(Some(&wire), false), body);
-        // API key must not push grok.com SuperGrok; it gets the team credits / rate-limit tiers copy
+        // API key must not push a personal-plan upsell; it gets the team credits / rate-limit tiers copy
         assert_eq!(
             format_rate_limited_user_message(Some(&wire), true),
             RATE_LIMITED_USER_MESSAGE_API_KEY

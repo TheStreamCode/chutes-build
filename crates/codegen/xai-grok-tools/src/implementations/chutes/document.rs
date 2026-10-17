@@ -149,7 +149,12 @@ impl xai_tool_runtime::Tool for ExtractDocumentTool {
         // Extract mode can run on raw text; every other mode needs a file.
         let mut doc = DocInput::default();
         let mut source_path: Option<String> = None;
-        if let Some(path) = input.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        if let Some(path) = input
+            .path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
             let (file_bytes, is_pdf) = read_document_file(&ctx, path).await?;
             let max_bytes = max_input_bytes();
             if file_bytes.len() > max_bytes {
@@ -157,17 +162,19 @@ impl xai_tool_runtime::Tool for ExtractDocumentTool {
                     "document exceeds the {max_bytes}-byte input limit; split it or raise CHUTES_MAX_INPUT_ASSET_BYTES"
                 )));
             }
-            let encoded = base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                &file_bytes,
-            );
+            let encoded =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &file_bytes);
             if is_pdf {
                 doc.pdf_b64 = Some(encoded);
             } else {
                 doc.image_b64 = Some(encoded);
             }
             source_path = Some(path.to_owned());
-        } else if let Some(text) = input.text.as_deref().map(str::trim).filter(|t| !t.is_empty())
+        } else if let Some(text) = input
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
         {
             doc.text = Some(text.to_owned());
         }

@@ -1,7 +1,7 @@
 //! Top-level action router: maps actions and action results to handlers.
 use super::auth::{
-    dispatch_cancel_login, dispatch_login, dispatch_logout, dispatch_submit_auth_code,
-    dispatch_switch_account,
+    dispatch_cancel_api_key_entry, dispatch_cancel_login, dispatch_enter_api_key, dispatch_login,
+    dispatch_logout, dispatch_submit_api_key, dispatch_submit_auth_code, dispatch_switch_account,
 };
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
@@ -98,10 +98,11 @@ use super::settings::ui::{
     dispatch_toggle_vim_mode,
 };
 use super::status::{
-    dispatch_copy_session_id, dispatch_manage_billing, dispatch_open_gboom, dispatch_open_tutorial, dispatch_show_account,
+    dispatch_copy_session_id, dispatch_manage_billing, dispatch_open_gboom, dispatch_open_tutorial,
     dispatch_privacy_banner_opt_in, dispatch_privacy_banner_opt_out, dispatch_share_session,
-    dispatch_show_context_info, dispatch_show_queue, dispatch_show_release_notes,
-    dispatch_show_session_info, dispatch_show_tasks, dispatch_show_usage, set_coding_data_sharing,
+    dispatch_show_account, dispatch_show_context_info, dispatch_show_queue,
+    dispatch_show_release_notes, dispatch_show_session_info, dispatch_show_tasks,
+    dispatch_show_usage, set_coding_data_sharing,
 };
 use super::task_result::{dispatch_task_result, unregister_all_active_sessions};
 use super::transcript::{
@@ -1273,6 +1274,9 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::Login => dispatch_login(app),
         Action::CancelLogin => dispatch_cancel_login(app),
         Action::SubmitAuthCode(code) => dispatch_submit_auth_code(app, code),
+        Action::EnterApiKey => dispatch_enter_api_key(app),
+        Action::SubmitApiKey(key) => dispatch_submit_api_key(app, key),
+        Action::CancelApiKeyEntry => dispatch_cancel_api_key_entry(app),
         Action::CopyAuthUrl => {
             dispatch_copy_auth_url(app, crate::clipboard::SystemClipboard::try_set)
         }

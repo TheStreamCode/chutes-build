@@ -316,8 +316,8 @@ pub async fn run_headless(
     reauthenticate: bool,
     memory_config: Option<crate::config::MemoryConfig>,
 ) -> anyhow::Result<()> {
-    if let Some(refusal) = xai_grok_config::Distribution::current()
-        .refusal(xai_grok_config::Capability::RemoteControl)
+    if let Some(refusal) =
+        xai_grok_config::Distribution::current().refusal(xai_grok_config::Capability::RemoteControl)
     {
         anyhow::bail!("{refusal}");
     }
@@ -409,7 +409,7 @@ pub async fn run_headless(
     else {
         anyhow::bail!("{HEADLESS_NO_SESSION}");
     };
-    let grok_code_url = format!("{}/build", ctx.grok_ws_origin);
+    let grok_code_url = format!("{}/build", ctx.ws_origin);
     let on_first_connect: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
         if !did_browser_flow {
             eprintln!();
@@ -661,7 +661,11 @@ impl DeferredRelayArm {
     /// Returns `Some(self)` when the session is not relay-eligible, so a later eligible token can still arm.
     /// Ineligible means BYOK / non-x.ai issuer; see [`RelayConfig::for_session`](crate::agent::relay::RelayConfig::for_session). Must be called within a `LocalSet` (delegates to [`spawn_leader_relay`]).
     fn arm_if_eligible(self, session: &GrokAuth, auth_manager: &Arc<AuthManager>) -> Option<Self> {
-        self.arm_if_eligible_as(session, auth_manager, xai_grok_config::Distribution::current())
+        self.arm_if_eligible_as(
+            session,
+            auth_manager,
+            xai_grok_config::Distribution::current(),
+        )
     }
     fn arm_if_eligible_as(
         self,
@@ -756,7 +760,7 @@ pub async fn run_leader(
     xai_grok_telemetry::unified_log::set_version(xai_grok_version::VERSION);
     let mut agent_config = agent_config.clone();
     agent_config.mode = crate::agent::config::AgentMode::Leader;
-    let ws_url = &agent_config.grok_com_config.grok_ws_url;
+    let ws_url = &agent_config.grok_com_config.ws_url;
     let mut lock = LeaderLock::new(ws_url);
     let socket_path = lock.socket_path().clone();
     match lock.try_acquire() {
@@ -1504,8 +1508,8 @@ mod tests {
             ..GrokAuth::test_default()
         };
         let cfg = xai_grok_login::GrokComConfig {
-            grok_ws_url: format!("ws://{addr}"),
-            grok_ws_origin: format!("http://{addr}"),
+            ws_url: format!("ws://{addr}"),
+            ws_origin: format!("http://{addr}"),
             ..Default::default()
         };
         crate::agent::relay::RelayConfig::for_session(&auth, &cfg, None, None)
@@ -1517,7 +1521,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn embedded_otel_gate_keeps_a_session_user_fail_closed() {
-        use crate::agent::auth_method::{LEGACY_CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_ENV_VAR};
+        use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR};
         use xai_grok_telemetry::external::{
             is_settings_gate_open, mark_external_otel_settings_resolved,
         };
@@ -1717,8 +1721,8 @@ mod tests {
         let (_demand_tx, demand_rx) = watch::channel(false);
         let slot = Rc::new(std::cell::RefCell::new(None));
         let grok_com_config = xai_grok_login::GrokComConfig {
-            grok_ws_url: format!("ws://{addr}"),
-            grok_ws_origin: format!("http://{addr}"),
+            ws_url: format!("ws://{addr}"),
+            ws_origin: format!("http://{addr}"),
             ..Default::default()
         };
         let tmp = tempfile::tempdir().unwrap();
@@ -1785,8 +1789,8 @@ mod tests {
         use crate::config::reloader::{ConfigReloader, ConfigUpdate, hash_auth_key};
         let (addr, _count) = spawn_mock_relay_server().await;
         let grok_com_config = xai_grok_login::GrokComConfig {
-            grok_ws_url: format!("ws://{addr}"),
-            grok_ws_origin: format!("http://{addr}"),
+            ws_url: format!("ws://{addr}"),
+            ws_origin: format!("http://{addr}"),
             ..Default::default()
         };
         let tmp = tempfile::tempdir().unwrap();

@@ -166,6 +166,8 @@ pub(crate) fn test_app() -> AppView {
         login_method_id: None,
         auth_start_mode: AuthMode::Pending,
         auth_code_input: LineEditor::default(),
+        api_key_entry_error: None,
+        api_key_entry_validating: false,
         next_auth_request_seq: 1,
         auth_url_poll_handle: None,
         deferred_startup: Default::default(),
@@ -2177,18 +2179,13 @@ fn expected_tier_restricted_commands() -> Vec<String> {
         .collect()
 }
 /// The present/absent assertions must exercise the deny list, not incidental fail-closed hiding:
-/// `/imagine`, `/imagine-video` are `required_tools()`-gated, so advertise their tools (otherwise the registry fail-closes them).
+/// `/imagine`, `/imagine-video` are `required_tools()`-gated on `generate_media`, so advertise it (otherwise the registry fail-closes them).
 /// `/voice` is fail-closed hidden until the remote flag turns it on, so reveal it via the registry directly.
 fn advertise_media_tools(app: &mut AppView) {
     app.welcome_prompt
         .slash_controller
         .registry_mut()
-        .set_available_tools(
-            ["image_gen", "image_to_video"]
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-        );
+        .set_available_tools(["generate_media"].into_iter().map(str::to_string).collect());
     app.welcome_prompt.set_voice_visible(true);
 }
 fn assert_tier_restricted_commands_absent(app: &AppView) {
@@ -2296,7 +2293,7 @@ fn apply_auth_meta_clears_gate_on_subscription() {
     let mut app = test_app();
     app.gate = Some(xai_grok_login::GateInfo {
         message: "Subscribe to use Chutes Build".into(),
-        url: Some("https://grok.com/supergrok?referrer=grok-build".into()),
+        url: Some("https://chutes.ai/?_s=usage".into()),
         label: None,
     });
     assert!(app.is_access_blocked());
@@ -2920,8 +2917,8 @@ fn consent_pending_app() -> AppView {
                 },
             ],
             links: vec![
-                "https://x.ai/legal/tos".to_string(),
-                "https://x.ai/legal/aup".to_string(),
+                "https://chutes.ai/terms".to_string(),
+                "https://chutes.ai/privacy".to_string(),
             ],
             accept_label: "Accept".to_string(),
         },
@@ -4819,20 +4816,86 @@ fn prompt_focused_bare_text_chars_promote_no_action() {
     }
 }
 #[test]
-fn welcome_pending_l_triggers_login() {
+fn welcome_pending_l_triggers_api_key_entry() {
     let mut app = test_app();
     app.auth_state = AuthState::Pending { error: None };
     app.welcome_prompt_focused = false;
     let outcome = app.handle_input(&key_event(KeyCode::Char('l'), KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Action(Action::Login)));
+    assert!(matches!(outcome, InputOutcome::Action(Action::EnterApiKey)));
 }
 #[test]
-fn welcome_pending_enter_triggers_login() {
+fn welcome_pending_enter_triggers_api_key_entry() {
     let mut app = test_app();
     app.auth_state = AuthState::Pending { error: None };
     app.welcome_prompt_focused = false;
     let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Action(Action::Login)));
+    assert!(matches!(outcome, InputOutcome::Action(Action::EnterApiKey)));
+}
+#[test]
+fn welcome_pending_k_triggers_api_key_entry() {
+    let mut app = test_app();
+    app.auth_state = AuthState::Pending { error: None };
+    app.welcome_prompt_focused = false;
+    let outcome = app.handle_input(&key_event(KeyCode::Char('k'), KeyModifiers::NONE));
+    assert!(matches!(outcome, InputOutcome::Action(Action::EnterApiKey)));
+}
+
+fn entry_mode_app() -> AppView {
+    let mut app = test_app();
+    app.auth_state = AuthState::Authenticating {
+        request_seq: 1,
+        handle: None,
+        auth_url: None,
+        mode: AuthMode::ApiKeyEntry,
+    };
+    app
+}
+
+#[test]
+fn welcome_entry_enter_submits_redacted_key() {
+    let mut app = entry_mode_app();
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
+    match outcome {
+        InputOutcome::Action(Action::SubmitApiKey(key)) => {
+            assert_eq!(key.expose(), "cpk-test-key");
+        }
+        other => panic!("expected SubmitApiKey, got {other:?}"),
+    }
+}
+
+#[test]
+fn welcome_entry_enter_with_blank_input_is_unchanged() {
+    let mut app = entry_mode_app();
+    let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(outcome, InputOutcome::Unchanged));
+}
+
+#[test]
+fn welcome_entry_esc_cancels_to_pending() {
+    let mut app = entry_mode_app();
+    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(
+        outcome,
+        InputOutcome::Action(Action::CancelApiKeyEntry)
+    ));
+}
+
+#[test]
+fn welcome_entry_freezes_while_validating() {
+    let mut app = entry_mode_app();
+    app.api_key_entry_validating = true;
+    let outcome = app.handle_input(&key_event(KeyCode::Char('x'), KeyModifiers::NONE));
+    assert!(matches!(outcome, InputOutcome::Unchanged));
+    assert!(app.auth_code_input.text().is_empty());
+    let outcome = app.handle_input(&key_event(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(outcome, InputOutcome::Unchanged));
+    // Esc still backs out while a validation is in flight (the late result drops by sequence).
+    let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(
+        outcome,
+        InputOutcome::Action(Action::CancelApiKeyEntry)
+    ));
 }
 #[test]
 fn welcome_pending_n_is_unchanged() {

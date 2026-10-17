@@ -52,7 +52,10 @@ pub(crate) enum WatchStrategy {
 
 /// Per-dir on Linux and fan-out elsewhere, overridden by `CHUTES_BUILD_FSNOTIFY_PER_DIR`.
 pub(crate) fn watch_strategy() -> WatchStrategy {
-    match std::env::var("CHUTES_BUILD_FSNOTIFY_PER_DIR").ok().as_deref() {
+    match std::env::var("CHUTES_BUILD_FSNOTIFY_PER_DIR")
+        .ok()
+        .as_deref()
+    {
         Some("1") | Some("true") => WatchStrategy::PerDir,
         Some("0") | Some("false") => WatchStrategy::Fanout,
         _ if cfg!(target_os = "linux") => WatchStrategy::PerDir,

@@ -95,7 +95,7 @@ fn parse_models_list_response(raw: &str) -> Result<acp::SessionModelState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::auth_method::{LEGACY_CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_ENV_VAR};
+    use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR};
     use crate::agent::config::Config;
     use serial_test::serial;
     use xai_grok_login::{AuthMode, GrokAuth};

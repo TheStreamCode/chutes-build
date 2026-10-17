@@ -20,8 +20,9 @@ fn action_outcome(response: &serde_json::Value) -> xai_hooks_plugins_types::Acti
 #[test]
 fn plugins_action_install_and_update_respect_marketplace_lockdown() {
     run_agent_test(|cwd, _server| async move {
-        let grok_home =
-            std::path::PathBuf::from(std::env::var("CHUTES_BUILD_HOME").expect("harness sets CHUTES_BUILD_HOME"));
+        let grok_home = std::path::PathBuf::from(
+            std::env::var("CHUTES_BUILD_HOME").expect("harness sets CHUTES_BUILD_HOME"),
+        );
         std::fs::create_dir_all(&grok_home).unwrap();
         // Binding lockdown: one allowed marketplace (installs/updates of
         // anything else refuse) and project MCP pinned off.

@@ -60,7 +60,7 @@ fn record(id: &str, created_at: i64) -> TrackedRow {
 }
 fn worktrees_report(worktrees: Vec<WorktreeUsage>, total_bytes: u64) -> DiskUsageReport {
     DiskUsageReport {
-        grok_home: "/wt-home".into(),
+        chutes_home: "/wt-home".into(),
         total_bytes,
         top_level_dirs: vec![DirUsage {
             name: WORKTREES_DIR.to_owned(),
@@ -496,7 +496,7 @@ fn worktrees_dominate_at_half_of_total() {
     ];
     for case in cases {
         let report = DiskUsageReport {
-            grok_home: "/home/user/.chutes-build".into(),
+            chutes_home: "/home/user/.chutes-build".into(),
             total_bytes: case.total_bytes,
             top_level_dirs: vec![DirUsage {
                 name: WORKTREES_DIR.to_owned(),
@@ -513,7 +513,7 @@ fn worktrees_dominate_at_half_of_total() {
 fn json_shape_is_frozen() {
     let report = DiskUsageReport {
         schema_version: SCHEMA_VERSION,
-        grok_home: "/home/user/.chutes-build".into(),
+        chutes_home: "/home/user/.chutes-build".into(),
         total_bytes: 100,
         volume_capacity_bytes: Some(1_000),
         volume_available_bytes: Some(600),
@@ -556,8 +556,8 @@ fn json_shape_is_frozen() {
     assert_eq!(
         serde_json::to_value(&report).unwrap(),
         serde_json::json!({
-            "schema_version": 2,
-            "grok_home": "/home/user/.chutes-build",
+            "schema_version": 3,
+            "chutes_home": "/home/user/.chutes-build",
             "total_bytes": 100,
             "volume_capacity_bytes": 1_000,
             "volume_available_bytes": 600,
@@ -641,7 +641,7 @@ fn missing_home_prints_unreadable_directory_skip() {
         String::from_utf8(out).unwrap()
     };
     let skipped = DiskUsageReport {
-        grok_home: "/nonexistent/.chutes-build".into(),
+        chutes_home: "/nonexistent/.chutes-build".into(),
         skips: SkipCounts {
             unreadable_dirs: 1,
             ..SkipCounts::default()
@@ -657,7 +657,7 @@ fn missing_home_prints_unreadable_directory_skip() {
     assert!(!text.contains("Disk usage for"), "{text}");
     assert!(!text.contains("Worktrees"), "{text}");
     let clean = DiskUsageReport {
-        grok_home: "/nonexistent/.chutes-build".into(),
+        chutes_home: "/nonexistent/.chutes-build".into(),
         ..DiskUsageReport::default()
     };
     let text = render(&clean);
@@ -669,7 +669,7 @@ fn missing_home_prints_unreadable_directory_skip() {
     assert!(!text.contains("Disk usage for"), "{text}");
     assert!(!text.contains("Worktrees"), "{text}");
     let short = DiskUsageReport {
-        grok_home: "/nonexistent/.chutes-build".into(),
+        chutes_home: "/nonexistent/.chutes-build".into(),
         redirections_bytes: 4096,
         skips: SkipCounts {
             unreadable_dirs: 1,
@@ -702,7 +702,7 @@ fn missing_home_json_is_valid_and_empty() {
     )
     .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(json.get("schema_version"), Some(&serde_json::json!(2)));
+    assert_eq!(json.get("schema_version"), Some(&serde_json::json!(3)));
     assert_eq!(json.get("registry"), Some(&serde_json::json!("absent")));
     assert_eq!(json.get("registry_path"), Some(&serde_json::json!("")));
     assert_eq!(json.get("total_bytes"), Some(&serde_json::json!(0)));
@@ -712,7 +712,7 @@ fn missing_home_json_is_valid_and_empty() {
 fn print_report_truncates_long_labels_and_keeps_columns_aligned() {
     let long_label = "a".repeat(30);
     let report = DiskUsageReport {
-        grok_home: "/wt-home".into(),
+        chutes_home: "/wt-home".into(),
         total_bytes: 300,
         top_level_dirs: vec![DirUsage {
             name: WORKTREES_DIR.to_owned(),
@@ -860,7 +860,11 @@ fn print_report_renders_registry_notices() {
             registry: RegistryState::Busy,
             rows: true,
             expected: &["in use by another process", "Retry in a moment."],
-            absent: &["db rebuild", "damaged", "Remove $CHUTES_BUILD_HOME/worktrees.db"],
+            absent: &[
+                "db rebuild",
+                "damaged",
+                "Remove $CHUTES_BUILD_HOME/worktrees.db",
+            ],
         },
         Case {
             name: "an unopenable registry names the file without proposing deletion",
@@ -871,7 +875,11 @@ fn print_report_renders_registry_notices() {
                 "worktrees.db",
                 "Check its permissions.",
             ],
-            absent: &["db rebuild", "damaged", "Remove $CHUTES_BUILD_HOME/worktrees.db"],
+            absent: &[
+                "db rebuild",
+                "damaged",
+                "Remove $CHUTES_BUILD_HOME/worktrees.db",
+            ],
         },
     ];
     for case in cases {
@@ -1022,7 +1030,9 @@ fn symlinked_default_home_keeps_home_label() {
     std::fs::create_dir_all(&real_grok).unwrap();
     std::os::unix::fs::symlink(&real_grok, fake_home.join(".chutes-build")).unwrap();
     let _home = crate::test_util::EnvVarGuard::set("HOME", &fake_home);
-    let resolved = dunce::canonicalize(&fake_home).unwrap().join(".chutes-build");
+    let resolved = dunce::canonicalize(&fake_home)
+        .unwrap()
+        .join(".chutes-build");
     let canonical = dunce::canonicalize(&resolved).unwrap();
     assert_ne!(canonical, resolved, "the symlink must actually resolve");
     assert_eq!(

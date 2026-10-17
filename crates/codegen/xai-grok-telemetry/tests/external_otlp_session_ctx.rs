@@ -66,7 +66,7 @@ async fn ambient_ctx_injects_session_turn_and_prompt_id() {
 
     let prompt = server
         .recorder()
-        .log_record("grok_code.user_prompt")
+        .log_record("chutes_build.user_prompt")
         .expect("user_prompt present");
     assert_eq!(
         prompt.attributes.get("session.id").and_then(Value::as_str),
@@ -91,7 +91,7 @@ async fn ambient_ctx_injects_session_turn_and_prompt_id() {
 
     let tokens: Vec<_> = server
         .recorder()
-        .metric_points_named("grok_code.token.usage");
+        .metric_points_named("chutes_build.token.usage");
     assert!(!tokens.is_empty(), "token.usage must export");
     for p in &tokens {
         assert!(

@@ -92,6 +92,19 @@ impl ChutesCredentials {
         })
     }
 
+    /// Credentials from an explicitly provided key (interactive setup flows).
+    /// The key is trimmed; blank input is rejected rather than stored.
+    pub fn from_key(key: &str) -> Result<Self, CredentialError> {
+        let api_key = key.trim();
+        if api_key.is_empty() {
+            return Err(CredentialError::Empty);
+        }
+        Ok(Self {
+            api_key: api_key.to_owned(),
+            management_scheme: AuthScheme::from_env(),
+        })
+    }
+
     pub fn inference_authorization(&self) -> Cow<'_, str> {
         Cow::Owned(format!("Bearer {}", self.api_key))
     }
@@ -129,6 +142,8 @@ fn sensitive_header_value(value: &str) -> reqwest::header::HeaderValue {
 pub enum CredentialError {
     #[error("CHUTES_API_KEY is not set; configure it in the environment before using Chutes")]
     Missing,
+    #[error("the API key is empty")]
+    Empty,
 }
 
 #[cfg(test)]

@@ -329,7 +329,8 @@ mod tests {
             Some("xterm-256color")
         );
         assert_eq!(
-            cmd.get_env("CHUTES_BUILD_SCROLL_LOG").and_then(|v| v.to_str()),
+            cmd.get_env("CHUTES_BUILD_SCROLL_LOG")
+                .and_then(|v| v.to_str()),
             None,
             "hermetic baseline must remove unrelated inherited vars"
         );
@@ -483,7 +484,8 @@ mod tests {
             Some("xterm-kitty")
         );
         assert_eq!(
-            cmd.get_env("CHUTES_BUILD_OSC52_SINK").and_then(|v| v.to_str()),
+            cmd.get_env("CHUTES_BUILD_OSC52_SINK")
+                .and_then(|v| v.to_str()),
             Some("1"),
             "explicit sink scenarios must be able to re-inject the marker"
         );

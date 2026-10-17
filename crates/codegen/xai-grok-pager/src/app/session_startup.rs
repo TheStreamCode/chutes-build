@@ -346,11 +346,14 @@ pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ENV: &str = "CHUTES_BUILD_CHAT_LOCAL
 #[cfg(feature = "local-workspace")]
 pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_CWD_ENV: &str = "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_CWD";
 #[cfg(feature = "local-workspace")]
-pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV: &str = "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE";
+pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV: &str =
+    "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE";
 #[cfg(feature = "local-workspace")]
-pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV: &str = "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID";
+pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV: &str =
+    "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID";
 #[cfg(feature = "local-workspace")]
-pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME_ENV: &str = "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME";
+pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME_ENV: &str =
+    "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME";
 /// Skip interactive first-run confirm (still prints the banner).
 #[cfg(feature = "local-workspace")]
 pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV: &str = "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK";
@@ -364,14 +367,12 @@ pub const LOCAL_WORKSPACE_ATTACH_NEEDS_SERVER_ID: &str = "local-workspace attach
 #[cfg(feature = "local-workspace")]
 pub const LOCAL_WORKSPACE_REQUIRES_CHAT: &str = "local-workspace flags/env require --chat";
 #[cfg(feature = "local-workspace")]
-pub const LOCAL_WORKSPACE_HOME_DENIED: &str =
-    "local-workspace cwd may not be / or $HOME unless CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME=1";
+pub const LOCAL_WORKSPACE_HOME_DENIED: &str = "local-workspace cwd may not be / or $HOME unless CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME=1";
 #[cfg(feature = "local-workspace")]
 pub const LOCAL_WORKSPACE_HITL_HINT: &str = "Permission prompts for local workspace tools apply to your machine. \
      Local workspace replaces the chat sandbox.";
 #[cfg(feature = "local-workspace")]
-pub const LOCAL_WORKSPACE_ACK_REQUIRED: &str =
-    "local-workspace requires interactive confirm, CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK=1, or an ack file";
+pub const LOCAL_WORKSPACE_ACK_REQUIRED: &str = "local-workspace requires interactive confirm, CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK=1, or an ack file";
 /// Declared advertised tool ids for attach FS-only check (comma-separated).
 #[cfg(feature = "local-workspace")]
 pub const CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS_ENV: &str =
@@ -451,7 +452,8 @@ pub fn resolve_local_workspace_config(
     let env_enable = env_truthy(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ENV);
     let env_mode = env_nonempty(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV);
     let env_server_id = env_nonempty(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV);
-    let env_cwd = env_nonempty(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_CWD_ENV).map(std::path::PathBuf::from);
+    let env_cwd =
+        env_nonempty(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_CWD_ENV).map(std::path::PathBuf::from);
     let cli_attach = cli_attach.map(str::trim).filter(|s| !s.is_empty());
     let cli_requested = cli_own.is_some() || cli_attach.is_some();
     let env_requested = env_enable || env_mode.is_some() || env_server_id.is_some();
@@ -2584,8 +2586,10 @@ mod tests {
             tmp.path().to_str().unwrap(),
         );
         let _enable = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ENV);
-        let _mode = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV);
-        let _sid = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV);
+        let _mode =
+            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV);
+        let _sid =
+            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV);
         let cfg = resolve_local_workspace_config(true, None, None, Some(tmp.path())).unwrap();
         assert!(
             cfg.is_none(),
@@ -2614,9 +2618,12 @@ mod tests {
     #[test]
     fn resolve_local_workspace_own_env_defaults() {
         let _env = advertised_tools_env();
-        let _enable = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ENV, "1");
-        let _mode = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV);
-        let _sid = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV);
+        let _enable =
+            xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ENV, "1");
+        let _mode =
+            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_MODE_ENV);
+        let _sid =
+            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_SERVER_ID_ENV);
         let cwd = tempfile::tempdir().unwrap();
         let _cwd = xai_grok_test_support::EnvGuard::set(
             CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_CWD_ENV,
@@ -2652,8 +2659,9 @@ mod tests {
             CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS_ENV,
             "workspace.fs_list",
         );
-        let _allow =
-            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME_ENV);
+        let _allow = xai_grok_test_support::EnvGuard::unset(
+            CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME_ENV,
+        );
         let home = tempfile::tempdir().unwrap();
         let home_str = home.path().to_str().unwrap();
         let _home = xai_grok_test_support::EnvGuard::set("HOME", home_str);
@@ -2666,8 +2674,9 @@ mod tests {
     #[serial_test::serial(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS)]
     #[test]
     fn resolve_local_workspace_refuses_uncheckable_toolset() {
-        let _tools =
-            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS_ENV);
+        let _tools = xai_grok_test_support::EnvGuard::unset(
+            CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS_ENV,
+        );
         let tmp = tempfile::tempdir().unwrap();
         let err =
             resolve_local_workspace_config(true, None, Some("srv"), Some(tmp.path())).unwrap_err();
@@ -2705,10 +2714,13 @@ mod tests {
     #[serial_test::serial(CHUTES_BUILD_HOME)]
     #[test]
     fn local_workspace_non_tty_requires_ack() {
-        let _ack = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV);
+        let _ack =
+            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV);
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().unwrap());
+        let _home = xai_grok_test_support::EnvGuard::set(
+            "CHUTES_BUILD_HOME",
+            home.path().to_str().unwrap(),
+        );
         let cfg = LocalWorkspaceConfig {
             mode: LocalWorkspaceMode::Attach,
             cwd: Some(std::path::PathBuf::from("/tmp/repo")),
@@ -2724,8 +2736,9 @@ mod tests {
     #[serial_test::serial(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME)]
     #[test]
     fn validate_local_workspace_cwd_denies_root() {
-        let _allow =
-            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME_ENV);
+        let _allow = xai_grok_test_support::EnvGuard::unset(
+            CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ALLOW_HOME_ENV,
+        );
         let err = validate_local_workspace_cwd(std::path::Path::new("/")).unwrap_err();
         assert!(err.to_string().contains("ALLOW_HOME"), "{err}");
     }

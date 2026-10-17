@@ -66,7 +66,10 @@ impl DocInput {
         self.pdf_b64
             .as_deref()
             .is_some_and(|v| !v.trim().is_empty())
-            || self.image_b64.as_deref().is_some_and(|v| !v.trim().is_empty())
+            || self
+                .image_b64
+                .as_deref()
+                .is_some_and(|v| !v.trim().is_empty())
     }
 
     fn has_any(&self) -> bool {
@@ -88,10 +91,10 @@ impl DocInput {
                 serde_json::Value::Number(max_pages.into()),
             );
         }
-        if let Some(temperature) = common.temperature {
-            if let Some(number) = serde_json::Number::from_f64(temperature) {
-                body.insert("temperature".to_owned(), serde_json::Value::Number(number));
-            }
+        if let Some(temperature) = common.temperature
+            && let Some(number) = serde_json::Number::from_f64(temperature)
+        {
+            body.insert("temperature".to_owned(), serde_json::Value::Number(number));
         }
         if let Some(max_new_tokens) = common.max_new_tokens {
             body.insert(
@@ -108,7 +111,10 @@ impl DocInput {
         if let Some(pdf) = self.pdf_b64.as_deref().map(str::trim)
             && !pdf.is_empty()
         {
-            body.insert("pdf_b64".to_owned(), serde_json::Value::String(pdf.to_owned()));
+            body.insert(
+                "pdf_b64".to_owned(),
+                serde_json::Value::String(pdf.to_owned()),
+            );
         }
         if let Some(image) = self.image_b64.as_deref().map(str::trim)
             && !image.is_empty()
@@ -150,7 +156,10 @@ pub fn markdown_body(
     if matches!(engine, DocEngine::Nuextract)
         && let Some(mode) = mode.map(str::trim).filter(|m| !m.is_empty())
     {
-        body.insert("mode".to_owned(), serde_json::Value::String(mode.to_owned()));
+        body.insert(
+            "mode".to_owned(),
+            serde_json::Value::String(mode.to_owned()),
+        );
     }
     input.push_common(&mut body, common);
     Ok(serde_json::Value::Object(body))
@@ -199,7 +208,10 @@ pub fn extract_body(
     if let Some(text) = input.text.as_deref().map(str::trim)
         && !text.is_empty()
     {
-        body.insert("text".to_owned(), serde_json::Value::String(text.to_owned()));
+        body.insert(
+            "text".to_owned(),
+            serde_json::Value::String(text.to_owned()),
+        );
     }
     body.insert("template".to_owned(), template.clone());
     if let Some(instructions) = instructions.map(str::trim).filter(|s| !s.is_empty()) {
@@ -274,7 +286,9 @@ pub async fn extract_markdown(
         base_url.trim_end_matches('/'),
         engine.markdown_cord_path()
     );
-    invoke_json(client, &url, &body).await.map_err(DocError::Media)
+    invoke_json(client, &url, &body)
+        .await
+        .map_err(DocError::Media)
 }
 
 /// Create an extraction template through `base_url`.
@@ -287,7 +301,9 @@ pub async fn create_template(
 ) -> Result<serde_json::Value, DocError> {
     let body = template_body(input, description, common).map_err(DocError::InvalidInput)?;
     let url = format!("{}/ocr/nuextract/template", base_url.trim_end_matches('/'));
-    invoke_json(client, &url, &body).await.map_err(DocError::Media)
+    invoke_json(client, &url, &body)
+        .await
+        .map_err(DocError::Media)
 }
 
 /// Run structured extraction through `base_url` with a template from
@@ -304,7 +320,9 @@ pub async fn extract_with_template(
     let body = extract_body(input, template, instructions, examples, common)
         .map_err(DocError::InvalidInput)?;
     let url = format!("{}/ocr/nuextract/extract", base_url.trim_end_matches('/'));
-    invoke_json(client, &url, &body).await.map_err(DocError::Media)
+    invoke_json(client, &url, &body)
+        .await
+        .map_err(DocError::Media)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -321,7 +339,10 @@ mod tests {
 
     #[test]
     fn engine_paths_and_aliases() {
-        assert_eq!(DocEngine::Lighton.markdown_cord_path(), "/ocr/lighton/markdown");
+        assert_eq!(
+            DocEngine::Lighton.markdown_cord_path(),
+            "/ocr/lighton/markdown"
+        );
         assert_eq!(
             DocEngine::Nuextract.markdown_cord_path(),
             "/ocr/nuextract/markdown"
@@ -350,11 +371,21 @@ mod tests {
             image_b64: Some("QUJD".to_owned()),
             ..DocInput::default()
         };
-        let body = markdown_body(&input, DocEngine::Nuextract, Some("content"), &DocCommon::default())
-            .unwrap();
+        let body = markdown_body(
+            &input,
+            DocEngine::Nuextract,
+            Some("content"),
+            &DocCommon::default(),
+        )
+        .unwrap();
         assert_eq!(body["mode"], "content");
-        let body = markdown_body(&input, DocEngine::Lighton, Some("content"), &DocCommon::default())
-            .unwrap();
+        let body = markdown_body(
+            &input,
+            DocEngine::Lighton,
+            Some("content"),
+            &DocCommon::default(),
+        )
+        .unwrap();
         assert!(body.get("mode").is_none());
     }
 
@@ -377,12 +408,34 @@ mod tests {
             text: Some("hello".to_owned()),
             ..DocInput::default()
         };
-        assert!(extract_body(&DocInput::default(), &template, None, None, &DocCommon::default())
-            .is_err());
-        assert!(extract_body(&input, &serde_json::json!("nope"), None, None, &DocCommon::default())
-            .is_err());
-        let body = extract_body(&input, &template, Some("be strict"), None, &DocCommon::default())
-            .unwrap();
+        assert!(
+            extract_body(
+                &DocInput::default(),
+                &template,
+                None,
+                None,
+                &DocCommon::default()
+            )
+            .is_err()
+        );
+        assert!(
+            extract_body(
+                &input,
+                &serde_json::json!("nope"),
+                None,
+                None,
+                &DocCommon::default()
+            )
+            .is_err()
+        );
+        let body = extract_body(
+            &input,
+            &template,
+            Some("be strict"),
+            None,
+            &DocCommon::default(),
+        )
+        .unwrap();
         assert_eq!(body["text"], "hello");
         assert_eq!(body["template"], template);
         assert_eq!(body["instructions"], "be strict");

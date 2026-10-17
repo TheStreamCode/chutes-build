@@ -85,7 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    println!("cargo:rustc-env=CHUTES_BUILD_SHELL_RG_TARGET={}", asset_triple);
+    println!(
+        "cargo:rustc-env=CHUTES_BUILD_SHELL_RG_TARGET={}",
+        asset_triple
+    );
     let dest = gen_dir.join(format!("rg-{}-{}.bin", RG_VER, asset_triple));
     let _ = fs::remove_file(&dest);
 

@@ -1380,7 +1380,8 @@ mod tests {
     #[test]
     fn scan_detects_grok_session_media_path() {
         // The shape of `image_gen` output prose: a dot-directory (`.grok`), a percent-encoded session segment, and a trailing sentence period
-        let line = make_line("Saved to /Users/alice/.chutes-build/sessions/%2Fabc/00000000/images/1.jpg.");
+        let line =
+            make_line("Saved to /Users/alice/.chutes-build/sessions/%2Fabc/00000000/images/1.jpg.");
         let mut overlay = LinkOverlay::new();
         scan_unjoined(std::iter::once((0, &line)), 0, &[], &mut overlay);
 
@@ -1398,8 +1399,9 @@ mod tests {
     fn scan_detects_media_path_soft_wrapped_across_rows() {
         // Regression: `image_gen` output prose wraps the long session path across visual rows (`joiner: Some("")` mid-word break)
         // Previously each row was scanned in isolation, so only the `/Users/alice` fragment on the first row matched and became clickable
-        let row0 =
-            make_line("Image generated and saved to /Users/alice/.chutes-build/sessions/%2FUsers%2Fali");
+        let row0 = make_line(
+            "Image generated and saved to /Users/alice/.chutes-build/sessions/%2FUsers%2Fali",
+        );
         let row1 = make_line("ce%2Fcode%2Fxai/00000000-0000-0000-0000-000000000001/images/1.jpg");
         let rows: Vec<(u16, &Line<'static>, Option<&str>)> =
             vec![(3, &row0, None), (4, &row1, Some(""))];

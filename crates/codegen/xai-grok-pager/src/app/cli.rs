@@ -20,11 +20,11 @@ pub enum Command {
     Account(crate::account_cmd::AccountArgs),
     /// Manage running leader processes
     Leader(LeaderMgmtArgs),
-    /// Unavailable: this build has no account sign-in (prints API-key setup guidance)
+    /// Delete the locally saved Chutes API key (this build has no account sign-in)
     Logout,
-    /// Unavailable: this build has no account sign-in (prints API-key setup guidance)
+    /// Save your Chutes API key locally: validates it and stores it for future runs (this build has no account sign-in)
     Login {
-        /// Ignored (kept for backwards compatibility). OAuth2 is now the only auth method.
+        /// Ignored (kept for backwards compatibility). The API key is the only auth method.
         #[arg(long, hide = true)]
         legacy: bool,
         /// Use Chutes Build OAuth via api.chutes.ai.
@@ -297,9 +297,9 @@ pub struct AgentArgs {
     /// Override the CLI chat proxy base URL.
     #[arg(long = "cli-chat-proxy-base-url")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Override the public xAI API base URL.
-    #[arg(long = "xai-api-base-url")]
-    pub xai_api_base_url: Option<String>,
+    /// Override the public API base URL.
+    #[arg(long = "public-api-base-url", alias = "xai-api-base-url")]
+    pub public_api_base_url: Option<String>,
     /// Agent runtime mode
     #[command(subcommand)]
     pub mode: Option<AgentCmd>,
@@ -342,10 +342,10 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "grok-ws-origin")]
-    pub grok_ws_origin: Option<String>,
-    #[arg(long = "grok-ws-url")]
-    pub grok_ws_url: Option<String>,
+    #[arg(long = "ws-origin", alias = "grok-ws-origin")]
+    pub ws_origin: Option<String>,
+    #[arg(long = "ws-url", alias = "grok-ws-url")]
+    pub ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.
 #[derive(Debug, clap::Args, Clone)]
@@ -396,7 +396,7 @@ pub struct LeaderArgs {
 }
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "grok",
+    name = "chutes-build",
     version = xai_grok_version::full_version(),
     about = "Chutes Build TUI",
     disable_version_flag = true,
@@ -837,7 +837,7 @@ impl PagerArgs {
             .map(std::path::Path::new)
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
-            .filter(|n| *n == "grok" || *n == "agent")
+            .filter(|n| *n == "agent")
             .unwrap_or("chutes-build")
             .to_owned();
         Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)))
@@ -1343,7 +1343,8 @@ mod tests {
                 },
             }))
         ));
-        let kill = PagerArgs::try_parse_from(["grok", "leader", "kill"]).expect("chutes-build leader kill");
+        let kill = PagerArgs::try_parse_from(["grok", "leader", "kill"])
+            .expect("chutes-build leader kill");
         assert!(matches!(
             kill.command,
             Some(Command::Leader(LeaderMgmtArgs {

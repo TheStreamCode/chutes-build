@@ -3457,7 +3457,7 @@ fn apply_requirements_value_overrides_user_settings() {
         );
     assert_eq!(
             "https://managed-api.example/v1",
-            cfg.endpoints.xai_api_base_url
+            cfg.endpoints.public_api_base_url
         );
     assert_eq!(
             Some("https://managed-models.example/v1"),

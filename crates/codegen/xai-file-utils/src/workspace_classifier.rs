@@ -1,8 +1,17 @@
 use std::path::{Path, PathBuf};
 
 const EXCLUDED_DIR_NAMES: &[&str] = &[
-    ".chutes-build", ".cache", ".daemon", ".config", ".npm", ".cargo", ".rustup", ".vscode", ".gemini",
-    ".hermes", ".claude",
+    ".chutes-build",
+    ".cache",
+    ".daemon",
+    ".config",
+    ".npm",
+    ".cargo",
+    ".rustup",
+    ".vscode",
+    ".gemini",
+    ".hermes",
+    ".claude",
 ];
 
 fn known_os_dirs() -> Vec<PathBuf> {

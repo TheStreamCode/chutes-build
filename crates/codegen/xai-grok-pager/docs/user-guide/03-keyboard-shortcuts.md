@@ -288,7 +288,7 @@ Actions that affect the agent session, available from the agent screen.
 
 Non-image files insert their absolute path as text instead of a chip.
 
-> **`Alt+V` on Windows** is grok-specific. Windows Terminal's default `Ctrl+V` only pastes plain text and silently drops image clipboards; `Alt+V` bypasses the interceptor. To use `Ctrl+V` for images too, add `{ "command": null, "keys": "ctrl+v" }` to `actions` in your Windows Terminal `settings.json`.
+> **`Alt+V` on Windows** is Chutes Build-specific. Windows Terminal's default `Ctrl+V` only pastes plain text and silently drops image clipboards; `Alt+V` bypasses the interceptor. To use `Ctrl+V` for images too, add `{ "command": null, "keys": "ctrl+v" }` to `actions` in your Windows Terminal `settings.json`.
 
 ### Linux PRIMARY and CLIPBOARD
 

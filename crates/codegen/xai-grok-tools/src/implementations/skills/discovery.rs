@@ -1482,7 +1482,11 @@ model: test-model
         )
         .unwrap();
         // Same name under /.chutes-build/ → kept (user content).
-        let grok_shell = tmp.path().join(".chutes-build").join("skills").join("shell");
+        let grok_shell = tmp
+            .path()
+            .join(".chutes-build")
+            .join("skills")
+            .join("shell");
         std::fs::create_dir_all(&grok_shell).unwrap();
         std::fs::write(
             grok_shell.join("SKILL.md"),
@@ -1495,7 +1499,11 @@ model: test-model
             (grok_shell.join("SKILL.md"), SkillScope::User),
         ]);
         assert_eq!(skills.len(), 1, "cursor builtin must be dropped");
-        assert!(skills.first().is_some_and(|s| s.path.contains("/.chutes-build/")));
+        assert!(
+            skills
+                .first()
+                .is_some_and(|s| s.path.contains("/.chutes-build/"))
+        );
     }
 
     #[test]

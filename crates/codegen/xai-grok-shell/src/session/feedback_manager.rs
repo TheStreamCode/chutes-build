@@ -1388,7 +1388,8 @@ mod tests {
     fn test_shutdown_budgets_fit_under_session_flush_grace() {
         use crate::agent::activity::SESSION_FLUSH_GRACE;
         // `nonempty_drain_budget` reads env; pin default regardless of CI presets.
-        let _unset = xai_grok_test_support::env::EnvGuard::unset("CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS");
+        let _unset =
+            xai_grok_test_support::env::EnvGuard::unset("CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS");
         assert!(
             SHUTDOWN_SIGNAL_SYNC_TIMEOUT + SHUTDOWN_DRAIN_HARD_MAX <= SESSION_FLUSH_GRACE,
             "sync + hard-max drain must fit under flush grace"
@@ -1417,8 +1418,10 @@ mod tests {
     #[serial_test::serial]
     fn test_nonempty_drain_budget_env_raises_cap() {
         {
-            let _guard =
-                xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS", "7");
+            let _guard = xai_grok_test_support::env::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS",
+                "7",
+            );
             assert_eq!(
                 nonempty_drain_budget(Duration::from_secs(30)),
                 Duration::from_secs(7),
@@ -1426,8 +1429,10 @@ mod tests {
             );
         }
         {
-            let _guard =
-                xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS", "99");
+            let _guard = xai_grok_test_support::env::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS",
+                "99",
+            );
             assert_eq!(
                 nonempty_drain_budget(Duration::from_secs(30)),
                 SHUTDOWN_DRAIN_HARD_MAX,
@@ -2057,10 +2062,14 @@ mod author_identity_tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn env_var_identity_reaches_the_wire_end_to_end() {
-        let _email =
-            xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_TEST_WORK_EMAIL", "ada@corp.example");
-        let _name =
-            xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_TEST_WORK_NAME", "Ada Lovelace");
+        let _email = xai_grok_test_support::env::EnvGuard::set(
+            "CHUTES_BUILD_TEST_WORK_EMAIL",
+            "ada@corp.example",
+        );
+        let _name = xai_grok_test_support::env::EnvGuard::set(
+            "CHUTES_BUILD_TEST_WORK_NAME",
+            "Ada Lovelace",
+        );
 
         // The loader expands `$VAR` at load, exactly as a trusted config tier ships it.
         let mut value = toml::from_str::<toml::Value>(

@@ -72,14 +72,15 @@ headers = { "Authorization" = "Bearer token" }
 ```
 
 MCP data-plane requests (JSON-RPC and SSE) and the anonymous-access probe carry a
-default `User-Agent: grok-cli/<version>` header, where `<version>` is the Chutes Build binary
+default `User-Agent: chutes-build/<version>` header, where `<version>` is the Chutes Build binary
 version. OAuth discovery, client registration, and token requests are issued by the
 rmcp OAuth client and keep its own behavior (no default `User-Agent`). A valid
 `User-Agent` entry in the server's `headers` overrides the default; an invalid
 configured `User-Agent` value is dropped by header parsing (with a warning), so such a
 server still receives the default. Exception: Figma MCP servers (server name `figma`,
-legacy managed name `grok_com_figma`, or a `figma.com` host — all case-insensitive)
-send the bare token `grok-cli` with no version unless the config supplies its own
+managed names `chutes_build_com_figma` / `chutes_figma` (legacy `grok_com_figma`),
+or a `figma.com` host — all case-insensitive)
+send the bare token `chutes-build` with no version unless the config supplies its own
 `User-Agent`.
 
 ### Streamable HTTP with Session ID
@@ -102,7 +103,7 @@ chutes-build mcp list
 chutes-build mcp list --json          # Machine-readable output
 
 # Add a stdio server. Everything after -- is the server command, so flags
-# like -y reach the server instead of being parsed by grok.
+# like -y reach the server instead of being parsed by Chutes Build.
 chutes-build mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem /path/to/dir
 
 # Add a stdio server with environment variables (-e is repeatable)
@@ -463,8 +464,8 @@ chutes-build inspect --json   # Machine-readable
 ### Debug Logging
 
 ```bash
-RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/grok.log chutes-build
-tail -f /tmp/grok.log
+RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/chutes-build.log chutes-build
+tail -f /tmp/chutes-build.log
 ```
 
 Look for log entries containing `mcp` to trace server startup, tool discovery, and tool call execution.

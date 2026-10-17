@@ -695,7 +695,10 @@ mod tests {
         write_skill_md(&server.path().join("dup"), "dup");
 
         let cwd = tempfile::tempdir().unwrap();
-        write_skill_md(&cwd.path().join(".chutes-build").join("skills").join("dup"), "dup");
+        write_skill_md(
+            &cwd.path().join(".chutes-build").join("skills").join("dup"),
+            "dup",
+        );
 
         let config = SkillsConfig {
             server_skill_dirs: vec![server.path().to_string_lossy().into_owned()],
@@ -732,7 +735,10 @@ mod tests {
         write_skill_md(&bundled.path().join("dup"), "dup");
 
         let cwd = tempfile::tempdir().unwrap();
-        write_skill_md(&cwd.path().join(".chutes-build").join("skills").join("dup"), "dup");
+        write_skill_md(
+            &cwd.path().join(".chutes-build").join("skills").join("dup"),
+            "dup",
+        );
 
         let config = SkillsConfig {
             bundled_skill_dirs: vec![bundled.path().to_string_lossy().into_owned()],
@@ -1252,7 +1258,10 @@ mod tests {
         // Create workspace user dir with a skill
         let user_dir = repo_root.join("x").join("testuser");
         write_skill_md(
-            &user_dir.join(".chutes-build").join("skills").join("my-tool"),
+            &user_dir
+                .join(".chutes-build")
+                .join("skills")
+                .join("my-tool"),
             "my-tool",
         );
 
@@ -1282,7 +1291,10 @@ mod tests {
         // User dir with a skill
         let user_dir = repo_root.join("x").join("testuser");
         write_skill_md(
-            &user_dir.join(".chutes-build").join("skills").join("dedup-skill"),
+            &user_dir
+                .join(".chutes-build")
+                .join("skills")
+                .join("dedup-skill"),
             "dedup-skill",
         );
 
@@ -1309,7 +1321,10 @@ mod tests {
         // Create a skill that would only be found via workspace user path
         let user_dir = repo_root.join("x").join("ghost");
         write_skill_md(
-            &user_dir.join(".chutes-build").join("skills").join("ghost-skill"),
+            &user_dir
+                .join(".chutes-build")
+                .join("skills")
+                .join("ghost-skill"),
             "ghost-skill",
         );
 
@@ -1864,7 +1879,10 @@ mod tests {
         fs::create_dir_all(&repo_root).unwrap();
         init_git_repo(&repo_root);
 
-        let auto_dir = repo_root.join(".chutes-build").join("skills").join("dup-skill");
+        let auto_dir = repo_root
+            .join(".chutes-build")
+            .join("skills")
+            .join("dup-skill");
         write_skill_md(&auto_dir, "dup-skill");
 
         // Add the same auto-discovered skills root as a config path.
@@ -1904,7 +1922,10 @@ mod tests {
         fs::create_dir_all(&repo_root).unwrap();
         init_git_repo(&repo_root);
 
-        let auto_dir = repo_root.join(".chutes-build").join("skills").join("overlap-skill");
+        let auto_dir = repo_root
+            .join(".chutes-build")
+            .join("skills")
+            .join("overlap-skill");
         write_skill_md(&auto_dir, "overlap-skill");
 
         let config = SkillsConfig {
@@ -1991,7 +2012,10 @@ mod tests {
         init_git_repo(&repo_root);
 
         // Same skill name in local (higher-priority) and repo (lower-priority) sources.
-        write_skill_md(&cwd.join(".chutes-build").join("skills").join("same"), "same");
+        write_skill_md(
+            &cwd.join(".chutes-build").join("skills").join("same"),
+            "same",
+        );
         let repo_skill_dir = repo_root.join(".chutes-build").join("skills").join("same");
         write_skill_md(&repo_skill_dir, "same");
 
@@ -2044,11 +2068,17 @@ mod tests {
         init_git_repo(&repo_root);
 
         write_skill_md(
-            &repo_root.join(".chutes-build").join("skills").join("commit"),
+            &repo_root
+                .join(".chutes-build")
+                .join("skills")
+                .join("commit"),
             "commit",
         );
         write_skill_md(
-            &repo_root.join(".chutes-build").join("skills").join("review"),
+            &repo_root
+                .join(".chutes-build")
+                .join("skills")
+                .join("review"),
             "review",
         );
 
@@ -2093,7 +2123,10 @@ mod tests {
         init_git_repo(&repo_root);
 
         write_skill_md(
-            &repo_root.join(".chutes-build").join("skills").join("deploy"),
+            &repo_root
+                .join(".chutes-build")
+                .join("skills")
+                .join("deploy"),
             "deploy",
         );
 
@@ -2496,7 +2529,10 @@ mod tests {
             "cursor must be gated off: {dirs:?}"
         );
         assert!(ends_with(&dirs, ".claude"), "claude must remain: {dirs:?}");
-        assert!(ends_with(&dirs, ".chutes-build"), "grok must remain: {dirs:?}");
+        assert!(
+            ends_with(&dirs, ".chutes-build"),
+            "grok must remain: {dirs:?}"
+        );
     }
 
     // ── Same-scope frontmatter-name collisions (copied skill dirs) ──────
@@ -2680,7 +2716,10 @@ mod tests {
             ),
         ]);
         assert_eq!(out.len(), 1);
-        assert!(out.first().is_some_and(|s| s.path.contains(".chutes-build")));
+        assert!(
+            out.first()
+                .is_some_and(|s| s.path.contains(".chutes-build"))
+        );
     }
 
     #[tokio::test]

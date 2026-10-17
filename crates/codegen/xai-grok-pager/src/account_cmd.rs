@@ -22,8 +22,7 @@ pub async fn run(args: AccountArgs) -> Result<()> {
 }
 
 async fn collect() -> Result<AccountSummary> {
-    let client =
-        ChutesAccountClient::from_env().context("Cannot load Chutes account data")?;
+    let client = ChutesAccountClient::from_env().context("Cannot load Chutes account data")?;
     let snapshot = client
         .usage_snapshot(true)
         .await
@@ -37,7 +36,10 @@ pub fn format_human(summary: &AccountSummary) -> String {
     let mut out = String::from("Chutes account\n\n");
     match summary.plan.as_ref() {
         Some(plan) => {
-            out.push_str(&format!("Plan: {}\n", plan.plan_name.as_deref().unwrap_or("Unknown")));
+            out.push_str(&format!(
+                "Plan: {}\n",
+                plan.plan_name.as_deref().unwrap_or("Unknown")
+            ));
             let mut caps = Vec::new();
             if let Some(price) = plan.monthly_price_usd {
                 caps.push(format!("{} /mo", format_usd(price)));
@@ -70,7 +72,11 @@ pub fn format_human(summary: &AccountSummary) -> String {
     } else {
         out.push_str("Usage\n");
         for window in &summary.windows {
-            out.push_str(&format!("  {:<18} {}\n", window.label, format_window_value(window)));
+            out.push_str(&format!(
+                "  {:<18} {}\n",
+                window.label,
+                format_window_value(window)
+            ));
         }
     }
     if !summary.quotas.is_empty() {
@@ -78,11 +84,9 @@ pub fn format_human(summary: &AccountSummary) -> String {
         out.push_str("Quotas\n");
         for quota in &summary.quotas {
             match quota.quota {
-                Some(limit) => out.push_str(&format!(
-                    "  {}: {}\n",
-                    quota.model_label,
-                    format_int(limit)
-                )),
+                Some(limit) => {
+                    out.push_str(&format!("  {}: {}\n", quota.model_label, format_int(limit)))
+                }
                 None => out.push_str(&format!("  {}: unknown\n", quota.model_label)),
             }
         }

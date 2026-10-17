@@ -359,7 +359,7 @@ Point Chutes Build at a custom OpenAI-compatible `/v1/models` endpoint instead o
 ```bash
 export CHUTES_BUILD_MODELS_BASE_URL="https://api.acme.com/v1"
 export CHUTES_API_KEY="cpk_..."
-grok
+chutes-build
 ```
 
 ### Config File Alternative
@@ -479,8 +479,8 @@ curl -s https://api.example.com/v1/models \
 ### Debug Logging
 
 ```bash
-RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/grok.log grok
-tail -f /tmp/grok.log
+RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/chutes-build.log chutes-build
+tail -f /tmp/chutes-build.log
 ```
 
 Look for log entries containing `model` or `sampling` to trace model selection and API calls.

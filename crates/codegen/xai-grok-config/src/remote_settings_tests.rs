@@ -170,9 +170,9 @@ fn remote_settings_vendor_sessions_round_trip_and_default_absent() {
 }
 #[test]
 fn remote_settings_image_description_model_round_trip() {
-    let json = r#"{"image_description_model": "grok-4.6"}"#;
+    let json = r#"{"image_description_model": "model-router"}"#;
     let s: RemoteSettings = serde_json::from_str(json).unwrap();
-    assert_eq!(s.image_description_model.as_deref(), Some("grok-4.6"));
+    assert_eq!(s.image_description_model.as_deref(), Some("model-router"));
     let out = serde_json::to_string(&s).unwrap();
     let s2: RemoteSettings = serde_json::from_str(&out).unwrap();
     assert_eq!(s2.image_description_model, s.image_description_model);
@@ -244,7 +244,7 @@ fn remote_settings_consent_gate_round_trip() {
             "id": "tos-2026-08",
             "version": 3,
             "title": "Updated terms",
-            "body": "Review our [Terms of Service](https://x.ai/legal/tos) before continuing.",
+            "body": "Review our [Terms of Service](https://chutes.ai/terms) before continuing.",
             "accept_label": "Accept and continue"
         }
     }"#;
@@ -255,7 +255,7 @@ fn remote_settings_consent_gate_round_trip() {
     assert!(
         gate.body
             .as_deref()
-            .is_some_and(|b| b.contains("https://x.ai/legal/tos"))
+            .is_some_and(|b| b.contains("https://chutes.ai/terms"))
     );
 }
 /// A poisoned response would leave `zdr_access_enabled` false and hard-block ZDR users.

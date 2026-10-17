@@ -1882,7 +1882,10 @@ mod tests {
             skipped_sources: vec![],
         };
         let msg = err.to_string();
-        assert!(msg.contains("chutes-build plugin install ./sentry"), "{msg}");
+        assert!(
+            msg.contains("chutes-build plugin install ./sentry"),
+            "{msg}"
+        );
         assert!(msg.contains("chutes-build plugin marketplace add"), "{msg}");
         assert!(!msg.contains("could not be synced"), "{msg}");
     }

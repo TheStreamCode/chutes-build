@@ -22,7 +22,9 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         "chutes.ai/auth/logout" => handle_logout(agent, args).await,
         "chutes.ai/auth/info" => handle_info(agent),
         "chutes.ai/auth/check_subscription" => handle_check_subscription(agent).await,
-        "chutes.ai/auth/hydrate_team_capability" => handle_hydrate_team_capability(agent, args).await,
+        "chutes.ai/auth/hydrate_team_capability" => {
+            handle_hydrate_team_capability(agent, args).await
+        }
         _ => Err(acp::Error::method_not_found()),
     }
 }

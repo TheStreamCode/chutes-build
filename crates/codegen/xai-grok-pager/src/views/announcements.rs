@@ -1255,7 +1255,11 @@ mod tests {
     /// `is_dismissible(owner)` distinguishes the pinned (Ctrl+O) promo from a dismissible one.
     #[test]
     fn promo_cta_returns_label_and_pinned_flag() {
-        let mut pinned = promo("p", "msg", Some(("Upgrade Account", "https://chutes.ai/promo")));
+        let mut pinned = promo(
+            "p",
+            "msg",
+            Some(("Upgrade Account", "https://chutes.ai/promo")),
+        );
         pinned.dismissible = Some(false);
         let pinned = [pinned];
         let (owner, label, url) = promo_cta(&pinned, &no_hidden()).expect("usable cta");
@@ -1410,7 +1414,7 @@ mod tests {
         let mut ann = promo(
             "p",
             "New promo",
-            Some(("Get SuperGrok", "https://chutes.ai/grok")),
+            Some(("Get Pro Plan", "https://chutes.ai/")),
         );
         ann.cta.as_mut().unwrap().caption = Some("or use Ctrl+O".into());
         let anns = [ann];
@@ -1419,7 +1423,7 @@ mod tests {
         let hits = render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);
 
         let row0 = buf_row(&buf, area, 0);
-        assert!(row0.starts_with("[Get SuperGrok]"), "row0={row0:?}");
+        assert!(row0.starts_with("[Get Pro Plan]"), "row0={row0:?}");
         assert!(
             !row0.contains("New promo"),
             "message must not paint on the banner; row0={row0:?}"
@@ -1475,7 +1479,7 @@ mod tests {
             "p",
             "msg",
             Some((
-                "Upgrade to SuperGrok Heavy for the exclusive preview",
+                "Upgrade to Chutes Pro for the exclusive preview",
                 "https://chutes.ai",
             )),
         )];

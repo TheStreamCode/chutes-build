@@ -81,8 +81,8 @@ impl RelayConfig {
         }
         let _ = alpha_test_key;
         Some(Self {
-            ws_url: ctx.grok_ws_url.clone(),
-            ws_origin: ctx.grok_ws_origin.clone(),
+            ws_url: ctx.ws_url.clone(),
+            ws_origin: ctx.ws_origin.clone(),
             token_header: ctx.token_header.clone(),
             auth: session.clone(),
             auth_manager,

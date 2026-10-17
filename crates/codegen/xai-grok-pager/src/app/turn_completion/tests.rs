@@ -1421,10 +1421,7 @@ fn classifier_completed_without_elapsed_is_none() {
     let ev = terminal_marker(input).unwrap();
     assert!(matches!(
         ev,
-        SessionEvent::TurnCompleted {
-            elapsed: None,
-            ..
-        }
+        SessionEvent::TurnCompleted { elapsed: None, .. }
     ));
 }
 

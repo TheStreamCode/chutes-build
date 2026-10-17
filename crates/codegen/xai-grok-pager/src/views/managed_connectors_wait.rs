@@ -1,4 +1,4 @@
-//! Wait overlay after opening grok.com/connectors from the MCP tab.
+//! Wait overlay after opening chutes.ai/connectors from the MCP tab.
 //!
 //! Covers the list until the user refreshes (R) or dismisses (Esc). Shared by Needs Auth and
 //! Ctrl+O / URL click. Owns the overlay's paint and its key/mouse routing; the extensions modal
@@ -46,7 +46,7 @@ pub enum ManagedConnectorsWaitOutcome {
     Refresh,
     /// Leave the overlay and return to the list without refreshing.
     Dismiss,
-    /// Open grok.com/connectors again; the overlay stays up.
+    /// Open chutes.ai/connectors again; the overlay stays up.
     OpenConnectors,
 }
 

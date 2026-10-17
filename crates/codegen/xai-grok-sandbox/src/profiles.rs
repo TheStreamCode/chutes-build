@@ -124,7 +124,9 @@ pub fn load_sandbox_config(workspace: &Path) -> SandboxConfig {
     }
 
     // Project config: <workspace>/.chutes-build/sandbox.toml (additive only)
-    let project_path = workspace.join(".chutes-build").join(SANDBOX_CONFIG_FILENAME);
+    let project_path = workspace
+        .join(".chutes-build")
+        .join(SANDBOX_CONFIG_FILENAME);
     if let Some(project) = load_config_file(&project_path) {
         merge_project_profiles(&mut config, project);
     }
@@ -134,8 +136,12 @@ pub fn load_sandbox_config(workspace: &Path) -> SandboxConfig {
 
 pub fn sandbox_profile_conflicts(workspace: &Path) -> Vec<String> {
     let global = load_config_file(&grok_home().join(SANDBOX_CONFIG_FILENAME)).unwrap_or_default();
-    let project = load_config_file(&workspace.join(".chutes-build").join(SANDBOX_CONFIG_FILENAME))
-        .unwrap_or_default();
+    let project = load_config_file(
+        &workspace
+            .join(".chutes-build")
+            .join(SANDBOX_CONFIG_FILENAME),
+    )
+    .unwrap_or_default();
     mismatched_profile_names(&global, &project)
 }
 
@@ -232,8 +238,8 @@ impl ProfileName {
                 if real == home.join(path.file_name()?) {
                     return Some(real);
                 }
-                let default_sessions =
-                    xai_dirs::home_dir().map(|user_home| user_home.join(".chutes-build").join("sessions"));
+                let default_sessions = xai_dirs::home_dir()
+                    .map(|user_home| user_home.join(".chutes-build").join("sessions"));
                 if path.file_name() == Some(std::ffi::OsStr::new("sessions"))
                     && default_sessions.as_ref() == Some(&real)
                 {

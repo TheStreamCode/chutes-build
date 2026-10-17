@@ -3959,7 +3959,7 @@ async fn cached_token_fallthrough_prefers_api_key_for_deployment_key() {
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn cached_token_fallthrough_respects_kill_switch() {
-    use crate::agent::auth_method::{CHUTES_BUILD_COM_METHOD_ID, CHUTES_API_KEY_ENV_VAR};
+    use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, CHUTES_BUILD_COM_METHOD_ID};
     use xai_grok_test_support::EnvGuard;
     let _lockdown = EnvGuard::unset("CHUTES_BUILD_DISABLE_API_KEY_AUTH");
     let _key = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "test-deployment-key");
@@ -3980,7 +3980,7 @@ async fn cached_token_fallthrough_respects_kill_switch() {
 #[serial_test::serial]
 async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
     use crate::agent::auth_method::{
-        CHUTES_BUILD_COM_METHOD_ID, LEGACY_CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_ENV_VAR,
+        CHUTES_API_KEY_ENV_VAR, CHUTES_BUILD_COM_METHOD_ID, LEGACY_CHUTES_API_KEY_ENV_VAR,
     };
     use xai_grok_test_support::EnvGuard;
     let _lockdown = EnvGuard::unset("CHUTES_BUILD_DISABLE_API_KEY_AUTH");
@@ -4710,8 +4710,10 @@ fn parse_session_kind_matrix() {
 fn reject_chat_kind_without_feature_errors_without_chat_feature() {
     use serde_json::json;
     assert!(
-        reject_chat_kind_without_feature(json!({"chutes.ai/session": {"kind": "chat"}}).as_object())
-            .is_err()
+        reject_chat_kind_without_feature(
+            json!({"chutes.ai/session": {"kind": "chat"}}).as_object()
+        )
+        .is_err()
     );
     assert!(reject_chat_kind_without_feature(None).is_ok());
     assert!(
@@ -8121,7 +8123,10 @@ async fn answer_folder_trust_request(
     let xai_acp_lib::AcpClientMessage::ExtMethod(args) = msg else {
         panic!("expected an ext_method reverse-request, got a different message");
     };
-    assert_eq!(args.request.method.as_ref(), "chutes.ai/folder_trust/request");
+    assert_eq!(
+        args.request.method.as_ref(),
+        "chutes.ai/folder_trust/request"
+    );
     let params: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();
     let resp: acp::ExtResponse = acp::ExtResponse::new(std::sync::Arc::from(
         serde_json::value::to_raw_value(&serde_json::json!({ "outcome": outcome })).unwrap(),
@@ -8915,7 +8920,10 @@ async fn emit_announcements_gate_emits_updates_baseline_and_bumps_gen() {
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                 panic!("expected ExtNotification, got another message kind");
             };
-            assert_eq!(args.request.method.as_ref(), "chutes.ai/announcements/update");
+            assert_eq!(
+                args.request.method.as_ref(),
+                "chutes.ai/announcements/update"
+            );
             let parsed: serde_json::Value =
                 serde_json::from_str(args.request.params.get()).expect("valid JSON payload");
             parsed
@@ -8970,7 +8978,10 @@ async fn emit_announcements_gate_keeps_baseline_on_failed_send_and_retries() {
     let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
         panic!("expected ExtNotification, got another message kind");
     };
-    assert_eq!(args.request.method.as_ref(), "chutes.ai/announcements/update");
+    assert_eq!(
+        args.request.method.as_ref(),
+        "chutes.ai/announcements/update"
+    );
     assert_eq!(
         *agent.last_emitted_announcements.borrow(),
         vec![ann("a")],

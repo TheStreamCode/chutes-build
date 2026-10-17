@@ -64,7 +64,7 @@ new image, video, music, and speech chutes work with no client update.
 | Embeddings | `embed_texts` | `Qwen/Qwen3-Embedding-8B-TEE` ([docs](https://chutes.ai/docs/models/chutes-qwen-qwen3-embedding-8b-tee)) |
 | Image generation | `generate_media` | Live catalog, e.g. [vonkaiser-z-image-turbo](https://chutes.ai/docs/models/vonkaiser-z-image-turbo) |
 | Image editing | `generate_media` | Live catalog, e.g. [vonkaiser-qwen-image-edit-2511](https://chutes.ai/docs/models/vonkaiser-qwen-image-edit-2511) |
-| Video generation | `generate_media` | Live catalog, e.g. [vonkaiser-ltx-23-video](https://chutes.ai/docs/models/vonkaiser-ltx-23-video) |
+| Video generation | `generate_media` | Live catalog, e.g. [vonkaiser-ltx-25-video](https://chutes.ai/docs/models/vonkaiser-ltx-25-video) |
 | Music generation | `generate_media` | Live catalog, e.g. [vonkaiser-ace-step-15-music-generator](https://chutes.ai/docs/models/vonkaiser-ace-step-15-music-generator) |
 
 When a default chute is unavailable the tool reports the failure honestly,

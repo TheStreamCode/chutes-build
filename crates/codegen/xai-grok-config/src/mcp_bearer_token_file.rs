@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 use agent_client_protocol as acp;
 
-const META_KEY: &str = "x.ai/mcp/bearerTokenFile";
+const META_KEY: &str = "chutes.ai/mcp/bearerTokenFile";
+/// Legacy upstream key, still read (never written) for mixed-version peers.
+const META_KEY_LEGACY: &str = "x.ai/mcp/bearerTokenFile";
 
 pub(crate) fn bearer_token_file_meta(configured: &str) -> acp::Meta {
     acp::Meta::from_iter([(
@@ -17,9 +19,14 @@ pub(crate) fn bearer_token_file_meta(configured: &str) -> acp::Meta {
     )])
 }
 
+fn meta_value<'m>(meta: Option<&'m acp::Meta>) -> Option<&'m serde_json::Value> {
+    let meta = meta?;
+    meta.get(META_KEY).or_else(|| meta.get(META_KEY_LEGACY))
+}
+
 /// The configured string, unparsed, for listing a client-provided server as it was given.
 pub(crate) fn configured_bearer_token_file(meta: Option<&acp::Meta>) -> Option<String> {
-    meta?.get(META_KEY)?.as_str().map(str::to_owned)
+    meta_value(meta)?.as_str().map(str::to_owned)
 }
 
 /// An absolute path to a bearer token file, with a leading `~/` already expanded.
@@ -42,7 +49,7 @@ impl BearerTokenPath {
     /// [`BearerTokenPathError`] when the meta value is not a string or does not name an absolute
     /// or `~/` path.
     pub fn from_meta(meta: Option<&acp::Meta>) -> Result<Option<Self>, BearerTokenPathError> {
-        let Some(value) = meta.and_then(|meta| meta.get(META_KEY)) else {
+        let Some(value) = meta_value(meta) else {
             return Ok(None);
         };
         let configured = value.as_str().ok_or(BearerTokenPathError::NotAString)?;

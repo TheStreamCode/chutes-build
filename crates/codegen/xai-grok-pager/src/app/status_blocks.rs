@@ -197,10 +197,9 @@ pub(crate) fn session_usage_block_text(
         group_thousands(t.model_calls),
         format_duration(std::time::Duration::from_millis(t.api_duration_ms)),
     ));
-    if let Some(tps) = crate::app::turn_completion::tokens_per_second(
-        t.output_tokens,
-        t.api_duration_ms,
-    ) {
+    if let Some(tps) =
+        crate::app::turn_completion::tokens_per_second(t.output_tokens, t.api_duration_ms)
+    {
         rows.push(format!("  Speed:          {tps:.1} tok/s"));
     }
     rows.push(format!("  Cost:           {}", format_cost(t)));

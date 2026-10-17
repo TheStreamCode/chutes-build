@@ -25,11 +25,11 @@ pub(super) fn is_max_tier(subscription_tier: Option<&str>) -> bool {
     t.to_ascii_lowercase().replace(' ', "_") == "supergrok_heavy"
 }
 
-/// URL for upgrading the subscription tier.
-pub(crate) const UPSELL_URL_UPGRADE: &str = "https://chutes.ai/supergrok?referrer=chutes-build";
+/// URL for upgrading the subscription tier (same usage destination as `/usage manage`).
+pub(crate) const UPSELL_URL_UPGRADE: &str = "https://chutes.ai/?_s=usage";
 
 /// URL for managing pay-as-you-go or on-demand spending and purchasing credits.
-pub(crate) const UPSELL_URL_PAYG: &str = "https://chutes.ai?_s=usage";
+pub(crate) const UPSELL_URL_PAYG: &str = "https://chutes.ai/?_s=usage";
 
 /// Billing mode for credit-limit upsell copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,12 +227,12 @@ fn open_supergrok_upsell(
 
     let (heading, source, modal_id_prefix) = match reason {
         UpsellReason::FreeUsageLimit => (
-            "You hit your free usage limit.",
+            "You hit your usage limit.",
             SuperGrokUpsell::FreeUsagePaywall,
             "free-usage-upsell",
         ),
         UpsellReason::RestrictedCommand => (
-            "Unlock all features with SuperGrok.",
+            "Unlock all features with a Chutes plan.",
             SuperGrokUpsell::RestrictedCommand,
             "restricted-command-upsell",
         ),
@@ -243,25 +243,19 @@ fn open_supergrok_upsell(
         auth_method,
     });
 
-    // /supergrok lists all plans; every upgrade option lands there.
+    // Both options land on the Chutes usage page (plan + credits).
     let options = vec![
         QuestionOption {
-            label: "Upgrade to SuperGrok".into(),
-            description: "For everyday coding and productivity tasks".into(),
+            label: "Upgrade your plan".into(),
+            description: "Raise your Chutes plan limits".into(),
             preview: None,
             id: Some(UPSELL_URL_UPGRADE.into()),
         },
         QuestionOption {
-            label: "Upgrade to SuperGrok Plus".into(),
-            description: "Significantly higher usage and rate limits".into(),
+            label: "Buy more credits".into(),
+            description: "Purchase credits to keep using Chutes Build".into(),
             preview: None,
-            id: Some(UPSELL_URL_UPGRADE.into()),
-        },
-        QuestionOption {
-            label: "Upgrade to SuperGrok Heavy".into(),
-            description: "Get the most out of Chutes Build. Highest usage limits.".into(),
-            preview: None,
-            id: Some(UPSELL_URL_UPGRADE.into()),
+            id: Some(UPSELL_URL_PAYG.into()),
         },
     ];
     let question = Question {
@@ -551,10 +545,10 @@ pub(super) fn dispatch_open_supergrok_url(app: &mut AppView) -> Vec<Effect> {
         .gate
         .as_ref()
         .and_then(|g| g.url.as_deref())
-        .unwrap_or("https://chutes.ai/supergrok?referrer=chutes-build");
-    // Funnel attribution: tag SuperGrok upsell clicks from the CLI with `referrer=chutes-build`, matching the OAuth consent flow and chutes.ai/cli links
-    // It applies even when the URL came from remote settings's `gate_url`, so nothing depends on the remote flag being configured correctly
-    // If the URL already specifies a referrer it's left alone
+        .unwrap_or(UPSELL_URL_UPGRADE);
+    // Funnel attribution: tag plan-upsell clicks from the CLI with `referrer=chutes-build`.
+    // It applies even when the URL came from remote settings's `gate_url`, so nothing depends on the remote flag being configured correctly.
+    // If the URL already specifies a referrer it's left alone.
     let url = crate::app::link_opener::ensure_query_param(url, "referrer", "chutes-build");
     super::ctx::open_url_or_show(app, &url);
     vec![]

@@ -299,7 +299,10 @@ mod tests {
     #[test]
     fn load_index_grok_dir_takes_precedence_over_claude_dir() {
         let dir = tempfile::tempdir().unwrap();
-        for (sub, name) in [(".chutes-build-plugin", "grok"), (".claude-plugin", "claude")] {
+        for (sub, name) in [
+            (".chutes-build-plugin", "grok"),
+            (".claude-plugin", "claude"),
+        ] {
             let d = dir.path().join(sub);
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(

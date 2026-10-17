@@ -196,7 +196,10 @@ pub(crate) fn exec_screen_mode_relaunch(session_id: &str, want_minimal: bool) ->
     let mut cmd = std::process::Command::new(&exe);
     cmd.args(&args);
     // Force mode resolution even when config.toml has the opposite preference.
-    cmd.env(CHUTES_BUILD_SCREEN_MODE_ENV, screen_mode_env_value(want_minimal));
+    cmd.env(
+        CHUTES_BUILD_SCREEN_MODE_ENV,
+        screen_mode_env_value(want_minimal),
+    );
 
     let mode_label = screen_mode_env_value(want_minimal);
     let reverse = if want_minimal {

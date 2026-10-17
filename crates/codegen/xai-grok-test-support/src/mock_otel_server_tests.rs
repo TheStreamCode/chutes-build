@@ -77,7 +77,7 @@ async fn undecodable_body_is_kept_as_a_fault_and_still_acknowledged() {
 #[tokio::test]
 async fn body_over_the_limit_is_kept_as_refused() {
     let server = MockOtelServer::start_with_body_limit(16).await.unwrap();
-    let body = logs_body("grok_code.session_start");
+    let body = logs_body("chutes_build.session_start");
 
     let status = post_protobuf(&server, "/v1/logs", body.clone()).await;
 
@@ -97,7 +97,7 @@ async fn body_over_the_limit_is_kept_as_refused() {
 #[tokio::test]
 async fn export_log_keeps_lowercase_headers_and_the_body() {
     let server = MockOtelServer::start().await.unwrap();
-    let body = logs_body("grok_code.user_prompt");
+    let body = logs_body("chutes_build.user_prompt");
     post(
         &server,
         "/v1/logs",
@@ -138,14 +138,14 @@ async fn wait_for_events_resolves_when_a_later_export_satisfies_the_predicate() 
     let (events, status) = tokio::join!(
         server.recorder().wait_for_events(Duration::from_secs(5), |events| {
             events.iter().any(|event| {
-                matches!(event, OtelEvent::LogRecord(record) if record.event_name == "grok_code.user_prompt")
+                matches!(event, OtelEvent::LogRecord(record) if record.event_name == "chutes_build.user_prompt")
             })
         }),
-        post_protobuf(&server, "/v1/logs", logs_body("grok_code.user_prompt")),
+        post_protobuf(&server, "/v1/logs", logs_body("chutes_build.user_prompt")),
     );
 
     assert_eq!(
-        (200, Ok(vec![logs_event("grok_code.user_prompt")])),
+        (200, Ok(vec![logs_event("chutes_build.user_prompt")])),
         (status, events)
     );
 }
@@ -164,7 +164,7 @@ async fn request_the_collector_does_not_serve_is_refused_and_fails_every_later_w
             method.clone(),
             &format!("{}{path}", server.origin()),
             &[("content-type", PROTOBUF)],
-            logs_body("grok_code.user_prompt"),
+            logs_body("chutes_build.user_prompt"),
         )
         .await
         .status()

@@ -906,7 +906,10 @@ fn a_root_at_or_beneath_a_globs_literal_prefix_is_carved_and_ungrantable() {
 #[test]
 fn anchor_is_the_path_the_tree_or_the_globs_literal_prefix() {
     let ws = Path::new("/opt/ws-fixture/ws");
-    assert_eq!(ws.join(".chutes-build"), path(ws.join(".chutes-build")).anchor());
+    assert_eq!(
+        ws.join(".chutes-build"),
+        path(ws.join(".chutes-build")).anchor()
+    );
     assert_eq!(
         ws.join(".git/modules"),
         glob(format!("{}/.git/modules/**/hooks", ws.display())).anchor()
@@ -1019,7 +1022,11 @@ fn home_files_linked_to_each_other_run_without_a_search() {
     std::fs::create_dir_all(home.join("dotfiles")).unwrap();
     std::fs::write(home.join(".bashrc"), "# rc\n").unwrap();
     std::fs::hard_link(home.join(".bashrc"), home.join(".bash_profile")).unwrap();
-    let floor = floor(&inputs(&ServedRoot::pin(&ws), &home.join(".chutes-build"), &home));
+    let floor = floor(&inputs(
+        &ServedRoot::pin(&ws),
+        &home.join(".chutes-build"),
+        &home,
+    ));
     let roots = std::slice::from_ref(&ws);
     let searches = ROOT_SEARCHES.get();
     assert_eq!(None, hard_linked_protected_file(&floor, roots));
@@ -1274,7 +1281,11 @@ fn a_100k_entry_workspace_without_a_leftover_link_runs_with_no_scan() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(home.join(".bashrc"), "").unwrap();
     std::fs::hard_link(home.join(".bashrc"), home.join(".bash_profile")).unwrap();
-    let floor = floor(&inputs(&ServedRoot::pin(&ws), &home.join(".chutes-build"), &home));
+    let floor = floor(&inputs(
+        &ServedRoot::pin(&ws),
+        &home.join(".chutes-build"),
+        &home,
+    ));
     let roots = std::slice::from_ref(&ws);
     let (searches, read) = (ROOT_SEARCHES.get(), ENTRIES_READ.get());
     assert_eq!(None, hard_linked_protected_file(&floor, roots));
@@ -1306,7 +1317,11 @@ fn an_alias_linked_deep_in_a_write_root_after_a_clean_command_is_refused_on_the_
     std::fs::create_dir_all(home.join("dotfiles")).unwrap();
     std::fs::write(home.join(".bashrc"), "# rc\n").unwrap();
     std::fs::hard_link(home.join(".bashrc"), home.join("dotfiles/bashrc")).unwrap();
-    let floor = floor(&inputs(&ServedRoot::pin(&ws), &home.join(".chutes-build"), &home));
+    let floor = floor(&inputs(
+        &ServedRoot::pin(&ws),
+        &home.join(".chutes-build"),
+        &home,
+    ));
     let roots = std::slice::from_ref(&ws);
     let times = |meta: std::fs::Metadata| (meta.mtime(), meta.mtime_nsec(), meta.ctime());
     let searches = ROOT_SEARCHES.get();
@@ -1389,7 +1404,11 @@ fn symlinks_are_neither_walked_nor_aliases_in_the_hard_link_check() {
     symlink(&outside, ws.join("vendor")).unwrap();
     symlink(&outside, ws.join(".git/hooks/lib")).unwrap();
     symlink(&config, ws.join("config-link")).unwrap();
-    let floor = floor(&inputs(&ServedRoot::pin(&ws), &home.join(".chutes-build"), &home));
+    let floor = floor(&inputs(
+        &ServedRoot::pin(&ws),
+        &home.join(".chutes-build"),
+        &home,
+    ));
     let roots = std::slice::from_ref(&ws);
     let (searches, read) = (ROOT_SEARCHES.get(), ENTRIES_READ.get());
     assert_eq!(None, hard_linked_protected_file(&floor, roots));
@@ -1408,7 +1427,11 @@ fn symlinks_are_neither_walked_nor_aliases_in_the_hard_link_check() {
     std::fs::write(&bashrc, "# rc\n").unwrap();
     std::fs::hard_link(&bashrc, root.join("bashrc.bak")).unwrap();
     symlink(&bashrc, home.join(".bashrc")).unwrap();
-    let floor = super::floor(&inputs(&ServedRoot::pin(&ws), &home.join(".chutes-build"), &home));
+    let floor = super::floor(&inputs(
+        &ServedRoot::pin(&ws),
+        &home.join(".chutes-build"),
+        &home,
+    ));
     assert!(floor.contains(&Protected::Path {
         path: bashrc.clone()
     }));

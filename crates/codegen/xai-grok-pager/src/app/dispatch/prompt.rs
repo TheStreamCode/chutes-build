@@ -1693,14 +1693,12 @@ pub(super) fn handle_prompt_response(
             .and_then(|pr| pr.meta.as_ref())
             .and_then(|meta| meta.get("usage"))
             .and_then(|usage| {
-                serde_json::from_value::<
-                    xai_grok_shell::extensions::notification::PromptUsage,
-                >(usage.clone())
+                serde_json::from_value::<xai_grok_shell::extensions::notification::PromptUsage>(
+                    usage.clone(),
+                )
                 .ok()
             })
-            .and_then(|usage| {
-                crate::app::turn_completion::prompt_tokens_per_second(&usage)
-            });
+            .and_then(|usage| crate::app::turn_completion::prompt_tokens_per_second(&usage));
         let event = match (&result, was_cancelling) {
             (Ok(_), false) if agent.bash_turn => None,
             (Err(_), _) if dedicated_ux_shown => None,

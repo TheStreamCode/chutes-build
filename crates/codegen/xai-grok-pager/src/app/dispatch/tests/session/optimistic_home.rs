@@ -648,7 +648,8 @@ fn leave_home_into_local_workspace_ack_keeps_the_keystroke_as_a_draft() {
         crate::app::session_startup::CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV,
     );
     let home = tempfile::tempdir().unwrap();
-    let _home = xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().unwrap());
+    let _home =
+        xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().unwrap());
     crate::app::session_startup::set_active_local_workspace(None).unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let mut app = test_app();
@@ -693,8 +694,8 @@ fn leave_home_is_a_no_op_behind_the_startup_gate() {
 fn typing_on_a_gated_welcome_does_not_leave_home() {
     let mut app = test_app();
     app.gate = Some(xai_grok_shell::auth::GateInfo {
-        message: "SuperGrok subscription required".into(),
-        url: Some("https://grok.com/supergrok".into()),
+        message: "Subscription required".into(),
+        url: Some("https://chutes.ai/?_s=usage".into()),
         label: Some("Subscribe".into()),
     });
     app.welcome_prompt_focused = true;

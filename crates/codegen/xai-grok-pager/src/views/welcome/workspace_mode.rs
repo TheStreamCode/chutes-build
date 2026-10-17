@@ -727,7 +727,8 @@ mod apply_tests {
     #[test]
     #[serial_test::serial(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK)]
     fn welcome_local_one_shot_only_when_agents_alive() {
-        let _ack = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV, "1");
+        let _ack =
+            xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV, "1");
         set_active_local_workspace(None).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let out = prepare_welcome_workspace_for_new_session(
@@ -756,7 +757,8 @@ mod apply_tests {
     #[test]
     #[serial_test::serial(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK)]
     fn welcome_local_stamps_own_mode() {
-        let _ack = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV, "1");
+        let _ack =
+            xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV, "1");
         set_active_local_workspace(None).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let out = prepare_welcome_workspace_for_new_session(
@@ -818,11 +820,14 @@ mod apply_tests {
     #[test]
     #[serial_test::serial(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK)]
     fn local_without_ack_awaits_confirm() {
-        let _ack = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV);
+        let _ack =
+            xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV);
         // Isolate the ack file from the developer machine
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().unwrap());
+        let _home = xai_grok_test_support::EnvGuard::set(
+            "CHUTES_BUILD_HOME",
+            home.path().to_str().unwrap(),
+        );
         set_active_local_workspace(None).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let out = prepare_welcome_workspace_for_new_session(

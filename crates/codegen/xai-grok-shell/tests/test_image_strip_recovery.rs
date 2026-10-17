@@ -178,8 +178,10 @@ fn poisoned_image_session_recovers_within_the_failing_turn() {
 
 /// The session's `chat_history.jsonl`; the sessions dir name encodes the cwd in an internal format, so we scan for the file.
 fn session_chat_jsonl() -> std::path::PathBuf {
-    let sessions = std::path::PathBuf::from(std::env::var("CHUTES_BUILD_HOME").expect("CHUTES_BUILD_HOME set"))
-        .join("sessions");
+    let sessions = std::path::PathBuf::from(
+        std::env::var("CHUTES_BUILD_HOME").expect("CHUTES_BUILD_HOME set"),
+    )
+    .join("sessions");
     std::fs::read_dir(&sessions)
         .expect("read sessions dir")
         .filter_map(|e| Some(e.ok()?.path().join(SESSION_ID).join("chat_history.jsonl")))

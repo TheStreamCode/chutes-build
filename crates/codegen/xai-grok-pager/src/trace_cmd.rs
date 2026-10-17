@@ -647,7 +647,11 @@ impl UploadAttempt<'_> {
         let _ = writeln!(log, "Trace upload debug log");
         let _ = writeln!(log, "======================");
         let _ = writeln!(log, "Timestamp:    {}", chrono::Utc::now().to_rfc3339());
-        let _ = writeln!(log, "Chutes Build version: {}", xai_grok_version::full_version());
+        let _ = writeln!(
+            log,
+            "Chutes Build version: {}",
+            xai_grok_version::full_version()
+        );
         let _ = writeln!(
             log,
             "OS:           {} {}",

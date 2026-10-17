@@ -112,7 +112,7 @@ pub struct AddArgs {
     command_or_url: Option<String>,
 
     /// Arguments passed to the server command.
-    /// Place them after `--` so flags such as `-y` are passed to the server instead of grok.
+    /// Place them after `--` so flags such as `-y` are passed to the server instead of chutes-build.
     #[arg(value_name = "ARGS")]
     args: Vec<String>,
 
@@ -632,7 +632,9 @@ async fn run_set_enabled(name: &str, enabled: bool) -> Result<()> {
         if !available.is_empty() {
             eprintln!("Available servers: {}", available.join(", "));
         } else {
-            eprintln!("No MCP servers configured. Run `chutes-build mcp add --help` to get started.");
+            eprintln!(
+                "No MCP servers configured. Run `chutes-build mcp add --help` to get started."
+            );
         }
         std::process::exit(1);
     }
@@ -726,7 +728,9 @@ async fn run_remove(name: &str, requested_scope: Option<McpScope>) -> Result<()>
                 display_user_grok_path(xai_grok_config::USER_CONFIG_FILENAME)
             );
             eprintln!("  project: {}", project_path.display());
-            eprintln!("Specify which one to remove, e.g.: chutes-build mcp remove {name} --scope project");
+            eprintln!(
+                "Specify which one to remove, e.g.: chutes-build mcp remove {name} --scope project"
+            );
             std::process::exit(1);
         }
     };

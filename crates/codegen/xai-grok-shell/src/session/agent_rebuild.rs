@@ -296,7 +296,10 @@ impl AgentRebuildSpec {
         }
         let session_env = {
             let mut env = session_env.as_ref().clone();
-            env.insert("CHUTES_BUILD_SESSION_ID".to_string(), session_id_str.clone());
+            env.insert(
+                "CHUTES_BUILD_SESSION_ID".to_string(),
+                session_id_str.clone(),
+            );
             Arc::new(env)
         };
         let presentation = latch_task_model_presentation(models_manager, task_model_policy).await;

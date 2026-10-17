@@ -5,9 +5,7 @@
 //! written to a workspace JSON file and only a summary — model, count,
 //! dimensions, path — is returned into the conversation.
 
-use chutes_build_core::embeddings::{
-    DEFAULT_EMBED_MODEL, DEFAULT_EMBED_SLUG, embed_texts,
-};
+use chutes_build_core::embeddings::{DEFAULT_EMBED_MODEL, DEFAULT_EMBED_SLUG, embed_texts};
 use chutes_build_core::media::ChutesMediaClient;
 
 use crate::types::output::ToolOutput;
@@ -115,8 +113,8 @@ impl xai_tool_runtime::Tool for EmbedTextsTool {
             .filter(|name| !name.is_empty())
             .unwrap_or(DEFAULT_EMBED_MODEL);
 
-        let client = ChutesMediaClient::from_env()
-            .map_err(|error| execution_error("embed_texts", error))?;
+        let client =
+            ChutesMediaClient::from_env().map_err(|error| execution_error("embed_texts", error))?;
         let detail = client.describe(slug).await.map_err(|error| {
             execution_error(
                 "embed_texts",
@@ -132,9 +130,15 @@ impl xai_tool_runtime::Tool for EmbedTextsTool {
             )
         })?;
 
-        let output = embed_texts(&client, &base_url, model_name, &input.texts, input.dimensions)
-            .await
-            .map_err(|error| execution_error("embed_texts", error))?;
+        let output = embed_texts(
+            &client,
+            &base_url,
+            model_name,
+            &input.texts,
+            input.dimensions,
+        )
+        .await
+        .map_err(|error| execution_error("embed_texts", error))?;
 
         let resources = crate::types::tool_metadata::shared_resources(&ctx)?;
         let cwd = {
@@ -258,9 +262,18 @@ mod tests {
 
     #[test]
     fn filename_sanitizer_keeps_safe_stems() {
-        assert_eq!(sanitize_filename_stem(Some("run-1_final.v2")), "run-1_final.v2");
-        assert_eq!(sanitize_filename_stem(Some("../../etc/passwd")), "etc_passwd");
-        assert_eq!(sanitize_filename_stem(Some("a".repeat(100).as_str())).len(), 64);
+        assert_eq!(
+            sanitize_filename_stem(Some("run-1_final.v2")),
+            "run-1_final.v2"
+        );
+        assert_eq!(
+            sanitize_filename_stem(Some("../../etc/passwd")),
+            "etc_passwd"
+        );
+        assert_eq!(
+            sanitize_filename_stem(Some("a".repeat(100).as_str())).len(),
+            64
+        );
     }
 
     #[test]

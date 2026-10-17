@@ -547,7 +547,7 @@ Key environment variables that affect headless mode:
 | `CHUTES_BUILD_LOG_FILE`                | Path to a log file (used verbatim as the path; works in headless and TUI, honors `RUST_LOG`) |
 | `RUST_LOG`                     | Log level filter (e.g. `debug`). Headless logs to stderr.     |
 
-For CI environments without browser access, set `CHUTES_API_KEY` with an API key from [console.chutes.ai](https://console.chutes.ai):
+For CI environments without browser access, set `CHUTES_API_KEY` with an API key from [chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys):
 
 ```bash
 export CHUTES_API_KEY="cpk_..."

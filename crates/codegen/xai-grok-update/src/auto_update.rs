@@ -60,15 +60,19 @@ fn manual_install_cmd(channel: &str) -> String {
         };
     }
     if cfg!(windows) {
-        format!("$env:CHUTES_BUILD_CHANNEL='{channel}'; irm https://chutes.ai/cli/install.ps1 | iex")
+        format!(
+            "$env:CHUTES_BUILD_CHANNEL='{channel}'; irm https://chutes.ai/cli/install.ps1 | iex"
+        )
     } else {
-        format!("curl -fsSL https://chutes.ai/cli/install.sh | CHUTES_BUILD_CHANNEL='{channel}' bash")
+        format!(
+            "curl -fsSL https://chutes.ai/cli/install.sh | CHUTES_BUILD_CHANNEL='{channel}' bash"
+        )
     }
 }
 
 fn reinstall_hint(installer: &str, channel: &str) -> String {
     match installer {
-        "npm" => "Please reinstall via npm:\n  npm i -g @xai-official/grok".to_string(),
+        "npm" => "Please reinstall via npm:\n  npm i -g chutes-build".to_string(),
         "gh-release" => "Please reinstall via GitHub Releases:\n  gh release download --repo TheStreamCode/chutes-build --pattern 'chutes-build-*' --output chutes-build && chmod +x chutes-build".to_string(),
         WINGET => format!("Update with WinGet:\n  {UPGRADE_COMMAND}"),
         _ => format!("Please reinstall via:\n  {}", manual_install_cmd(channel)),
@@ -221,7 +225,10 @@ pub fn print_update_status(status: &UpdateStatus, json: bool) -> anyhow::Result<
         return Ok(());
     }
 
-    println!("Chutes Build - v{}{}", status.current_version, channel_label);
+    println!(
+        "Chutes Build - v{}{}",
+        status.current_version, channel_label
+    );
     Ok(())
 }
 
@@ -1769,9 +1776,12 @@ async fn regenerate_completions(binary: &std::path::Path, grok_home: &std::path:
     let user_home = xai_dirs::home_dir().unwrap_or_default();
 
     let completions: &[(&str, std::path::PathBuf)] = &[
-        ("bash", grok_home.join("completions/bash/grok.bash")),
-        ("zsh", grok_home.join("completions/zsh/_grok")),
-        ("fish", user_home.join(".config/fish/completions/grok.fish")),
+        ("bash", grok_home.join("completions/bash/chutes-build.bash")),
+        ("zsh", grok_home.join("completions/zsh/_chutes-build")),
+        (
+            "fish",
+            user_home.join(".config/fish/completions/chutes-build.fish"),
+        ),
     ];
 
     for (shell, dest) in completions {
@@ -2406,7 +2416,9 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
         let system_link = std::path::PathBuf::from(format!("/usr/local/bin/{name}"));
         if let Ok(existing_target) = tokio::fs::read_link(&system_link).await {
             let target_str = existing_target.to_string_lossy();
-            if target_str.contains(".chutes-build/downloads/") && !target_str.ends_with("chutes-build-latest") {
+            if target_str.contains(".chutes-build/downloads/")
+                && !target_str.ends_with("chutes-build-latest")
+            {
                 let _ = atomic_symlink_swap(&binary_path, &system_link).await;
             }
         }
@@ -2465,10 +2477,10 @@ fn create_temp_npmrc(npm_registry: Option<&str>) -> Result<Option<std::path::Pat
 /// SIGKILL'd by the kernel. macOS (Apple Silicon in particular) can no longer verify the code signature of the mmap'd
 /// executable pages once the backing inode is unlinked.
 #[cfg(target_os = "macos")]
-fn warn_if_other_grok_processes_running() {
+fn warn_if_other_cli_processes_running() {
     let my_pid = std::process::id().to_string();
     let mut cmd = Command::new("pgrep");
-    cmd.args(["-f", "grok"])
+    cmd.args(["-f", "chutes-build"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -2482,7 +2494,7 @@ fn warn_if_other_grok_processes_running() {
             .collect();
         if !other_pids.is_empty() {
             eprintln!(
-                "  ⚠ Warning: {} other grok process(es) detected.",
+                "  ⚠ Warning: {} other chutes-build process(es) detected.",
                 other_pids.len()
             );
             eprintln!("    Processes running from the npm vendored binary path may be");
@@ -2505,10 +2517,10 @@ pub fn install_npm_for_test(
 
 fn install_npm(target: Option<&str>, channel: &str, npm_registry: Option<&str>) -> Result<()> {
     #[cfg(target_os = "macos")]
-    warn_if_other_grok_processes_running();
+    warn_if_other_cli_processes_running();
 
     let version_arg = match target {
-        Some(ver) => format!("@xai-official/grok@{ver}"),
+        Some(ver) => format!("chutes-build@{ver}"),
         None => {
             // All current callers resolve the version via get_latest_version (max(stable, alpha) for the alpha channel) before reaching here
             // Falling back to a raw dist-tag would bypass that logic, so warn loudly if this path is ever hit
@@ -2517,7 +2529,7 @@ fn install_npm(target: Option<&str>, channel: &str, npm_registry: Option<&str>) 
                 "install_npm called without a resolved version, falling back to dist-tag"
             );
             format!(
-                "@xai-official/grok@{}",
+                "chutes-build@{}",
                 if channel == "alpha" {
                     "alpha"
                 } else {
@@ -2681,7 +2693,7 @@ pub async fn run_update(
         {
             tracing::warn!("Failed to persist auto_update=false for pinned install: {e}");
         }
-        eprintln!("  ✓ grok v{} installed successfully!", version);
+        eprintln!("  ✓ chutes-build v{} installed successfully!", version);
         eprintln!("  Please restart Chutes Build.");
         return Ok(Some(version.to_string()));
     }
@@ -2788,7 +2800,10 @@ pub async fn run_update(
         );
         &effective_current
     } else {
-        eprintln!("Updating Chutes Build {} → {}", effective_current, install_target);
+        eprintln!(
+            "Updating Chutes Build {} → {}",
+            effective_current, install_target
+        );
         &install_target
     };
 
@@ -2799,7 +2814,10 @@ pub async fn run_update(
     let stable_ptr = try_fetch_stable_pointer().await;
     write_version_cache(target_version, stable_ptr.as_deref()).await;
     refresh_deployment_config().await;
-    eprintln!("  ✓ grok v{} installed successfully!", target_version);
+    eprintln!(
+        "  ✓ chutes-build v{} installed successfully!",
+        target_version
+    );
 
     if !force && std::env::var_os("CHUTES_BUILD_AUTO_UPDATE").is_none() {
         eprintln!("  Please restart Chutes Build.");

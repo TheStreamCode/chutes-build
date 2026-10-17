@@ -465,7 +465,9 @@ mod tests {
     }
     #[test]
     fn plan_file_in_session_dir() {
-        let t = PlanModeTracker::new(PathBuf::from("/home/user/.chutes-build/sessions/proj/abc-123"));
+        let t = PlanModeTracker::new(PathBuf::from(
+            "/home/user/.chutes-build/sessions/proj/abc-123",
+        ));
         assert_eq!(
             t.plan_file_path(),
             Path::new("/home/user/.chutes-build/sessions/proj/abc-123/plan.md")

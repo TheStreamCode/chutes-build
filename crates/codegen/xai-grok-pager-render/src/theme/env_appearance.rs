@@ -127,7 +127,10 @@ mod tests {
             Some(SystemAppearance::Dark)
         );
         assert_eq!(
-            detect_from_env_map(&env(&[("CHUTES_BUILD_APPEARANCE", ""), ("COLORFGBG", "0;15"),])),
+            detect_from_env_map(&env(&[
+                ("CHUTES_BUILD_APPEARANCE", ""),
+                ("COLORFGBG", "0;15"),
+            ])),
             Some(SystemAppearance::Light)
         );
     }
@@ -160,7 +163,10 @@ mod tests {
             Some(SystemAppearance::Dark)
         );
         assert_eq!(
-            detect_from_env_map(&env(&[("LC_CHUTES_BUILD_APPEARANCE", ""), ("COLORFGBG", "0;15"),])),
+            detect_from_env_map(&env(&[
+                ("LC_CHUTES_BUILD_APPEARANCE", ""),
+                ("COLORFGBG", "0;15"),
+            ])),
             Some(SystemAppearance::Light)
         );
     }

@@ -87,7 +87,10 @@ pub fn transcribe_body(audio_b64: &str, options: &TranscribeOptions) -> serde_js
     // Whisper is the only engine whose schema documents timestamps; sending
     // the flag elsewhere trips closed-schema validation on the chute.
     if matches!(options.engine, SttEngine::Whisper) && options.return_timestamps {
-        body.insert("return_timestamps".to_owned(), serde_json::Value::Bool(true));
+        body.insert(
+            "return_timestamps".to_owned(),
+            serde_json::Value::Bool(true),
+        );
     }
     if let Some(max) = options.max_new_tokens
         && !matches!(options.engine, SttEngine::Whisper)
@@ -148,7 +151,9 @@ pub async fn transcribe(
     let body = transcribe_body(audio_b64, options);
     let response = client.invoke(&url, "POST", &body).await?;
     let bytes = response.bytes().ok_or_else(|| {
-        MediaError::UnexpectedResponse("STT cord returned a spilled (non-memory) response".to_owned())
+        MediaError::UnexpectedResponse(
+            "STT cord returned a spilled (non-memory) response".to_owned(),
+        )
     })?;
     let raw: serde_json::Value = serde_json::from_slice(bytes).map_err(MediaError::Decode)?;
     let text = transcript_text(&raw).ok_or_else(|| {

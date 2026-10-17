@@ -301,7 +301,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
         // help's on-disk bytes are machine-dependent (home substituted in).
-        let raw = EXTRACTED_BODY.replace("platform", "read ~/.chutes-build/docs/user-guide then platform");
+        let raw = EXTRACTED_BODY.replace(
+            "platform",
+            "read ~/.chutes-build/docs/user-guide then platform",
+        );
         let body = raw.replace("~/.chutes-build/", &format!("{}/", home.to_string_lossy()));
         let raw_hash = sha256_hex(raw.as_bytes());
         let dir = write_skill(home, "help", &body);

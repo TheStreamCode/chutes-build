@@ -80,23 +80,30 @@ CLI behavior must agree before a release candidate is packaged.
 
 ## Build and publish
 
-1. Run the `Package release` workflow from `main` with `publish` disabled.
-2. Confirm all six native binary smoke tests, SHA-256 verification, and the
-   assembled Linux launcher test passed.
-3. Inspect the six retained npm archives and checksum sidecars; confirm their
-   target, version, executable name, license, and notices.
-4. Run the workflow again from `main` with `publish` enabled.
-5. Approve the protected `npm-release` environment after reviewing the run.
-6. Confirm all six native packages were published before the root
-   `chutes-build` launcher.
-7. The same run then creates the `v<version>` tag and the GitHub release, with
-   the notes taken from this version's `CHANGELOG.md` section and every asset
-   attached: the six platform executables, the six npm archives, and their
-   checksum sidecars. Nothing to do by hand.
-8. Install the published version on at least Windows and one Unix platform, then
-   verify `chutes-build --version` and a non-billable startup path.
+Push-to-publish: one tag, one run, no manual dispatch.
 
-Step 8 is not a formality either. Doing it for 1.0.0 — `npm install chutes-build`
+1. Land the version bump on `main` (manifests, `Cargo.lock`, `CHANGELOG.md`
+   section — the release notes are sliced from it, and an absent section
+   fails the run).
+2. Tag and push the tag from the release commit:
+   `git tag v<version> && git push origin v<version>`.
+3. The tag push runs `Package release` once: validate (including a
+   tag-matches-`package.json` check), the six native builds, the assembled
+   launcher smoke test, npm publish (native packages first, launcher last),
+   and the GitHub release with every asset attached — the six platform
+   executables, the six npm archives, and their checksum sidecars. Nothing
+   to do by hand.
+4. Confirm `npm view chutes-build version`, the `v<version>` release and its
+   assets, allowing a few minutes for registry propagation.
+5. Install the published version on at least Windows and one Unix platform,
+   then verify `chutes-build --version` and a non-billable startup path.
+
+`workflow_dispatch` remains for validation-only runs (`publish` disabled)
+and for re-publishing after a partial failure (`publish` enabled reuses the
+idempotent publish jobs). A failed or partial run must be investigated; do
+not reuse an already published version.
+
+Step 5 is not a formality either. Doing it for 1.0.0 — `npm install chutes-build`
 into a throwaway prefix, then reading every subcommand's `--help` — found five
 places where the re-base had taken upstream's branding back over the fork's, three
 of them flag *names* (`--grok-ws-origin`, `--grok-ws-url`, `--xai-api-base-url`).
@@ -112,8 +119,7 @@ wordmark's hash so that particular loss cannot repeat silently, but the general
 lesson is that reading strings is not the same as running the program.
 
 The workflow publishes native packages first because the root launcher depends
-on them as optional dependencies. A failed or partial run must be investigated;
-do not reuse an already published version.
+on them as optional dependencies.
 
 **A cancelled build job ships nothing, even when it built everything.** The first
 1.0.3 run produced all six artifacts and published none. `darwin-arm64` finished

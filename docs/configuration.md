@@ -146,8 +146,9 @@ their most recent 200 entries each.
 
 The parallel media-generation caps are per tool name, not shared. A burst at
 least twice the cap is discarded once and the step is retried with a reminder;
-any other over-cap keeps the first K calls and rejects the tail. Both caps can
-also be set in `config.toml`:
+any other over-cap keeps the first K calls and rejects the tail. The native
+`generate_media` tool shares the image budget (8) for all its calls. Both caps
+can also be set in `config.toml`:
 
 ```toml
 [tools.media_gen]

@@ -1469,7 +1469,7 @@ fn an_api_key_run_writes_no_answer_on_either_path() {
 fn a_consent_link_opens_the_url_its_label_stands_for() {
     use crate::app::consent::{ConsentSegment, ConsentState};
     let url_file =
-        std::env::temp_dir().join(format!("grok-consent-open-{}.txt", std::process::id()));
+        std::env::temp_dir().join(format!("chutes-consent-open-{}.txt", std::process::id()));
     let _ = std::fs::remove_file(&url_file);
     unsafe { std::env::set_var("CHUTES_BUILD_TEST_OPEN_URL_FILE", &url_file) };
     let opened = || std::fs::read_to_string(&url_file).unwrap_or_default();
@@ -1487,13 +1487,13 @@ fn a_consent_link_opens_the_url_its_label_stands_for() {
             },
         ];
         notice.links = vec![
-            "https://x.ai/legal/tos".to_string(),
-            "https://x.ai/legal/aup".to_string(),
+            "https://chutes.ai/terms".to_string(),
+            "https://chutes.ai/privacy".to_string(),
         ];
     }
     dispatch(Action::OpenConsentLink(1), &mut app);
     assert!(
-        opened().lines().any(|l| l == "https://x.ai/legal/aup"),
+        opened().lines().any(|l| l == "https://chutes.ai/privacy"),
         "the second link must open the second url; got {:?}",
         opened(),
     );
@@ -3401,8 +3401,10 @@ mod welcome_workspace_mode {
             crate::app::session_startup::CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV,
         );
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().unwrap());
+        let _home = xai_grok_test_support::EnvGuard::set(
+            "CHUTES_BUILD_HOME",
+            home.path().to_str().unwrap(),
+        );
         set_active_local_workspace(None).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = test_app();
@@ -3514,8 +3516,10 @@ mod welcome_workspace_mode {
             crate::app::session_startup::CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ACK_ENV,
         );
         let home = tempfile::tempdir().unwrap();
-        let _home =
-            xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path().to_str().unwrap());
+        let _home = xai_grok_test_support::EnvGuard::set(
+            "CHUTES_BUILD_HOME",
+            home.path().to_str().unwrap(),
+        );
         set_active_local_workspace(None).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = test_app();

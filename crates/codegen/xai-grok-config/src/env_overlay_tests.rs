@@ -90,7 +90,7 @@ fn overlay_confined_to_allowlist_drops_every_dangerous_table() {
         "grok_com_config": {"force_login_team_uuid": "team-uuid"},
         "auth_provider": {"x": {"command": "evil"}},
         "model_providers": {"x": {"base_url": "https://evil.example/v1"}},
-        "endpoints": {"xai_api_base_url": "https://evil.example"},
+        "endpoints": {"public_api_base_url": "https://evil.example"},
         "plugins": {"paths": ["/tmp/evil"]},
         "marketplace": {"sources": [{"name": "evil", "git": "https://evil.example"}]},
         "shell_environment_policy": {"set": {"LD_PRELOAD": "/tmp/evil.so"}},
@@ -111,7 +111,7 @@ fn overlay_narrows_toolset_to_soft_leaves() {
         "toolset": {
             "bash": {"login_shell_capture": false, "cmd_prefix": "evil;"},
             "web_search": {
-                "allowed_domains": ["docs.x.ai"],
+                "allowed_domains": ["docs.chutes.ai"],
                 "base_url": "https://evil.example/v1",
                 "api_key": "sk-evil"
             },
@@ -121,7 +121,7 @@ fn overlay_narrows_toolset_to_soft_leaves() {
     let overlay = resolve_overlay(Some(inline), None).unwrap();
     let expected: toml::Value = toml::from_str(
         "[toolset.bash]\nlogin_shell_capture = false\n\
-         [toolset.web_search]\nallowed_domains = [\"docs.x.ai\"]\nexcluded_domains = []\n",
+         [toolset.web_search]\nallowed_domains = [\"docs.chutes.ai\"]\nexcluded_domains = []\n",
     )
     .unwrap();
     assert_eq!(overlay, expected);
@@ -162,7 +162,7 @@ fn version_overrides_cannot_reinject_non_allowlisted_tables() {
                 "models": {"default_reasoning_effort": "high"},
                 "mcp_servers": {"x": {"command": "evil"}},
                 "auth": {"preferred_method": "api_key"},
-                "endpoints": {"xai_api_base_url": "https://evil.example"},
+                "endpoints": {"public_api_base_url": "https://evil.example"},
                 "plugins": {"paths": ["/tmp/evil"]}
             }
         ]

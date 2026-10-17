@@ -211,8 +211,14 @@ async fn feedback_modal_trace_step_and_upload_ordering_pty() {
     overrides.push(EnvOp::set("CHUTES_BUILD_TELEMETRY_ENABLED", "true"));
     // Telemetry is on for the trace offer gate; the events sink must be the mock, never the baked production one.
     let events_url = format!("{}/events", content.url());
-    overrides.push(EnvOp::set("CHUTES_BUILD_TELEMETRY_EVENTS_URL", events_url.as_str()));
-    overrides.push(EnvOp::set("CHUTES_BUILD_TELEMETRY_EVENTS_API_KEY", "pty-capture"));
+    overrides.push(EnvOp::set(
+        "CHUTES_BUILD_TELEMETRY_EVENTS_URL",
+        events_url.as_str(),
+    ));
+    overrides.push(EnvOp::set(
+        "CHUTES_BUILD_TELEMETRY_EVENTS_API_KEY",
+        "pty-capture",
+    ));
     overrides.push(EnvOp::remove("CHUTES_BUILD_TRACE_UPLOAD_URL"));
 
     let binary = pager_binary().expect("resolve pager binary");

@@ -9,9 +9,10 @@ so. If you see a message naming `CHUTES_API_KEY`, that is the whole setup.
 
 ## Get a Chutes API key
 
-Generate a key from [console.chutes.ai](https://console.chutes.ai). Keys start
-with `cpk_`. Treat a key like a password: anyone holding it can bill your
-account.
+Generate a key from
+[chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys).
+Keys start with `cpk_`. Treat a key like a password: anyone holding it can
+bill your account.
 
 ## Configure the key
 
@@ -49,18 +50,25 @@ The legacy `CHUTES_BUILD_API_KEY` variable is still accepted when
 `CHUTES_API_KEY` is unset, so existing deployments keep working; new setups
 should use `CHUTES_API_KEY`.
 
-Without any key, Chutes Build starts on a setup screen that names
-`CHUTES_API_KEY` and exits only via Quit. Headless runs (`-p`) fail with the
-same message instead of producing output.
+Save the key once with `chutes-build login`: it prompts (or reads piped
+stdin), validates the key against the API, and stores it at
+`~/.chutes-build/api_key` for future runs. `chutes-build logout` deletes
+the saved key. An explicit `CHUTES_API_KEY` env value always wins over
+the saved one.
 
-## No login, no logout, no sessions
+Without any key, Chutes Build starts on a setup screen where you can
+paste the key inline (it validates, saves, and resumes) or Quit — never
+a login option. Headless runs (`-p`) fail with the same message instead
+of producing output.
 
-`chutes-build login` and `chutes-build logout` exist only to tell you the
-above: both print the API-key setup message and exit. The `/login` and
-`/logout` TUI commands are unavailable for the same reason. There is no
+## No account login, no sessions
+
+There is no account sign-in: `/login` and `/logout` are unavailable, and
+`login --oauth` / `login --device-auth` are refused. There is no
 `~/.chutes-build/auth.json` session to create, refresh, expire, or steal —
 this build neither reads nor writes a login store — and no auth-provider
-command is ever honored, whatever the config names.
+command is ever honored, whatever the config names. `/apikey` prints
+these setup instructions; a key changed mid-session needs a restart.
 
 ---
 
@@ -96,11 +104,10 @@ can use the credentials, so:
 
 ## Grove Git credentials (not an account login)
 
-Grove (the `chutes-build clone` daemon) builds its own Git credential cell
-from `auth_mode` in Grove config. Those credentials are managed with
-`grove status` and `grove reload-credentials` — see
-[chutes-build clone](27-grok-clone.md#authentication) for the failure classes
-and their next steps.
+Grove (the external worktree daemon, where used) builds its own Git
+credential cell from `auth_mode` in Grove config. Those credentials are
+managed with `grove status` and `grove reload-credentials`, separately
+from Chutes Build: a `CHUTES_API_KEY` never grants Git access.
 
 ---
 
@@ -150,11 +157,12 @@ RUST_LOG=debug chutes-build -p "hello" 2> /tmp/chutes-build.log
 ### Common fixes
 
 - **"Not signed in"** — `CHUTES_API_KEY` is unset or empty in this shell.
-  Export it (see above) and retry. There is no login command that can
-  substitute for the key.
+  Export it (see above), save one with `chutes-build login`, or paste it
+  on the welcome screen, and retry.
 - **"Authentication failed"** — the key is rejected by the Chutes API.
-  Generate a fresh key at [console.chutes.ai](https://console.chutes.ai),
+  Generate a fresh key at
+  [chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys),
   check for trailing whitespace or quotes in the value, and confirm no
   per-model `api_key`/`env_key` overrides the global one with a stale key.
-- **"Set CHUTES_API_KEY ... and restart" on the start screen** — same cause
-  as "Not signed in": quit, export the key, start again.
+- **Missing key on the start screen** — same cause as "Not signed in":
+  paste the key inline, or quit, export the key, and start again.

@@ -81,7 +81,7 @@ impl VoiceConfig {
         ws_url(&self.api_base, &self.stt_ws_path)
     }
 
-    /// `api_base`: non-empty `[voice].api_base`, else `[endpoints].xai_api_base_url` from `root`, else `resolved_endpoints_base`, else the default.
+    /// `api_base`: non-empty `[voice].api_base`, else `[endpoints].public_api_base_url` from `root`, else `resolved_endpoints_base`, else the default.
     ///
     /// `resolved_endpoints_base` carries the caller's env/CLI overrides; it ranks below the raw table so config keeps beating env (shell precedence).
     pub fn from_config_table(root: &toml::Table, resolved_endpoints_base: Option<&str>) -> Self {
@@ -89,6 +89,7 @@ impl VoiceConfig {
         let mut cfg: Self = voice_table
             .and_then(|t| toml::Value::Table(t.clone()).try_into().ok())
             .unwrap_or_default();
+        let endpoints_table = root.get("endpoints").and_then(|v| v.as_table());
 
         // Read `[voice].api_base` from the raw table, not `cfg`: serde default makes "unset" and an explicit `https://api.chutes.ai` indistinguishable
         cfg.api_base = non_empty_str(
@@ -98,8 +99,11 @@ impl VoiceConfig {
         )
         .or_else(|| {
             non_empty_str(
-                root.get("endpoints")
-                    .and_then(|e| e.get("xai_api_base_url"))
+                endpoints_table
+                    .and_then(|e| {
+                        e.get("public_api_base_url")
+                            .or_else(|| e.get("xai_api_base_url"))
+                    })
                     .and_then(|v| v.as_str()),
             )
         })
@@ -183,7 +187,11 @@ batch_api_base = "https://stt.example.com"
 
     #[test]
     fn scheme_less_and_wss_bases() {
-        for base in ["api.chutes.ai", "wss://api.chutes.ai", "HTTPS://api.chutes.ai"] {
+        for base in [
+            "api.chutes.ai",
+            "wss://api.chutes.ai",
+            "HTTPS://api.chutes.ai",
+        ] {
             let cfg = VoiceConfig {
                 api_base: base.into(),
                 ..VoiceConfig::default()
@@ -289,6 +297,20 @@ api_base = "  "
         // Whitespace-only resolved base falls through to the default.
         let cfg = VoiceConfig::from_config_table(&toml::Table::new(), Some("  "));
         assert_eq!(cfg.api_base, VoiceConfig::default().api_base);
+    }
+
+    #[test]
+    fn canonical_endpoints_key_wins_over_legacy_alias() {
+        let table: toml::Table = toml::from_str(
+            r#"
+[endpoints]
+public_api_base_url = "https://canonical.example.com"
+xai_api_base_url = "https://legacy.example.com"
+"#,
+        )
+        .unwrap();
+        let cfg = VoiceConfig::from_config_table(&table, None);
+        assert_eq!(cfg.api_base, "https://canonical.example.com");
     }
 
     /// config.toml beats the env/CLI fallback, matching the shell's endpoints precedence.

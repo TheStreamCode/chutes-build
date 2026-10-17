@@ -56,7 +56,7 @@ pub fn load_media_tool_config(
 }
 
 pub fn image_gen_config(cfg: &Config, credentials: &MediaToolCredentials) -> ImageGenConfig {
-    let base_url = cfg.endpoints.xai_api_base_url.clone();
+    let base_url = cfg.endpoints.public_api_base_url.clone();
     ImageGenConfig::Enabled {
         api_key: credentials.static_bearer.clone(),
         extra_headers: media_headers(cfg, &base_url),
@@ -83,7 +83,7 @@ pub fn video_gen_config(cfg: &Config, credentials: &MediaToolCredentials) -> Vid
     if zdr_restricted {
         tracing::info!("video_gen zdr-restricted by tools.disable_zdr_incompatible_tools");
     }
-    let base_url = cfg.endpoints.xai_api_base_url.clone();
+    let base_url = cfg.endpoints.public_api_base_url.clone();
     VideoGenConfig::Enabled {
         api_key: credentials.static_bearer.clone(),
         extra_headers: media_headers(cfg, &base_url),

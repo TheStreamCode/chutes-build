@@ -20,7 +20,7 @@ reads the same project conventions other agents use, and imports the rest.
 
 **`/import-claude`** scans your `~/.claude` settings — permissions, env
 vars, MCP servers, hooks — and shows a checkbox preview; confirming
-writes the items you selected into your `.grok` config. Re-run it anytime.
+writes the items you selected into your Chutes Build config. Re-run it anytime.
 
 ## Pick up where you left off
 

@@ -3629,13 +3629,23 @@ mod tests {
             .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
             .collect();
 
-        assert_eq!(env.get("CHUTES_BUILD_TEST_BASE").map(String::as_str), Some("1"));
-        assert_eq!(env.get("CHUTES_BUILD_TEST_LOGIN").map(String::as_str), Some("l"));
-        assert_eq!(env.get("CHUTES_BUILD_TEST_REQ").map(String::as_str), Some("r"));
+        assert_eq!(
+            env.get("CHUTES_BUILD_TEST_BASE").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            env.get("CHUTES_BUILD_TEST_LOGIN").map(String::as_str),
+            Some("l")
+        );
+        assert_eq!(
+            env.get("CHUTES_BUILD_TEST_REQ").map(String::as_str),
+            Some("r")
+        );
         assert!(!env.contains_key("CHUTES_BUILD_TEST_SECRET"));
         assert_eq!(env.get("PATH").map(String::as_str), Some("/login/bin"));
         assert_eq!(
-            env.get(crate::util::CHUTES_BUILD_AGENT_ENV).map(String::as_str),
+            env.get(crate::util::CHUTES_BUILD_AGENT_ENV)
+                .map(String::as_str),
             Some(crate::util::CHUTES_BUILD_AGENT_ENV_VALUE)
         );
     }

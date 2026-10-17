@@ -284,7 +284,7 @@ impl XaiProtoBuilder {
                 Some(file_descriptor_set_path)
             } else if gen_pbjson {
                 tempfile = tempfile::TempDir::new()?;
-                let file_descriptor_set_path = tempfile.path().join("xai-proto-build.pbbin");
+                let file_descriptor_set_path = tempfile.path().join("chutes-proto-build.pbbin");
                 builder = builder.file_descriptor_set_path(&file_descriptor_set_path);
                 Some(file_descriptor_set_path)
             } else {

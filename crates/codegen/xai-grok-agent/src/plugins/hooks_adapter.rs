@@ -170,9 +170,15 @@ fn process_hooks_content(
 
     // Native `CHUTES_BUILD_PLUGIN_*` vars plus their vendor-compat aliases.
     let plugin_env: HashMap<String, String> = HashMap::from([
-        ("CHUTES_BUILD_PLUGIN_ROOT".to_string(), plugin_root.to_string()),
+        (
+            "CHUTES_BUILD_PLUGIN_ROOT".to_string(),
+            plugin_root.to_string(),
+        ),
         ("CLAUDE_PLUGIN_ROOT".to_string(), plugin_root.to_string()),
-        ("CHUTES_BUILD_PLUGIN_DATA".to_string(), plugin_data.to_string()),
+        (
+            "CHUTES_BUILD_PLUGIN_DATA".to_string(),
+            plugin_data.to_string(),
+        ),
         ("CLAUDE_PLUGIN_DATA".to_string(), plugin_data.to_string()),
     ]);
 
@@ -352,7 +358,9 @@ mod tests {
         };
         assert!(spec.name.starts_with("plugin/my-plugin/"));
         assert_eq!(
-            spec.extra_env.get("CHUTES_BUILD_PLUGIN_ROOT").map(String::as_str),
+            spec.extra_env
+                .get("CHUTES_BUILD_PLUGIN_ROOT")
+                .map(String::as_str),
             Some("/path/to/plugin")
         );
         assert_eq!(
@@ -360,7 +368,9 @@ mod tests {
             Some("/path/to/plugin")
         );
         assert_eq!(
-            spec.extra_env.get("CHUTES_BUILD_PLUGIN_DATA").map(String::as_str),
+            spec.extra_env
+                .get("CHUTES_BUILD_PLUGIN_DATA")
+                .map(String::as_str),
             Some("/path/to/data")
         );
 
@@ -394,7 +404,9 @@ mod tests {
         };
         assert!(spec.name.starts_with("plugin/inline-plugin/"));
         assert_eq!(
-            spec.extra_env.get("CHUTES_BUILD_PLUGIN_ROOT").map(String::as_str),
+            spec.extra_env
+                .get("CHUTES_BUILD_PLUGIN_ROOT")
+                .map(String::as_str),
             Some("/path/to/plugin")
         );
         assert!(warnings.is_empty());

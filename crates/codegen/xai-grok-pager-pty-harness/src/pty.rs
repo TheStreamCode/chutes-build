@@ -171,7 +171,8 @@ impl PtyController {
             .or_else(|| pair.master.process_group_leader().map(|pid| pid as u32));
         #[cfg(windows)]
         let process_pid = child.process_id();
-        let process_tree = process_pid.map(|pid| TestProcessTree::attach(pid, "chutes-build PTY child"));
+        let process_tree =
+            process_pid.map(|pid| TestProcessTree::attach(pid, "chutes-build PTY child"));
         // Attachment failures remain recorded by TestProcessTree and show up in process_tree_diagnostics() on every harness timeout
         // Drop the slave so we get EOF when the child exits.
         drop(pair.slave);

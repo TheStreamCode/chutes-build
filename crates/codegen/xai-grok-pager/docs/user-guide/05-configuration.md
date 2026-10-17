@@ -109,7 +109,8 @@ respect_gitignore = false              # default: false; set true to make every 
 # Optional caps on parallel media generation in a single model step.
 # Per tool name. First 2×-or-more burst: discard that step and retry once.
 # Any other over-cap (including a second 2× burst) keeps the first K.
-# Defaults: image 8, video 4.
+# Defaults: image 8, video 4. The native `generate_media` tool shares the
+# image budget (8) for all its calls.
 # Env vars CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS / CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS
 # override these values (see environment-variables doc).
 # [tools.media_gen]
@@ -249,20 +250,11 @@ allowed_domains = ["docs.chutes.ai", "arxiv.org"]
 
 ### Authentication
 
-See [Authentication](02-authentication.md) for the full story.
-
-```toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-auth-provider"
-auth_provider_label = "Acme Corp"
-auth_token_ttl = 3600
-
-[grok_com_config.oidc]
-issuer = "https://acme.okta.com"
-client_id = "0oa1b2c3d4e5f6g7h8i9"
-# scopes = ["openid", "profile", "email", "offline_access", "api:access"]
-# audience = "https://api.acme.com"
-```
+See [Authentication](02-authentication.md) for the full story. This
+build authenticates by Chutes API key only: save one with
+`chutes-build login` or export `CHUTES_API_KEY`. The `[auth]`
+`auth_provider_command` and `[auth.oidc]` / `[grok_com_config.oidc]`
+keys are parsed but never honored.
 
 ### Custom models
 
@@ -316,9 +308,9 @@ url = "https://mcp.example.com/api/mcp"  # HTTP/SSE transport
 headers = { "x-mcp-session-id" = "{{session_id}}" }
 ```
 
-Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header; a
+Remote (HTTP/SSE) servers receive a default `User-Agent: chutes-build/<version>` header; a
 valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare
-`grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
+`chutes-build`). See [MCP servers](07-mcp-servers.md) for details.
 
 MCP servers can also be set per-project in `.chutes-build/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules; every other section loads only from `~/.chutes-build/config.toml`.
 
@@ -516,7 +508,7 @@ timeout_secs = 10
 
 # Push to ntfy server
 [[ui.notifications.hooks]]
-command = "curl -s -d '$CHUTES_BUILD_MESSAGE' ntfy.sh/my-grok-alerts"
+command = "curl -s -d '$CHUTES_BUILD_MESSAGE' ntfy.sh/my-chutes-alerts"
 events = ["turn_complete"]
 only_unfocused = true
 timeout_secs = 10
@@ -778,7 +770,7 @@ The key ones. See the README for the complete list.
 
 | Variable | Description |
 |----------|-------------|
-| `CHUTES_API_KEY` | API key from console.chutes.ai |
+| `CHUTES_API_KEY` | API key from chutes.ai/app/settings/api-keys |
 | `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` | External auth binary path |
 | `CHUTES_BUILD_AUTH_PROVIDER_LABEL` | Display name on TUI login screen |
 | `CHUTES_BUILD_AUTH_TOKEN_TTL` | Token lifetime in seconds |

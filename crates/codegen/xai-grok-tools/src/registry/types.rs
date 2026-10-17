@@ -51,8 +51,12 @@ pub const LOCK_PATH_SHAPED_PROPERTIES: &[&str] = &[
 ];
 /// Registered tools with a path-shaped property that deliberately declare no
 /// [`ToolMetadata::lock_path_param`]. Every entry needs a reason; the audit skips these ids.
-pub const LOCK_PATH_UNLOCKED_BY_DESIGN: &[&str] =
-    &["OpenCode:glob", "Pi:find", "Pi:ls", "ChutesBuild:memory_get"];
+pub const LOCK_PATH_UNLOCKED_BY_DESIGN: &[&str] = &[
+    "OpenCode:glob",
+    "Pi:find",
+    "Pi:ls",
+    "ChutesBuild:memory_get",
+];
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolConfig {
     pub id: String,
@@ -4107,9 +4111,9 @@ mod tests {
         };
         let errors = builder.validate_config(&config);
         assert!(
-            errors
-                .iter()
-                .any(|e| e.tool == "ChutesBuild:task" && e.message.contains("ChutesBuild:kill_task")),
+            errors.iter().any(
+                |e| e.tool == "ChutesBuild:task" && e.message.contains("ChutesBuild:kill_task")
+            ),
             "task tool should be rejected without kill_task: {errors:?}",
         );
     }
@@ -4143,10 +4147,8 @@ mod tests {
         };
         let errors = builder.validate_config(&config);
         assert!(
-            errors
-                .iter()
-                .any(|e| e.tool == "ChutesBuild:task"
-                    && e.message.contains("ChutesBuild:get_task_output")),
+            errors.iter().any(|e| e.tool == "ChutesBuild:task"
+                && e.message.contains("ChutesBuild:get_task_output")),
             "task tool should be rejected without get_task_output: {errors:?}",
         );
     }

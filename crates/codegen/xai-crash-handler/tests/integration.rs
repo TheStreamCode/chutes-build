@@ -1,4 +1,4 @@
-//! Integration tests for xai-crash-handler.
+//! Integration tests for chutes-build-crash-handler.
 //!
 //! These tests verify that installing the crash handler does not interfere
 //! with normal program operation (tokio runtime, signal handling),

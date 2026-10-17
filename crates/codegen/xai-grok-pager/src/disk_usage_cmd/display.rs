@@ -22,7 +22,7 @@ pub fn print_report(
     now: i64,
     out: &mut impl Write,
 ) -> std::io::Result<()> {
-    let home_label = home_prefix_label(&report.grok_home);
+    let home_label = home_prefix_label(&report.chutes_home);
     writeln!(out, "Disk usage for {home_label}")?;
     for entry in &report.top_level_dirs {
         writeln!(
@@ -94,14 +94,14 @@ pub fn print_report(
             writeln!(
                 out,
                 "  Worktree registry at {} could not be opened; rows show as untracked. Check its permissions.",
-                abbreviate(&report.registry_path, &report.grok_home, &home_label)
+                abbreviate(&report.registry_path, &report.chutes_home, &home_label)
             )?;
         }
         RegistryState::Corrupt => {
             writeln!(
                 out,
                 "  Worktree registry is damaged; rows show as untracked. Remove {} and run `chutes-build worktree db rebuild` to recreate it.",
-                abbreviate(&report.registry_path, &report.grok_home, &home_label)
+                abbreviate(&report.registry_path, &report.chutes_home, &home_label)
             )?;
         }
     }
@@ -139,7 +139,7 @@ pub fn print_report(
                 pad_to_width(kind, kind_width),
                 age,
                 pad_to_width(&label, label_width),
-                abbreviate(&wt.path, &report.grok_home, &home_label),
+                abbreviate(&wt.path, &report.chutes_home, &home_label),
             )?;
         }
     }
@@ -223,11 +223,11 @@ pub(crate) fn print_redirect_rows(
     Ok(())
 }
 
-pub fn print_missing_home(grok_home: &str, out: &mut impl Write) -> std::io::Result<()> {
+pub fn print_missing_home(chutes_home: &str, out: &mut impl Write) -> std::io::Result<()> {
     writeln!(
         out,
         "Nothing on disk yet at {}.",
-        home_prefix_label(grok_home)
+        home_prefix_label(chutes_home)
     )
 }
 
@@ -235,7 +235,7 @@ pub(crate) fn print_missing_home_report(
     report: &DiskUsageReport,
     out: &mut impl Write,
 ) -> std::io::Result<()> {
-    print_missing_home(&report.grok_home, out)?;
+    print_missing_home(&report.chutes_home, out)?;
     print_redirect_rows(report, out)?;
     print_skip_notes(report, out)
 }
@@ -321,6 +321,6 @@ fn abbreviate(path: &str, home: &str, label: &str) -> String {
     }
 }
 
-fn home_prefix_label(grok_home: &str) -> String {
-    crate::util::display_grok_home_prefix_for(Path::new(grok_home))
+fn home_prefix_label(chutes_home: &str) -> String {
+    crate::util::display_grok_home_prefix_for(Path::new(chutes_home))
 }

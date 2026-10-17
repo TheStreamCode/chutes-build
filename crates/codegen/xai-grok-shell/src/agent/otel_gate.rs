@@ -13,7 +13,7 @@ pub(crate) fn suppress() {
     xai_grok_telemetry::external::set_settings_gate_max_wait(SETTINGS_GATE_MAX_WAIT);
     xai_grok_telemetry::external::suppress_external_otel_until_settings();
 }
-/// Whether an xAI fleet policy can govern this process.
+/// Whether a fleet policy from the proxy can govern this process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PolicyChannel {
     Applies,
@@ -30,11 +30,11 @@ pub(crate) enum NoPolicy {
     RemoteFetchDisabled,
     ProxyRepointed,
 }
-pub(crate) fn policy_channel(remote_fetch_enabled: bool, proxy_is_xai: bool) -> PolicyChannel {
+pub(crate) fn policy_channel(remote_fetch_enabled: bool, proxy_is_prod: bool) -> PolicyChannel {
     if !remote_fetch_enabled {
         return PolicyChannel::Unavailable(NoPolicy::RemoteFetchDisabled);
     }
-    if !proxy_is_xai {
+    if !proxy_is_prod {
         return PolicyChannel::Unavailable(NoPolicy::ProxyRepointed);
     }
     PolicyChannel::Applies

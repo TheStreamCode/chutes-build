@@ -93,9 +93,9 @@ fn external_stream_grpc_end_to_end() {
 
     let event_names = recorder.event_names();
     for expected in [
-        "grok_code.session_start",
-        "grok_code.user_prompt",
-        "grok_code.api_request",
+        "chutes_build.session_start",
+        "chutes_build.user_prompt",
+        "chutes_build.api_request",
     ] {
         assert!(
             event_names.iter().any(|n| n == expected),
@@ -105,11 +105,13 @@ fn external_stream_grpc_end_to_end() {
 
     let metrics = recorder.metric_points();
     assert!(
-        metrics.iter().any(|p| p.name == "grok_code.session.count"),
+        metrics
+            .iter()
+            .any(|p| p.name == "chutes_build.session.count"),
         "missing session.count in {metrics:?}"
     );
     assert!(
-        metrics.iter().any(|p| p.name == "grok_code.token.usage"),
+        metrics.iter().any(|p| p.name == "chutes_build.token.usage"),
         "missing token.usage in {metrics:?}"
     );
     for point in metrics {

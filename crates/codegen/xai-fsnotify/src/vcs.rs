@@ -40,7 +40,9 @@ pub(crate) fn dir_named(p: &Path, name: &str) -> bool {
 /// and threaded down, so discovery, watching, and filtering can't disagree.
 pub(crate) fn sapling_enabled() -> bool {
     !matches!(
-        std::env::var("CHUTES_BUILD_FSNOTIFY_SAPLING").ok().as_deref(),
+        std::env::var("CHUTES_BUILD_FSNOTIFY_SAPLING")
+            .ok()
+            .as_deref(),
         Some("0") | Some("false")
     )
 }

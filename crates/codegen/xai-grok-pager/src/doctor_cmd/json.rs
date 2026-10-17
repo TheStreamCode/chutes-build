@@ -364,12 +364,12 @@ pub(super) fn terminal_name(name: TerminalName) -> &'static str {
         TerminalName::Rio => "rio",
         TerminalName::Foot => "foot",
         TerminalName::JetBrains => "jetbrains",
-        TerminalName::GrokDesktop => "grok_desktop",
+        // The brand token must never reach output: fold into "unknown".
+        TerminalName::GrokDesktop | TerminalName::Unknown => "unknown",
         TerminalName::Vte => "vte",
         TerminalName::Terminator => "terminator",
         TerminalName::WindowsTerminal => "windows_terminal",
         TerminalName::Otty => "otty",
-        TerminalName::Unknown => "unknown",
     }
 }
 

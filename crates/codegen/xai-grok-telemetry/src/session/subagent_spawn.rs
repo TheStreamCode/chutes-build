@@ -1,7 +1,7 @@
 //! A closed phase schema in the spirit of [`crate::startup::StartupPhase`].
 //! Time anything else with a `tracing` span, or extend the enum deliberately.
 //! Phases are recorded once per spawned child and reported on the `subagent_completed` event.
-//! Names follow the `grok_code_subagent_spawn_*` metric taxonomy.
+//! Names follow the `chutes_build_subagent_spawn_*` metric taxonomy.
 #![deny(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 
 use std::sync::{Arc, Mutex};

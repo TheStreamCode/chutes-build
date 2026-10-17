@@ -30,12 +30,18 @@ fn shorten_location_path_short_paths_leave_alone() {
     assert_eq!(shorten_location_path("~").as_ref(), "~");
     assert_eq!(shorten_location_path("~/src").as_ref(), "~/src");
     assert_eq!(shorten_location_path("~/src/repo").as_ref(), "~/src/repo");
-    assert_eq!(shorten_location_path("~/.chutes-build").as_ref(), "~/.chutes-build");
+    assert_eq!(
+        shorten_location_path("~/.chutes-build").as_ref(),
+        "~/.chutes-build"
+    );
     assert_eq!(
         shorten_location_path("~/.chutes-build/worktrees").as_ref(),
         "~/.chutes-build/worktrees"
     );
-    assert_eq!(shorten_location_path("$CHUTES_BUILD_HOME").as_ref(), "$CHUTES_BUILD_HOME");
+    assert_eq!(
+        shorten_location_path("$CHUTES_BUILD_HOME").as_ref(),
+        "$CHUTES_BUILD_HOME"
+    );
     assert_eq!(
         shorten_location_path("$CHUTES_BUILD_HOME/worktrees").as_ref(),
         "$CHUTES_BUILD_HOME/worktrees"

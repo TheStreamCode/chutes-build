@@ -768,7 +768,11 @@ mod tests {
         assert_ne!(h1, h2, "ancestor .mcp.json edit must change the hash");
 
         std::fs::create_dir_all(tmp.path().join(".chutes-build")).unwrap();
-        std::fs::write(tmp.path().join(".chutes-build").join("config.toml"), "x = 1").unwrap();
+        std::fs::write(
+            tmp.path().join(".chutes-build").join("config.toml"),
+            "x = 1",
+        )
+        .unwrap();
         let h3 = hash_project_mcp_config(&child).expect("readable");
         assert_ne!(
             h2, h3,
@@ -797,7 +801,10 @@ ignore = ["/tmp"]
         )
         .unwrap();
         let skills = parse_skills_config(&config);
-        assert_eq!(skills.paths, vec!["/home/user/.chutes-build/skills".to_string()]);
+        assert_eq!(
+            skills.paths,
+            vec!["/home/user/.chutes-build/skills".to_string()]
+        );
         assert_eq!(skills.ignore, vec!["/tmp".to_string()]);
     }
 

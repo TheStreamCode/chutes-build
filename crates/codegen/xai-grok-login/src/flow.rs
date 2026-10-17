@@ -867,7 +867,9 @@ async fn run_cli_login_steps(
     .await
     {
         if grok_com_config.oauth2.is_none() {
-            anyhow::bail!("Sign-in is not available for this deployment. Set CHUTES_API_KEY instead.");
+            anyhow::bail!(
+                "Sign-in is not available for this deployment. Set CHUTES_API_KEY instead."
+            );
         }
         let (auth, did_auth) = run_auth_flow_interactive(
             auth_manager,
@@ -1188,8 +1190,7 @@ mod tests {
     /// The script is the one published in `README.md`, which operators copy.
     #[tokio::test]
     async fn a_provider_written_to_the_published_contract_can_sign_in_after_an_expiry() {
-        let conforming =
-            r#"if [ "$CHUTES_BUILD_AUTH_EXPIRED" = "1" ]; then exit 1; else printf '%s' sso-token; fi"#;
+        let conforming = r#"if [ "$CHUTES_BUILD_AUTH_EXPIRED" = "1" ]; then exit 1; else printf '%s' sso-token; fi"#;
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())

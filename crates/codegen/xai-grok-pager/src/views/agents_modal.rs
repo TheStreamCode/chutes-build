@@ -513,7 +513,10 @@ pub fn merge_persona_lists(bundle: &BundleState, cwd: &Path) -> Vec<PersonaDetai
         }
     }
     let dirs = [
-        (ConfigFileScope::Project, cwd.join(".chutes-build").join("personas")),
+        (
+            ConfigFileScope::Project,
+            cwd.join(".chutes-build").join("personas"),
+        ),
         (ConfigFileScope::User, grok_home.join("personas")),
     ];
     for (scope, dir) in dirs {
@@ -2684,7 +2687,11 @@ mod tests {
     #[test]
     fn persona_is_deletable_local_vs_bundled() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let local = dir.path().join(".chutes-build").join("personas").join("p.toml");
+        let local = dir
+            .path()
+            .join(".chutes-build")
+            .join("personas")
+            .join("p.toml");
         std::fs::create_dir_all(local.parent().unwrap()).unwrap();
         std::fs::write(&local, "instructions = \"x\"\n").unwrap();
         let local_detail = PersonaDetail {
@@ -2716,7 +2723,11 @@ mod tests {
     #[test]
     fn delete_persona_file_allows_project_persona() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join(".chutes-build").join("personas").join("gone.toml");
+        let path = dir
+            .path()
+            .join(".chutes-build")
+            .join("personas")
+            .join("gone.toml");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "instructions = \"bye\"\n").unwrap();
         delete_persona_file(&path).expect("delete");

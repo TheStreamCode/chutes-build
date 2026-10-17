@@ -25,8 +25,16 @@ pub(crate) fn resolve_search_tools_enabled(
         )
     };
     (
-        resolve("CHUTES_BUILD_TOOLS_FIND_BFS", "CHUTES_BUILD_FIND_BFS", "find_bfs"),
-        resolve("CHUTES_BUILD_TOOLS_GREP_UGREP", "CHUTES_BUILD_GREP_UGREP", "grep_ugrep"),
+        resolve(
+            "CHUTES_BUILD_TOOLS_FIND_BFS",
+            "CHUTES_BUILD_FIND_BFS",
+            "find_bfs",
+        ),
+        resolve(
+            "CHUTES_BUILD_TOOLS_GREP_UGREP",
+            "CHUTES_BUILD_GREP_UGREP",
+            "grep_ugrep",
+        ),
     )
 }
 
@@ -290,7 +298,8 @@ mod login_shell_capture_tests {
 
 /// Env override for `[toolset.ask_user_question] timeout_enabled`. The secs env
 /// var lives in the tools crate (`RESPONSE_TIMEOUT_ENV`), parsed once there.
-const ENV_ASK_USER_QUESTION_TIMEOUT_ENABLED: &str = "CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_ENABLED";
+const ENV_ASK_USER_QUESTION_TIMEOUT_ENABLED: &str =
+    "CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_ENABLED";
 
 fn ask_user_question_timeout_enabled_from_toml(v: Option<&TomlValue>) -> Option<bool> {
     v?.get("toolset")?
@@ -547,12 +556,12 @@ mod web_search_domains_tests {
     #[test]
     fn allowlist_parsed() {
         let got = web_search_options_from_section(&section(
-            r#"allowed_domains = ["docs.x.ai", "arxiv.org"]"#,
+            r#"allowed_domains = ["docs.chutes.ai", "arxiv.org"]"#,
         ))
         .unwrap();
         assert_eq!(
             got.allowed_domains,
-            Some(vec!["docs.x.ai".to_string(), "arxiv.org".to_string()])
+            Some(vec!["docs.chutes.ai".to_string(), "arxiv.org".to_string()])
         );
         assert!(got.excluded_domains.is_none());
     }
@@ -582,10 +591,13 @@ mod web_search_domains_tests {
     fn both_set_degrades_to_allowlist() {
         // Normalization prevents this across layers; this is the in-one-layer defensive path.
         let got = web_search_options_from_section(&section(
-            "allowed_domains = [\"docs.x.ai\"]\nexcluded_domains = [\"reddit.com\"]",
+            "allowed_domains = [\"docs.chutes.ai\"]\nexcluded_domains = [\"reddit.com\"]",
         ))
         .unwrap();
-        assert_eq!(got.allowed_domains, Some(vec!["docs.x.ai".to_string()]));
+        assert_eq!(
+            got.allowed_domains,
+            Some(vec!["docs.chutes.ai".to_string()])
+        );
         assert!(got.excluded_domains.is_none());
     }
 }

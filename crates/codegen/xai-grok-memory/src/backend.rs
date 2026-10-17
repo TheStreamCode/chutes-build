@@ -1303,7 +1303,8 @@ mod tests {
             ..Default::default()
         };
         let provider =
-            build_embedding_provider(Some(&config), &scoped, None, "https://api.chutes.ai/v1").await;
+            build_embedding_provider(Some(&config), &scoped, None, "https://api.chutes.ai/v1")
+                .await;
         assert!(
             provider.is_some(),
             "trusted endpoint must build a provider from the session credential"

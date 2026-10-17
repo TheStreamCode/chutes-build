@@ -431,7 +431,8 @@ mod tests {
         write_plugin_json(&source, "demo-plugin");
         write_agent_md(&source, "old");
 
-        let mut registry = InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
+        let mut registry =
+            InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
         let installed = register_local_install(&mut registry, &source, None);
 
         write_agent_md(&source, "new");
@@ -493,7 +494,8 @@ mod tests {
         write_plugin_json(&source, "demo-plugin");
         write_agent_md(&source, "old");
 
-        let mut registry = InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
+        let mut registry =
+            InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
         let installed = register_local_install(&mut registry, &source, None);
 
         // No edit to the source: snapshot matches, so refresh is a stat-walk skip with no re-copy
@@ -515,7 +517,8 @@ mod tests {
         write_plugin_json(&source, "demo-plugin");
         write_agent_md(&source, "old");
 
-        let mut registry = InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
+        let mut registry =
+            InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
         let installed = register_local_install(&mut registry, &source, None);
 
         // Rename keeps file count, total size, and the file's (old) mtime, so only the structural (relpath, len) set catches it
@@ -543,7 +546,8 @@ mod tests {
         write_plugin_json(&source, "demo-plugin");
         write_agent_md(&source, "old");
 
-        let mut registry = InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
+        let mut registry =
+            InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
         let installed = register_local_install(&mut registry, &source, None);
 
         // Change the source so a refresh attempts a re-copy, then force the promote rename to fail and assert the prior snapshot is restored
@@ -732,7 +736,8 @@ mod tests {
         write_agent_md(&source, "agent");
         std::fs::write(source.join("agents").join("agent.md"), "body-v2\n").unwrap();
 
-        let mut registry = InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
+        let mut registry =
+            InstallRegistry::empty(home.join(".chutes-build").join("installed-plugins"));
         let installed = register_local_install(&mut registry, &source, None);
         let dest = installed.repo_path.clone();
 

@@ -1093,7 +1093,9 @@ mod platform {
         LEASE
             .get_or_init(|| {
                 if arboard_wayland_bypassed() {
-                    tracing::debug!("arboard leg disabled (CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL)");
+                    tracing::debug!(
+                        "arboard leg disabled (CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL)"
+                    );
                     return None;
                 }
                 match spawn_with_deadline(

@@ -80,10 +80,16 @@ pub fn imagine_usage_message() -> &'static str {
 }
 
 /// Build the model instruction that `/imagine` expands into for `prompt`.
+/// Routes through the Chutes-native `generate_media` tool: the legacy
+/// `image_gen` tool targets the xAI Imagine API, which Chutes does not serve.
 pub fn imagine_instruction(prompt: &str) -> String {
     format!(
-        "Call the image_gen tool immediately, passing the user's prompt below \
-         verbatim — do not rewrite, embellish, or expand it. \
+        "Call the generate_media tool immediately with kind \"image\", passing the user's prompt below \
+         verbatim as `prompt` — do not rewrite, embellish, or expand it. \
+         Use model \"vonkaiser-z-image-turbo\" unless the user named another image model; \
+         if you need alternatives, call list_media_models with kind \"image\" first. \
+         generate_media substitutes an equivalent model automatically when the requested one is gone; \
+         report its final error verbatim instead of retrying blindly. \
          After the tool completes, briefly acknowledge and mention \
          where the image was saved.\n\n\
          Prompt: {prompt}"
@@ -105,13 +111,23 @@ pub fn imagine_video_instruction(prompt: &str) -> String {
 }
 
 /// Video workflow guidance injected by `/imagine-video`.
+/// Routes through the Chutes-native `generate_media` tool: the legacy
+/// `image_to_video`/`reference_to_video` tools target the xAI Imagine API,
+/// which Chutes does not serve.
 const IMAGINE_VIDEO_SKILL: &str = "\
 # Imagine Video
 
-Video starts from an image — there is no text-to-video tool. \
-Default to `image_to_video`; use `reference_to_video` when the user \
-explicitly asks for it, a shot genuinely needs multiple reference images, \
-or the subject should speak in a specific preset voice (`voices`).
+Generate video with the `generate_media` tool (kind \"video\"). \
+Default to model \"vonkaiser-ltx-25-video\"; if you need alternatives, call \
+`list_media_models` with kind \"video\" first. `generate_media` substitutes \
+an equivalent model automatically when the requested one is gone; report its \
+final error verbatim instead of retrying blindly.
+
+Some video models animate from a source image, others take a bare text \
+prompt — call `describe_media_model` on the model first when you are unsure \
+which inputs its cord expects. To stage a first frame explicitly, generate \
+a source image with `generate_media` (kind \"image\") and pass it as an \
+input asset via `params`.
 
 If a video tool fails with a zero-data-retention (ZDR) storage error, relay \
 that error verbatim and stop the workflow — do not generate more source \
@@ -120,22 +136,18 @@ images or retry.
 ## Default: single clip
 
 Unless the user asks for a long video, multiple scenes, or a multi-shot sequence, \
-generate **one** video:
-
-1. Create a source image with `image_gen` that stages the first frame \
-(composition, subject, lighting).
-2. Call `image_to_video` with that image and a short prompt describing the motion \
-or camera move (1–2 sentences, present tense).
-3. After the tool completes, mention the saved file path so the user can find it.
+generate **one** video with a short prompt describing the motion \
+or camera move (1–2 sentences, present tense). \
+After the tool completes, mention the saved file path so the user can find it.
 
 ## Longer / multi-shot videos
 
 When the user requests a longer video, multiple scenes, or a narrative sequence:
 
 1. **Plan the story as shots** — break the idea into distinct shots, one beat each.
-2. **Favor frequent, short shots** — prefer more 6s clips over fewer long ones; more cuts keep it dynamic.
-3. **Create each shot's source image** with `image_gen` (or `image_edit` to combine references), keeping characters and settings consistent across shots.
-4. **Animate each shot with `image_to_video`** — the source image becomes frame 1.
+2. **Favor frequent, short shots** — prefer more short clips over fewer long ones; more cuts keep it dynamic.
+3. **Create each shot's source image** with `generate_media` (kind \"image\") when the video model needs one, keeping characters and settings consistent across shots.
+4. **Animate each shot with `generate_media`** (kind \"video\").
 5. **Assemble with FFmpeg** using stream copy (`ffmpeg -f concat ... -c copy` — never re-encode). \
 Keep every shot at the same resolution and frame rate so the concat works. \
 After assembly, mention the final output path.
@@ -145,10 +157,6 @@ After assembly, mention the final output path.
 - **Prompt-craft:** one short, vivid moment in present tense with a clear camera movement, in 1–2 sentences.
 - **Minimal but interesting:** one clear subject, one simple motion or camera move per shot. Avoid complex multi-action animation; make the shot compelling through composition, lighting, and a strong moment.
 - **Complex source image?** Intricate frames (busy geometry, fine detail, heavy reflections) warp when animated. Keep the subject fixed and move only the camera (slow push-in, orbit, or parallax), or break into simpler shots. For new shots, generate a simpler, animation-friendly base image rather than animating a busy one.
-- **`image_to_video` animates from frame 1** — stage the first frame with `image_gen`/`image_edit` before animating.
-- **Aspect ratio:** set it on the source image (`image_gen` `aspect_ratio`); don't re-crop an existing video.
-- **Duration:** 6s or 10s only (prefer 6s); round to the nearest. `reference_to_video` accepts 1–15s.
-- **Speaking subjects:** to give a subject a voice, use `reference_to_video` with `voices` (up to 3 preset voice identifiers, e.g. \"ara\", \"eve\") and tag them in the prompt as `<AUDIO_0>`…; combine with reference `images` tagged `<IMAGE_0>`… for a consistent character.
 - **Real people:** reference-first — drive the video from a verified reference image; never animate a named person without one.
 - Don't loop the same clip unless asked.";
 
@@ -199,14 +207,17 @@ mod tests {
     fn imagine_instruction_carries_prompt_verbatim() {
         let text = imagine_instruction("a golden sunset");
         assert!(text.contains("a golden sunset"));
-        assert!(text.contains("image_gen"));
+        assert!(text.contains("generate_media"));
+        assert!(!text.contains("image_gen"));
     }
 
     #[test]
     fn imagine_video_instruction_carries_prompt_and_workflow() {
         let text = imagine_video_instruction("a cat playing piano");
         assert!(text.contains("a cat playing piano"));
-        assert!(text.contains("image_to_video"));
+        assert!(text.contains("generate_media"));
+        assert!(text.contains("list_media_models"));
+        assert!(!text.contains("image_to_video"));
     }
 
     #[test]

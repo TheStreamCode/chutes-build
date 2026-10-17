@@ -508,7 +508,7 @@ pub struct ModelsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_description: Option<String>,
     /// Model pin for next-prompt suggestions (tab-autocomplete ghost text).
-    /// When unset: the remote pin, then the client hint / built-in `grok-4.6` default with the catalog guard; see `ModelOverrideConfig::resolve`.
+    /// When unset: the remote pin, then the client hint / built-in `model-router` default with the catalog guard; see `ModelOverrideConfig::resolve`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_suggestion: Option<String>,
     /// Model switched to automatically when plan mode is engaged. Opt-in:
@@ -650,8 +650,13 @@ impl SandboxSettingsConfig {
         if let Some(val) = requirement {
             return Resolved::new(val.to_owned(), ConfigSource::Requirement);
         }
-        resolve_string_flag(cli_arg, "CHUTES_BUILD_SANDBOX", self.profile.as_deref(), None)
-            .unwrap_or_else(|| Resolved::new("off".to_owned(), ConfigSource::Default))
+        resolve_string_flag(
+            cli_arg,
+            "CHUTES_BUILD_SANDBOX",
+            self.profile.as_deref(),
+            None,
+        )
+        .unwrap_or_else(|| Resolved::new("off".to_owned(), ConfigSource::Default))
     }
     /// Resolve auto_allow_bash: requirement > env > config > default (false).
     pub(crate) fn resolve_auto_allow_bash(&self, requirement: Option<bool>) -> Resolved<bool> {
@@ -1010,7 +1015,7 @@ pub struct Config {
     /// Resolved to the compiled default (`default_session_summary_model`) when unset; see `ModelOverrideConfig::resolve`.
     #[serde(skip)]
     pub session_summary_model: Option<String>,
-    /// Image describe model (`grok-4.6` default via `ModelOverrideConfig::resolve`).
+    /// Image describe model (`model-router` default via `ModelOverrideConfig::resolve`).
     #[serde(skip)]
     pub image_description_model: Option<String>,
     /// Next-prompt suggestion model pin (`env > [models] prompt_suggestion > remote`).
@@ -2097,7 +2102,8 @@ impl Config {
             .default(self.is_feature_enabled(Feature::TurnSummary))
             .resolve()
     }
-    /// `image_gen` (and `/imagine`). Default on.
+    /// Legacy `image_gen` (`/imagine` uses the Chutes-native `generate_media` instead). Default off:
+    /// this client targets the xAI Imagine API, which Chutes does not serve.
     /// `imagine_tools_disabled` is a remote force-off (env/config cannot re-enable).
     /// Otherwise: requirement > env > `[features]` > remote > default.
     pub(crate) fn resolve_image_gen(&self) -> Resolved<bool> {
@@ -2119,11 +2125,11 @@ impl Config {
                     .as_ref()
                     .and_then(|s| s.image_gen_enabled),
             )
-            .default(true)
+            .default(false)
             .resolve()
     }
-    /// `image_edit` tool gate.
-    /// Same denylist / requirement pattern as [`Self::resolve_image_gen`]; no `[features]` key (defaults on).
+    /// Legacy `image_edit` tool gate (the Chutes-native path edits via `generate_media` with input assets).
+    /// Same denylist / requirement pattern as [`Self::resolve_image_gen`]; no `[features]` key (defaults off).
     pub(crate) fn resolve_image_edit(&self) -> Resolved<bool> {
         use xai_grok_tools::implementations::grok_build::IMAGE_EDIT_TOOL_NAME;
         if let Some(pinned) = self.requirements.image_edit.pinned() {
@@ -2136,9 +2142,12 @@ impl Config {
         {
             return Resolved::new(false, ConfigSource::Remote);
         }
-        BoolFlag::env("CHUTES_BUILD_IMAGE_EDIT").default(true).resolve()
+        BoolFlag::env("CHUTES_BUILD_IMAGE_EDIT")
+            .default(false)
+            .resolve()
     }
-    /// `image_to_video` / `reference_to_video` (and `/imagine-video`). Default on.
+    /// Legacy `image_to_video` / `reference_to_video` (`/imagine-video` uses `generate_media`). Default off:
+    /// these clients target the xAI Imagine API, which Chutes does not serve.
     /// Registered as a pair; denylisting either tool name (or `video_gen`) disables both.
     /// Otherwise same precedence as [`Self::resolve_image_gen`].
     pub(crate) fn resolve_video_gen(&self) -> Resolved<bool> {
@@ -2162,7 +2171,7 @@ impl Config {
                     .as_ref()
                     .and_then(|s| s.video_gen_enabled),
             )
-            .default(true)
+            .default(false)
             .resolve()
     }
     /// Precedence: env `CHUTES_BUILD_IMAGE_GEN_MODEL_OVERRIDE` > `[features] image_gen_model_override` config > remote settings `image_gen_model_override`.
@@ -3263,7 +3272,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 model: m.model,
                 model_family: m.model_family,
                 base_url: endpoints.resolve_inference_base_url(),
-                api_base_url: Some(endpoints.xai_api_base_url.clone()),
+                api_base_url: Some(endpoints.public_api_base_url.clone()),
                 name: m.name,
                 description: m.description,
                 notice: m.notice.and_then(ModelNotice::normalized),
@@ -3317,7 +3326,7 @@ pub struct ModelEntryConfig {
     /// See [`ModelInfo::model_family`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_family: Option<String>,
-    /// The base URL of the model. e.g. "https://api.x.ai/v1"
+    /// The base URL of the model. e.g. "https://llm.chutes.ai/v1"
     pub base_url: String,
     /// Human-readable display name of the model.
     #[serde(skip_serializing_if = "Option::is_none")]

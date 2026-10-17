@@ -4,8 +4,8 @@ use axum::http::{HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 
 use super::tests::{
-    CHUTES_BUILD_BUILD_TOOLS, chat_body, chat_result, read_call, read_reply, reply, respond_with_headers,
-    shell_call, shell_reply,
+    CHUTES_BUILD_BUILD_TOOLS, chat_body, chat_result, read_call, read_reply, reply,
+    respond_with_headers, shell_call, shell_reply,
 };
 use super::{ConversationReplay, ServedReply};
 use crate::conversation::ConversationId;

@@ -225,7 +225,11 @@ mod tests {
     #[tokio::test]
     async fn discover_skills_finds_skill_md() {
         let tmp = tempfile::tempdir().unwrap();
-        let skills_dir = tmp.path().join(".chutes-build").join("skills").join("my-skill");
+        let skills_dir = tmp
+            .path()
+            .join(".chutes-build")
+            .join("skills")
+            .join("my-skill");
         fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
             skills_dir.join("SKILL.md"),
@@ -253,7 +257,11 @@ mod tests {
     #[tokio::test]
     async fn discover_skills_respects_ignore_config() {
         let tmp = tempfile::tempdir().unwrap();
-        let skills_dir = tmp.path().join(".chutes-build").join("skills").join("ignored");
+        let skills_dir = tmp
+            .path()
+            .join(".chutes-build")
+            .join("skills")
+            .join("ignored");
         fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
             skills_dir.join("SKILL.md"),
@@ -409,7 +417,11 @@ mod tests {
     #[test]
     fn discover_plugins_finds_manifest_plugin() {
         let tmp = tempfile::tempdir().unwrap();
-        let plugins_dir = tmp.path().join(".chutes-build").join("plugins").join("test-plugin");
+        let plugins_dir = tmp
+            .path()
+            .join(".chutes-build")
+            .join("plugins")
+            .join("test-plugin");
         fs::create_dir_all(&plugins_dir).unwrap();
         fs::write(
             plugins_dir.join("plugin.json"),
@@ -434,7 +446,11 @@ mod tests {
     #[test]
     fn discover_plugins_json_has_expected_fields() {
         let tmp = tempfile::tempdir().unwrap();
-        let plugins_dir = tmp.path().join(".chutes-build").join("plugins").join("field-test");
+        let plugins_dir = tmp
+            .path()
+            .join(".chutes-build")
+            .join("plugins")
+            .join("field-test");
         fs::create_dir_all(plugins_dir.join("skills")).unwrap();
         fs::write(
             plugins_dir.join("plugin.json"),

@@ -1,4 +1,4 @@
-//! Decode `x.ai/leader/version_mismatch` into toast/log text.
+//! Decode `chutes.ai/leader/version_mismatch` into toast/log text.
 //!
 //! Versions are sanitized before the whitespace check, so a value made only of control characters is rejected instead of toasted.
 //! The full banner then goes through `sanitize_toast_message` too, so the `⚠` chrome glyph gets its ConHost fallback.
@@ -30,7 +30,7 @@ pub(crate) fn version_mismatch_banner(params: &str) -> Option<String> {
     }
     Some(
         sanitize_toast_message(&format!(
-            "⚠ {VERSION_MISMATCH_MARKER} client {client}, leader {leader}. Restart grok to match"
+            "⚠ {VERSION_MISMATCH_MARKER} client {client}, leader {leader}. Restart chutes-build to match"
         ))
         .into_owned(),
     )

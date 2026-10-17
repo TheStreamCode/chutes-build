@@ -160,4 +160,4 @@ pub use process::{
 pub use resources::{ResourceGrowth, ResourceSnapshot, RssMeasurement, RssOutcome, RssSampler};
 pub use sandbox::{TestSandbox, TestSandboxBuilder};
 pub use sse::UsageReport;
-pub use tools::{DAEMON_SPAWN_TOOL, CHUTES_BUILD_BUILD_SPAWN_TOOL, Tool};
+pub use tools::{CHUTES_BUILD_BUILD_SPAWN_TOOL, DAEMON_SPAWN_TOOL, Tool};

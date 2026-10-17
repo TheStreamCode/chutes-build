@@ -275,8 +275,9 @@ mod tests {
         use crate::implementations::codex::apply_patch::ApplyPatchInput;
         use crate::types::ToolInput;
         let input = ToolInput::ApplyPatch(ApplyPatchInput {
-            patch: "*** Begin Patch\n*** Update File: /home/user/.chutes-build/mcp.json\n*** End Patch"
-                .to_owned(),
+            patch:
+                "*** Begin Patch\n*** Update File: /home/user/.chutes-build/mcp.json\n*** End Patch"
+                    .to_owned(),
         });
         assert!(matches!(
             AccessKind::from(&input),

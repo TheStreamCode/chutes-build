@@ -1238,7 +1238,10 @@ mod tests {
                 tc("ChutesBuild:list_dir", ToolKind::List),
                 tc("ChutesBuild:grep", ToolKind::Search),
                 tc("ChutesBuild:kill_task", ToolKind::KillTaskAction),
-                tc("ChutesBuild:get_task_output", ToolKind::BackgroundTaskAction),
+                tc(
+                    "ChutesBuild:get_task_output",
+                    ToolKind::BackgroundTaskAction,
+                ),
             ],
             behavior_preset: None,
         };
@@ -1265,7 +1268,10 @@ mod tests {
                 tc("ChutesBuild:list_dir", ToolKind::List),
                 tc("ChutesBuild:grep", ToolKind::Search),
                 tc("ChutesBuild:kill_task", ToolKind::KillTaskAction),
-                tc("ChutesBuild:get_task_output", ToolKind::BackgroundTaskAction),
+                tc(
+                    "ChutesBuild:get_task_output",
+                    ToolKind::BackgroundTaskAction,
+                ),
                 tc("ChutesBuild:task", ToolKind::Task),
             ],
             behavior_preset: None,

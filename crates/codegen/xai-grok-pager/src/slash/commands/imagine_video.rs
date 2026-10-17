@@ -1,12 +1,12 @@
 use agent_client_protocol as acp;
+use xai_grok_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
 use xai_grok_tools::implementations::grok_build::{
-    IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction,
-    imagine_video_usage_message,
+    IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction, imagine_video_usage_message,
 };
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-const REQUIRED_TOOLS: &[&str] = &[IMAGE_TO_VIDEO_TOOL_NAME];
+const REQUIRED_TOOLS: &[&str] = &[GENERATE_MEDIA_TOOL_NAME];
 
 pub struct ImagineVideoCommand;
 
@@ -43,8 +43,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_image_to_video_tool() {
-        assert_eq!(ImagineVideoCommand.required_tools(), &["image_to_video"]);
+    fn requires_generate_media_tool() {
+        assert_eq!(ImagineVideoCommand.required_tools(), &["generate_media"]);
     }
 
     #[test]
@@ -83,12 +83,12 @@ mod tests {
                 };
                 let text = &t.text;
                 assert!(
-                    text.contains("image_to_video"),
-                    "skill should reference image_to_video"
+                    text.contains("generate_media"),
+                    "skill should reference generate_media"
                 );
                 assert!(
-                    text.contains("reference_to_video"),
-                    "skill should reference reference_to_video"
+                    text.contains("list_media_models"),
+                    "skill should reference list_media_models"
                 );
                 assert!(text.contains("a cat playing piano"));
             }

@@ -8,6 +8,12 @@ on:
         required: true
         default: false
         type: boolean
+  # Direct push-to-publish: pushing a version tag builds once and publishes
+  # npm + the GitHub release in the same run — no manual dispatch, no second
+  # CI pass. The tag must match package.json (checked in `validate`).
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
@@ -33,6 +39,16 @@ jobs:
           package-manager-cache: false
       - name: Verify release versions
         run: npm run verify:release
+      - name: Check tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF}" != "refs/tags/v${version}" ]]; then
+            echo "Tag ${GITHUB_REF} does not match package.json version ${version}." >&2
+            exit 1
+          fi
       - name: Test launcher
         run: npm test
 
@@ -202,7 +218,7 @@ jobs:
 
   publish-npm:
     name: Publish npm packages
-    if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+    if: ${{ (inputs.publish && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v') }}
     needs:
       - validate
       - native-packages
@@ -284,7 +300,7 @@ jobs:
 
   github-release:
     name: Publish GitHub release
-    if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+    if: ${{ (inputs.publish && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v') }}
     needs:
       - validate
       - native-packages
@@ -345,11 +361,16 @@ jobs:
             echo "Release ${tag} already exists; uploading any missing assets."
             gh release upload "$tag" dist/* --clobber
           else
-            # `--target` creates the tag at this run's commit, so the tag, the
-            # published npm version and the attached binaries are the same thing
-            # by construction.
+            # On a tag push the tag already exists remotely: create the release
+            # on it. Otherwise `--target` creates the tag at this run's commit,
+            # so the tag, the published npm version and the attached binaries
+            # are the same thing by construction.
+            target_args=()
+            if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+              target_args=(--target "${GITHUB_SHA}")
+            fi
             gh release create "$tag" \
-              --target "${GITHUB_SHA}" \
+              "${target_args[@]}" \
               --title "Chutes Build ${version}" \
               --notes-file release-notes.md \
               --verify-tag=false \

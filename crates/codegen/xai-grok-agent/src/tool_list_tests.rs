@@ -167,7 +167,10 @@ fn known_tool_the_toolset_lacks_is_unmatched_not_unknown() {
 fn spawn_directive_keeps_the_task_tool_and_its_companions() {
     let toolset = [
         tool("ChutesBuild:task", ToolKind::Task),
-        tool("ChutesBuild:get_task_output", ToolKind::BackgroundTaskAction),
+        tool(
+            "ChutesBuild:get_task_output",
+            ToolKind::BackgroundTaskAction,
+        ),
         tool("ChutesBuild:read_file", ToolKind::Read),
     ];
     let allowed = entries(&["Agent"]);

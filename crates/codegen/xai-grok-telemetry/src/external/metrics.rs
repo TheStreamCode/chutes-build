@@ -100,14 +100,14 @@ macro_rules! metrics {
 
 metrics! {
     SessionCount {
-        wire: "grok_code.session.count",
+        wire: "chutes_build.session.count",
         const: METRIC_SESSION_COUNT,
         field: session_count: counter_u64("{session}"),
         attrs: [],
         op: add(1),
     }
     TokenUsage {
-        wire: "grok_code.token.usage",
+        wire: "chutes_build.token.usage",
         const: METRIC_TOKEN_USAGE,
         field: token_usage: counter_u64("{token}"),
         payload: { token_type: &'static str, model: String, count: u64 },
@@ -115,7 +115,7 @@ metrics! {
         op: add(count),
     }
     CostUsage {
-        wire: "grok_code.cost.usage",
+        wire: "chutes_build.cost.usage",
         const: METRIC_COST_USAGE,
         field: cost_usage: counter_f64("USD"),
         payload: { model: String, cost_usd: f64 },
@@ -123,25 +123,25 @@ metrics! {
         op: add(cost_usd),
     }
     TurnCount {
-        wire: "grok_code.turn.count",
+        wire: "chutes_build.turn.count",
         const: METRIC_TURN_COUNT,
         field: turn_count: counter_u64("{turn}"),
         payload: { outcome: &'static str, model: String },
         attrs: [ "outcome" => plain(outcome), "model" => scrub(model) ],
         op: add(1),
     }
-    /// `grok_code.turn.ttft` (ms from turn start to the first token of any channel: reasoning, text, or a tool call).
+    /// `chutes_build.turn.ttft` (ms from turn start to the first token of any channel: reasoning, text, or a tool call).
     TurnTtft {
-        wire: "grok_code.turn.ttft",
+        wire: "chutes_build.turn.ttft",
         const: METRIC_TURN_TTFT,
         field: turn_ttft: histogram,
         payload: { duration_ms: u64, model: String },
         attrs: [ "model" => scrub(model) ],
         op: record(duration_ms),
     }
-    /// `grok_code.turn.ttfm` (ms from turn start to the first assistant text message; reasoning and tool calls are excluded).
+    /// `chutes_build.turn.ttfm` (ms from turn start to the first assistant text message; reasoning and tool calls are excluded).
     TurnTtfm {
-        wire: "grok_code.turn.ttfm",
+        wire: "chutes_build.turn.ttfm",
         const: METRIC_TURN_TTFM,
         field: turn_ttfm: histogram,
         payload: { duration_ms: u64, model: String },
@@ -149,7 +149,7 @@ metrics! {
         op: record(duration_ms),
     }
     ToolDecision {
-        wire: "grok_code.tool.decision",
+        wire: "chutes_build.tool.decision",
         const: METRIC_TOOL_DECISION,
         field: tool_decision: counter_u64("{decision}"),
         payload: { tool_name: String, decision: &'static str, access_kind: &'static str, permission_mode: &'static str },
@@ -162,7 +162,7 @@ metrics! {
         op: add(1),
     }
     ToolUsage {
-        wire: "grok_code.tool.usage",
+        wire: "chutes_build.tool.usage",
         const: METRIC_TOOL_USAGE,
         field: tool_usage: counter_u64("{call}"),
         payload: { tool_name: String, outcome: &'static str, model: String },
@@ -170,7 +170,7 @@ metrics! {
         op: add(1),
     }
     ErrorCount {
-        wire: "grok_code.error.count",
+        wire: "chutes_build.error.count",
         const: METRIC_ERROR_COUNT,
         field: error_count: counter_u64("{error}"),
         payload: { error_category: String, model: String },
@@ -178,7 +178,7 @@ metrics! {
         op: add(1),
     }
     StartupTimeout {
-        wire: "grok_code.startup.timeout",
+        wire: "chutes_build.startup.timeout",
         const: METRIC_STARTUP_TIMEOUT,
         field: startup_timeout: counter_u64("{timeout}"),
         payload: { stuck_in: String, auth_mode: String },
@@ -186,7 +186,7 @@ metrics! {
         op: add(1),
     }
     SessionCreateTimeout {
-        wire: "grok_code.session.create_timeout",
+        wire: "chutes_build.session.create_timeout",
         const: METRIC_SESSION_CREATE_TIMEOUT,
         field: session_create_timeout: counter_u64("{timeout}"),
         payload: { stuck_in: String },
@@ -194,7 +194,7 @@ metrics! {
         op: add(1),
     }
     StartupPhaseDuration {
-        wire: "grok_code.startup.phase_duration",
+        wire: "chutes_build.startup.phase_duration",
         const: METRIC_STARTUP_PHASE_DURATION,
         field: startup_phase_duration: histogram,
         payload: { phase: String, duration_ms: u64, outcome: String, auth_mode: String },
@@ -202,7 +202,7 @@ metrics! {
         op: record(duration_ms),
     }
     StartupTotal {
-        wire: "grok_code.startup.total",
+        wire: "chutes_build.startup.total",
         const: METRIC_STARTUP_TOTAL,
         field: startup_total: histogram,
         payload: { duration_ms: u64, outcome: String, auth_mode: String },
@@ -210,7 +210,7 @@ metrics! {
         op: record(duration_ms),
     }
     StartupInteractive {
-        wire: "grok_code.startup.interactive",
+        wire: "chutes_build.startup.interactive",
         const: METRIC_STARTUP_INTERACTIVE,
         field: startup_interactive: histogram,
         payload: { duration_ms: u64, auth_mode: String },
@@ -218,7 +218,7 @@ metrics! {
         op: record(duration_ms),
     }
     StartupSubTimerDuration {
-        wire: "grok_code.startup.subtimer_duration",
+        wire: "chutes_build.startup.subtimer_duration",
         const: METRIC_STARTUP_SUBTIMER_DURATION,
         field: startup_subtimer_duration: histogram,
         payload: { phase: String, duration_ms: u64, outcome: String, auth_mode: String },

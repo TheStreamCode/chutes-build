@@ -74,7 +74,7 @@ pub struct UsageInfoContext {
     pub chat_kind: bool,
     /// Remote-settings kill switch: link out instead of showing billing.
     pub billing_redirect_url: Option<String>,
-    /// Plan name for the allowance header (e.g. "SuperGrok").
+    /// Plan name for the allowance header (e.g. "Pro").
     pub subscription_tier: Option<String>,
 }
 

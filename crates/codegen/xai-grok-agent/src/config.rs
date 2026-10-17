@@ -282,15 +282,15 @@ fn grok_build_core_toolset_with(
         (&grok_build::MonitorTool).into(),
         (&search_tool::SearchTool).into(),
         (&use_tool::UseTool).into(),
-            (&chutes::Context7SearchTool).into(),
-            (&chutes::Context7DocsTool).into(),
-            (&chutes::ListMediaModelsTool).into(),
-            (&chutes::DescribeMediaModelTool).into(),
-            (&chutes::GenerateMediaTool).into(),
-            (&chutes::TranscribeAudioTool).into(),
-            (&chutes::ExtractDocumentTool).into(),
-            (&chutes::EmbedTextsTool).into(),
-            (&chutes::BrowserTool).into(),
+        (&chutes::Context7SearchTool).into(),
+        (&chutes::Context7DocsTool).into(),
+        (&chutes::ListMediaModelsTool).into(),
+        (&chutes::DescribeMediaModelTool).into(),
+        (&chutes::GenerateMediaTool).into(),
+        (&chutes::TranscribeAudioTool).into(),
+        (&chutes::ExtractDocumentTool).into(),
+        (&chutes::EmbedTextsTool).into(),
+        (&chutes::BrowserTool).into(),
         (&grok_build::UpdateGoalTool).into(),
     ];
     if include_workflow {
@@ -681,9 +681,13 @@ where
 #[strum(serialize_all = "kebab-case")]
 pub enum BuiltinAgentName {
     ChutesBuild,
+    #[strum(serialize = "chutes-build-concise")]
     GrokBuildConcise,
+    #[strum(serialize = "chutes-build-plan")]
     GrokBuildPlan,
+    #[strum(serialize = "chutes-build-plan-no-subagents")]
     GrokBuildPlanNoSubagents,
+    #[strum(serialize = "chutes-build-ask-user")]
     GrokBuildAskUser,
     Codex,
     Opencode,
@@ -1121,7 +1125,9 @@ impl MemoryScope {
                 is_project_scoped: false,
             },
             Self::Project => ResolvedMemoryDir {
-                path: project_cwd.join(".chutes-build/agent-memory").join(agent_name),
+                path: project_cwd
+                    .join(".chutes-build/agent-memory")
+                    .join(agent_name),
                 is_project_scoped: true,
             },
             Self::Local => ResolvedMemoryDir {
@@ -1338,7 +1344,9 @@ impl AgentDefinition {
                 return scope;
             }
         }
-        if path_str.contains(".chutes-build/agents/") || path_str.contains(".chutes-build\\agents\\") {
+        if path_str.contains(".chutes-build/agents/")
+            || path_str.contains(".chutes-build\\agents\\")
+        {
             return AgentScope::Project;
         }
         if path_str.contains(".chutes-build/bundled/agents/")
@@ -2625,8 +2633,22 @@ description: Test default tool config
         use std::str::FromStr;
         for (s, expected) in [
             ("chutes-build", BuiltinAgentName::ChutesBuild),
-            ("grok-build-concise", BuiltinAgentName::GrokBuildConcise),
-            ("grok-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
+            (
+                "chutes-build-concise",
+                BuiltinAgentName::GrokBuildConcise,
+            ),
+            (
+                "chutes-build-plan",
+                BuiltinAgentName::GrokBuildPlan,
+            ),
+            (
+                "chutes-build-plan-no-subagents",
+                BuiltinAgentName::GrokBuildPlanNoSubagents,
+            ),
+            (
+                "chutes-build-ask-user",
+                BuiltinAgentName::GrokBuildAskUser,
+            ),
             ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),
             ("general-purpose", BuiltinAgentName::GeneralPurpose),

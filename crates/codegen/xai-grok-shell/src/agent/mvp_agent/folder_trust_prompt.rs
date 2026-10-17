@@ -144,7 +144,8 @@ impl MvpAgent {
                     return;
                 }
             };
-            let ext_request = acp::ExtRequest::new("chutes.ai/folder_trust/request", raw_params.into());
+            let ext_request =
+                acp::ExtRequest::new("chutes.ai/folder_trust/request", raw_params.into());
 
             use agent_client_protocol::Client as _;
             let outcome = match tokio::time::timeout(

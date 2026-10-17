@@ -4,8 +4,10 @@ use super::*;
 fn test_tmp_download_path_is_unique_per_version_and_per_attempt() {
     // The old `with_extension("tmp")` collapsed every 0.1.x versioned name onto a single `grok-0.1.tmp`
     // The helper must keep distinct versions distinct AND make repeated attempts (same process, e.g. concurrent tokio tasks) unique.
-    let dest_181 = std::path::Path::new("/home/u/.chutes-build/downloads/grok-0.1.181-linux-x86_64");
-    let dest_182 = std::path::Path::new("/home/u/.chutes-build/downloads/grok-0.1.182-linux-x86_64");
+    let dest_181 =
+        std::path::Path::new("/home/u/.chutes-build/downloads/grok-0.1.181-linux-x86_64");
+    let dest_182 =
+        std::path::Path::new("/home/u/.chutes-build/downloads/grok-0.1.182-linux-x86_64");
 
     let a = tmp_download_path(dest_181);
     let b = tmp_download_path(dest_182);
@@ -216,8 +218,11 @@ async fn test_reconcile_agent_repoints_diverged_agent() {
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
     std::fs::write(downloads.join("grok-0.1.199-macos-aarch64"), "old").unwrap();
 
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
-        .unwrap();
+    std::os::unix::fs::symlink(
+        "../downloads/grok-0.2.101-macos-aarch64",
+        bin.join("chutes-build"),
+    )
+    .unwrap();
     std::os::unix::fs::symlink("../downloads/grok-0.1.199-macos-aarch64", bin.join("agent"))
         .unwrap();
 
@@ -238,8 +243,11 @@ async fn test_reconcile_agent_heals_legacy_unversioned_agent() {
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
     std::fs::write(downloads.join("grok-macos-aarch64"), "legacy").unwrap();
 
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
-        .unwrap();
+    std::os::unix::fs::symlink(
+        "../downloads/grok-0.2.101-macos-aarch64",
+        bin.join("chutes-build"),
+    )
+    .unwrap();
     std::os::unix::fs::symlink("../downloads/grok-macos-aarch64", bin.join("agent")).unwrap();
 
     reconcile_agent_to_grok(&bin).await;
@@ -256,8 +264,11 @@ async fn test_reconcile_agent_heals_legacy_unversioned_agent() {
 async fn test_reconcile_agent_creates_missing_agent() {
     let (_dir, bin, downloads) = managed_layout();
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
-        .unwrap();
+    std::os::unix::fs::symlink(
+        "../downloads/grok-0.2.101-macos-aarch64",
+        bin.join("chutes-build"),
+    )
+    .unwrap();
 
     reconcile_agent_to_grok(&bin).await;
 
@@ -292,8 +303,11 @@ async fn test_reconcile_agent_noop_when_consistent() {
 #[tokio::test]
 async fn test_reconcile_agent_skips_when_grok_dangling() {
     let (_dir, bin, downloads) = managed_layout();
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
-        .unwrap();
+    std::os::unix::fs::symlink(
+        "../downloads/grok-0.2.101-macos-aarch64",
+        bin.join("chutes-build"),
+    )
+    .unwrap();
     std::fs::write(downloads.join("grok-0.1.199-macos-aarch64"), "old").unwrap();
     std::os::unix::fs::symlink("../downloads/grok-0.1.199-macos-aarch64", bin.join("agent"))
         .unwrap();
@@ -921,7 +935,7 @@ fn test_reinstall_hint_npm_mentions_npm_command() {
     let hint = reinstall_hint("npm", "stable");
     assert!(hint.contains("npm i -g"), "should suggest npm i -g: {hint}");
     assert!(
-        hint.contains("@xai-official/grok"),
+        hint.contains("chutes-build"),
         "should name the package: {hint}"
     );
 }
@@ -2456,7 +2470,7 @@ fn cli_object_candidates_try_windows_exe_first() {
 fn npm_entry_is_recognized_by_the_binary_location() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    let native = root.join("lib/node_modules/@xai-official/grok/bin/grok-native");
+    let native = root.join("lib/node_modules/chutes-build/bin/chutes-build-native");
     std::fs::create_dir_all(native.parent().unwrap()).unwrap();
     std::fs::write(&native, "bin").unwrap();
     let path_entry = root.join("prefix-bin/grok");

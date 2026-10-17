@@ -128,8 +128,8 @@ const RECONNECT_MAX_ATTEMPTS_BOUNDED: u32 = 5;
 /// These are resolved from the environment (--dev flag) before spawning.
 #[derive(Debug, Clone)]
 pub struct LeaderEnvUrls {
-    pub grok_ws_url: String,
-    pub grok_ws_origin: String,
+    pub ws_url: String,
+    pub ws_origin: String,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -799,8 +799,8 @@ pub async fn resolve_leader_target(
 impl From<&xai_grok_login::GrokComConfig> for LeaderEnvUrls {
     fn from(c: &xai_grok_login::GrokComConfig) -> Self {
         Self {
-            grok_ws_url: c.grok_ws_url.clone(),
-            grok_ws_origin: c.grok_ws_origin.clone(),
+            ws_url: c.ws_url.clone(),
+            ws_origin: c.ws_origin.clone(),
         }
     }
 }
@@ -1371,7 +1371,7 @@ async fn evict_zombie_leader(pid: u32, sock_path: &Path, waited: Duration) {
     );
 }
 /// Connect to existing leader or spawn a new one. Uses OS-level file locking (flock) to coordinate: Try to connect to existing socket (fast path) If connection fails, try to acquire exclusive lock
-/// If lock acquired, we are responsible for spawning the leader If lock not acquired, another process is leader/spawning; wait and retry The `env_urls.grok_ws_url` determines which leader instance to connect to.
+/// If lock acquired, we are responsible for spawning the leader If lock not acquired, another process is leader/spawning; wait and retry The `env_urls.ws_url` determines which leader instance to connect to.
 /// Different WS URLs get different leader processes (via hashed socket paths).
 pub async fn connect_or_spawn(
     client_type: &str,
@@ -1383,7 +1383,7 @@ pub async fn connect_or_spawn(
         return Err(ConnectionError::SandboxConfinement(profile));
     }
     let start = std::time::Instant::now();
-    let mut lock = LeaderLock::new(&env_urls.grok_ws_url);
+    let mut lock = LeaderLock::new(&env_urls.ws_url);
     let sock_path = lock.socket_path().clone();
     let mut replacing_stale = false;
     if crate::leader::transport::listener_is_ready(&sock_path) {
@@ -1629,8 +1629,8 @@ fn spawn_leader_subprocess(env_urls: &LeaderEnvUrls) -> Result<u32, ConnectionEr
     cmd.arg("agent").arg("leader");
     cmd.arg("--no-exit-on-disconnect");
     cmd.arg(RELAY_ON_DEMAND_FLAG);
-    cmd.arg("--grok-ws-url").arg(&env_urls.grok_ws_url);
-    cmd.arg("--grok-ws-origin").arg(&env_urls.grok_ws_origin);
+    cmd.arg("--ws-url").arg(&env_urls.ws_url);
+    cmd.arg("--ws-origin").arg(&env_urls.ws_origin);
     if let Some(socket) = std::env::var_os(crate::leader::LEADER_SOCKET_ENV) {
         cmd.env(crate::leader::LEADER_SOCKET_ENV, socket);
     }
@@ -2063,8 +2063,8 @@ mod tests {
         let fake =
             spawn_fake_leader(sock_path.clone(), FakeLeaderBehavior::SilentAfterAccept).await;
         let env_urls = LeaderEnvUrls {
-            grok_ws_url: "wss://test.invalid".into(),
-            grok_ws_origin: "https://test.invalid".into(),
+            ws_url: "wss://test.invalid".into(),
+            ws_origin: "https://test.invalid".into(),
         };
         let (status_tx, mut status_rx) = LeaderReconnector::status_channel();
         let reconnector = LeaderReconnector::new(
@@ -2238,8 +2238,8 @@ mod tests {
     #[test]
     fn notify_connected_increments_generation() {
         let env_urls = LeaderEnvUrls {
-            grok_ws_url: "wss://test.invalid".into(),
-            grok_ws_origin: "https://test.invalid".into(),
+            ws_url: "wss://test.invalid".into(),
+            ws_origin: "https://test.invalid".into(),
         };
         let (status_tx, status_rx) = LeaderReconnector::status_channel();
         let reconnector = LeaderReconnector::new(
@@ -2269,8 +2269,8 @@ mod tests {
         let handle = spawn_leader_server(sock_path.clone()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let env_urls = LeaderEnvUrls {
-            grok_ws_url: "wss://test.invalid".into(),
-            grok_ws_origin: "https://test.invalid".into(),
+            ws_url: "wss://test.invalid".into(),
+            ws_origin: "https://test.invalid".into(),
         };
         let (status_tx, mut status_rx) = LeaderReconnector::status_channel();
         let reconnector = LeaderReconnector::new(
@@ -2312,8 +2312,8 @@ mod tests {
     #[tokio::test]
     async fn reconnector_bounded_fails_after_max_attempts() {
         let env_urls = LeaderEnvUrls {
-            grok_ws_url: "wss://test.invalid".into(),
-            grok_ws_origin: "https://test.invalid".into(),
+            ws_url: "wss://test.invalid".into(),
+            ws_origin: "https://test.invalid".into(),
         };
         let (status_tx, mut status_rx) = LeaderReconnector::status_channel();
         let reconnector = LeaderReconnector::new(
@@ -2347,8 +2347,8 @@ mod tests {
     #[tokio::test]
     async fn reconnector_cancelled_returns_error() {
         let env_urls = LeaderEnvUrls {
-            grok_ws_url: "wss://test.invalid".into(),
-            grok_ws_origin: "https://test.invalid".into(),
+            ws_url: "wss://test.invalid".into(),
+            ws_origin: "https://test.invalid".into(),
         };
         let (status_tx, _status_rx) = LeaderReconnector::status_channel();
         let reconnector = LeaderReconnector::new(

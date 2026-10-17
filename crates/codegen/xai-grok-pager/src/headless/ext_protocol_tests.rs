@@ -444,7 +444,7 @@ fn headless_session_notification_task_tag_errors_not_silent() {
 #[test]
 fn headless_version_mismatch_logs_warn_with_both_versions() {
     let notif = make_raw_ext_notif(
-        "x.ai/leader/version_mismatch",
+        "chutes.ai/leader/version_mismatch",
         serde_json::json!({
             "clientVersion": "0.1.157",
             "leaderVersion": "0.1.150",
@@ -462,7 +462,7 @@ fn headless_version_mismatch_logs_warn_with_both_versions() {
         "log names the method: {logs}"
     );
     let banner = crate::glyphs::sanitize_toast_message(
-        "⚠ Version mismatch: client 0.1.157, leader 0.1.150. Restart grok to match",
+        "⚠ Version mismatch: client 0.1.157, leader 0.1.150. Restart chutes-build to match",
     );
     assert!(
         logs.contains(banner.as_ref()),
@@ -473,7 +473,7 @@ fn headless_version_mismatch_logs_warn_with_both_versions() {
 #[test]
 fn headless_version_mismatch_without_message_still_warns() {
     let notif = make_raw_ext_notif(
-        "x.ai/leader/version_mismatch",
+        "chutes.ai/leader/version_mismatch",
         serde_json::json!({
             "clientVersion": "0.1.157",
             "leaderVersion": "0.1.150",
@@ -486,7 +486,7 @@ fn headless_version_mismatch_without_message_still_warns() {
     assert!(is_none);
     assert!(logs.contains("WARN"), "logged at warn level: {logs}");
     let banner = crate::glyphs::sanitize_toast_message(
-        "⚠ Version mismatch: client 0.1.157, leader 0.1.150. Restart grok to match",
+        "⚠ Version mismatch: client 0.1.157, leader 0.1.150. Restart chutes-build to match",
     );
     assert!(
         logs.contains(banner.as_ref()),
@@ -502,7 +502,7 @@ fn headless_version_mismatch_malformed_warns_distinctly() {
         serde_json::Value::String("not-an-object".into()),
     ] {
         let desc = params.to_string();
-        let notif = make_raw_ext_notif("x.ai/leader/version_mismatch", params);
+        let notif = make_raw_ext_notif("chutes.ai/leader/version_mismatch", params);
         let logs = capture_logs(|| {
             assert!(
                 matches!(handle_ext_notification(&notif), ExtEvent::None),

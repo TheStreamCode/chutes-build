@@ -33,7 +33,8 @@ pub(crate) fn resolve_compaction_tool_choice_from(
         .unwrap_or_default()
 }
 
-pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str = "CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT";
+pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str =
+    "CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT";
 
 /// Precedence (highest first): env `CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT` user TOML `[model.<id>].auto_compact_threshold_percent` (`cfg.config_models`, the merge of user and managed `[model.<id>]` sections) user TOML `[session].auto_compact_threshold_percent` remote settings per-model `ModelInfo.auto_compact_threshold_percent` (kept out of `ConfigModelOverride::apply` so the user and remote per-model tiers stay distinct) remote settings global `RemoteSettings.auto_compact_threshold_percent` default `DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT`
 pub(crate) fn resolve_auto_compact_threshold_percent(

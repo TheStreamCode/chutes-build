@@ -1281,7 +1281,7 @@ fn default_models_dual_endpoint_routing() {
             auth_scheme: AuthScheme::Bearer,
         };
         assert_eq!(
-            api_key_creds.base_url, endpoints.xai_api_base_url,
+            api_key_creds.base_url, endpoints.public_api_base_url,
             "{model_id}: ExternalApiKey must route to api.x.ai"
         );
     }
@@ -1306,7 +1306,10 @@ fn env_keys_deser_string_or_array() {
 }
 #[test]
 fn env_keys_resolve_first_set_wins() {
-    let keys = EnvKeys::new(["CHUTES_BUILD_TEST_ENV_KEY_PRIMARY", "CHUTES_BUILD_TEST_ENV_KEY_FALLBACK"]);
+    let keys = EnvKeys::new([
+        "CHUTES_BUILD_TEST_ENV_KEY_PRIMARY",
+        "CHUTES_BUILD_TEST_ENV_KEY_FALLBACK",
+    ]);
     assert_eq!(keys.resolve_value_with(|_| None), None, "none set");
     assert_eq!(
         keys.resolve_value_with(
@@ -1341,7 +1344,10 @@ fn env_keys_single_and_array_are_semantically_equal() {
 }
 #[test]
 fn env_keys_resolve_skips_whitespace_only_value() {
-    let keys = EnvKeys::new(["CHUTES_BUILD_TEST_WS_PRIMARY", "CHUTES_BUILD_TEST_WS_FALLBACK"]);
+    let keys = EnvKeys::new([
+        "CHUTES_BUILD_TEST_WS_PRIMARY",
+        "CHUTES_BUILD_TEST_WS_FALLBACK",
+    ]);
     assert_eq!(
         keys.resolve_value_with(|n| match n {
             "CHUTES_BUILD_TEST_WS_PRIMARY" => Some("   ".into()),
@@ -1429,7 +1435,7 @@ fn resolve_credentials_empty_env_key_falls_through_to_session() {
 #[test]
 #[serial]
 fn resolve_credentials_empty_env_key_falls_through_to_global_key() {
-    use crate::agent::auth_method::{LEGACY_CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_ENV_VAR};
+    use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR};
     use xai_chat_state::AuthType;
     use xai_grok_test_support::EnvGuard;
     let sentinel = "xai-global-sentinel-key";
@@ -3666,7 +3672,7 @@ fn e2e_enterprise_endpoints_plus_partial_model_override() {
             r#"
             [endpoints]
             cli_chat_proxy_base_url = "https://enterprise-proxy.acme.com/v1"
-            xai_api_base_url = "https://enterprise-api.acme.com/v1"
+            public_api_base_url = "https://enterprise-api.acme.com/v1"
 
             [model."{dm}"]
             api_key = "acme-api-key"
@@ -3695,6 +3701,7 @@ fn e2e_enterprise_endpoints_plus_partial_model_override() {
         "sampling must route to enterprise proxy"
     );
 }
+/// The legacy `xai_api_base_url` key keeps parsing (serde alias for `public_api_base_url`).
 #[test]
 fn e2e_enterprise_endpoints_only_no_model_override() {
     let (_, models) = resolve_models_from_toml(
@@ -3715,7 +3722,7 @@ fn e2e_enterprise_endpoints_only_no_model_override() {
     assert_eq!(
         model.api_base_url.as_deref(),
         Some("https://enterprise-api.acme.com/v1"),
-        "default model should use enterprise xai_api_base_url"
+        "default model should use enterprise public_api_base_url"
     );
 }
 /// Unset every env var that `EndpointsConfig::default()` reads for endpoints.
@@ -3724,6 +3731,7 @@ fn e2e_enterprise_endpoints_only_no_model_override() {
 fn unset_endpoint_env_vars() {
     for k in [
         "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+        "CHUTES_BUILD_PUBLIC_API_BASE_URL",
         "CHUTES_BUILD_XAI_API_BASE_URL",
         "CHUTES_BUILD_FEEDBACK_BASE_URL",
         "CHUTES_BUILD_TRACE_UPLOAD_URL",
@@ -3740,7 +3748,7 @@ fn unset_endpoint_env_vars() {
         unsafe { std::env::remove_var(k) };
     }
 }
-/// INVARIANT: auxiliary-service resolvers resolve to the cli-chat-proxy, never `xai_api_base_url`.
+/// INVARIANT: auxiliary-service resolvers resolve to the cli-chat-proxy, never `public_api_base_url`.
 /// Overriding ONLY inference keeps every aux endpoint on the proxy; explicit per-service overrides win verbatim.
 #[test]
 #[serial]
@@ -3748,7 +3756,7 @@ fn aux_endpoints_resolve_to_proxy_never_inference() {
     unset_endpoint_env_vars();
     let inference = "https://inference.acme-corp.example/xai/v1";
     let cfg = EndpointsConfig {
-        xai_api_base_url: inference.to_string(),
+        public_api_base_url: inference.to_string(),
         cli_chat_proxy_base_url: None,
         ..Default::default()
     };
@@ -3766,7 +3774,7 @@ fn aux_endpoints_resolve_to_proxy_never_inference() {
         cfg.resolve_otlp_traces_endpoint(),
         format!("{proxy}/traces")
     );
-    assert_eq!(cfg.xai_api_base_url, inference);
+    assert_eq!(cfg.public_api_base_url, inference);
     let overridden = EndpointsConfig {
         cli_chat_proxy_base_url: Some("https://proxy.enterprise.example/v1".to_string()),
         managed_config_url: Some(
@@ -3797,7 +3805,7 @@ fn aux_endpoints_resolve_to_proxy_never_inference() {
         "https://trace.enterprise.example"
     );
 }
-/// REGRESSION: the managed-config URL never follows `xai_api_base_url` through the full loader `Config::new_from_toml_cfg`.
+/// REGRESSION: the managed-config URL never follows `public_api_base_url` through the full loader `Config::new_from_toml_cfg`.
 /// That is a distinct construction path from `from_config_value`, so the deployment key never reaches the inference host on either.
 #[test]
 #[serial]
@@ -3806,7 +3814,7 @@ fn loader_managed_config_url_never_follows_inference_endpoint() {
     let cfg = Config::new_from_toml_cfg(
         &toml::from_str(
             r#"[endpoints]
-                xai_api_base_url = "https://inference.acme-corp.example/xai/v1""#,
+                public_api_base_url = "https://inference.acme-corp.example/xai/v1""#,
         )
         .unwrap(),
     )
@@ -3821,6 +3829,25 @@ fn loader_managed_config_url_never_follows_inference_endpoint() {
             .resolve_managed_config_url()
             .contains("inference.acme-corp.example"),
         "deployment key would be sent to the inference host"
+    );
+}
+/// `CHUTES_BUILD_PUBLIC_API_BASE_URL` wins; the legacy `CHUTES_BUILD_XAI_API_BASE_URL` still works as a fallback.
+#[test]
+#[serial]
+fn public_api_base_url_env_prefers_new_with_legacy_fallback() {
+    use xai_grok_test_support::EnvGuard;
+    unset_endpoint_env_vars();
+    let _legacy = EnvGuard::set("CHUTES_BUILD_XAI_API_BASE_URL", "https://legacy.example/v1");
+    assert_eq!(
+        EndpointsConfig::default().public_api_base_url,
+        "https://legacy.example/v1",
+        "legacy env must keep working"
+    );
+    let _new = EnvGuard::set("CHUTES_BUILD_PUBLIC_API_BASE_URL", "https://new.example/v1");
+    assert_eq!(
+        EndpointsConfig::default().public_api_base_url,
+        "https://new.example/v1",
+        "new env must win over legacy"
     );
 }
 #[test]
@@ -4900,14 +4927,23 @@ fn imagine_tools_disabled_gates_image_edit() {
     assert!(!off.value);
     assert_eq!(off.source, ConfigSource::Remote);
     unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_EDIT") };
+    // Denylisting another tool leaves the gate to its own layers (default off).
+    assert!(!with_list(vec!["image_to_video"]).resolve_image_edit().value);
+    assert!(!Config::default().resolve_image_edit().value);
+    // Explicit opt-in still enables it.
+    unsafe { std::env::set_var("CHUTES_BUILD_IMAGE_EDIT", "1") };
     assert!(with_list(vec!["image_to_video"]).resolve_image_edit().value);
-    assert!(Config::default().resolve_image_edit().value);
+    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_EDIT") };
 }
 #[test]
 #[serial]
 fn resolve_image_gen_gates() {
     unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_GEN") };
+    // Legacy xAI-Imagine path: off by default on Chutes (`/imagine` uses `generate_media`).
+    assert!(!Config::default().resolve_image_gen().value);
+    unsafe { std::env::set_var("CHUTES_BUILD_IMAGE_GEN", "1") };
     assert!(Config::default().resolve_image_gen().value);
+    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_GEN") };
     assert!(
         !Config {
             features: Features {
@@ -4947,7 +4983,11 @@ fn resolve_image_gen_gates() {
 #[serial]
 fn resolve_video_gen_gates() {
     unsafe { std::env::remove_var("CHUTES_BUILD_VIDEO_GEN") };
+    // Legacy xAI-Imagine path: off by default on Chutes (`/imagine-video` uses `generate_media`).
+    assert!(!Config::default().resolve_video_gen().value);
+    unsafe { std::env::set_var("CHUTES_BUILD_VIDEO_GEN", "1") };
     assert!(Config::default().resolve_video_gen().value);
+    unsafe { std::env::remove_var("CHUTES_BUILD_VIDEO_GEN") };
     assert!(
         !Config {
             features: Features {
@@ -5823,7 +5863,7 @@ fn web_search_domain_keys_are_not_reported_unused() {
         let unused = unused_keys_from_toml(&format!(
             r#"
                 [toolset.web_search]
-                {key} = ["docs.x.ai"]
+                {key} = ["docs.chutes.ai"]
                 not_a_real_key = true
             "#
         ));
@@ -6227,7 +6267,10 @@ fn external_otel_requirements_pin_wins_over_env() {
         resolve_external_otel_config_with(
             None,
             Some(&req),
-            ext_env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp"),]),
+            ext_env(&[
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
+                ("OTEL_LOGS_EXPORTER", "otlp"),
+            ]),
             ext_client(),
             false,
         )
@@ -6679,7 +6722,10 @@ fn external_otel_carries_internal_consumed_flag() {
     let cfg = resolve_external_otel_config_with(
         None,
         None,
-        ext_env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp")]),
+        ext_env(&[
+            ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
+            ("OTEL_LOGS_EXPORTER", "otlp"),
+        ]),
         ext_client(),
         true,
     )
@@ -7060,14 +7106,18 @@ fn is_telemetry_explicitly_disabled_sync_env_signals() {
     use xai_grok_config::Distribution;
     unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "0") };
     unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
-    assert!(is_telemetry_explicitly_disabled_sync_as(Distribution::STOCK));
+    assert!(is_telemetry_explicitly_disabled_sync_as(
+        Distribution::STOCK
+    ));
     unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "1") };
     assert!(!is_telemetry_explicitly_disabled_sync_as(
         Distribution::STOCK
     ));
     unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
     unsafe { std::env::set_var("DISABLE_TELEMETRY", "1") };
-    assert!(is_telemetry_explicitly_disabled_sync_as(Distribution::STOCK));
+    assert!(is_telemetry_explicitly_disabled_sync_as(
+        Distribution::STOCK
+    ));
     unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
 }
 /// Under CHUTES both sync gates answer disabled whatever the environment
@@ -8649,6 +8699,7 @@ fn test_model_entry(
 fn stock_endpoints_resolve_to_chutes_only() {
     use xai_grok_test_support::EnvGuard;
     let _unset_api = EnvGuard::unset("CHUTES_BUILD_XAI_API_BASE_URL");
+    let _unset_public = EnvGuard::unset("CHUTES_BUILD_PUBLIC_API_BASE_URL");
     let _unset_base = EnvGuard::unset("CHUTES_BUILD_MODELS_BASE_URL");
     let _unset_list = EnvGuard::unset("CHUTES_BUILD_MODELS_LIST_URL");
     let _unset_proxy = EnvGuard::unset("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL");
@@ -8656,7 +8707,7 @@ fn stock_endpoints_resolve_to_chutes_only() {
     let _key = EnvGuard::set("CHUTES_API_KEY", "cpk_pinning_probe");
     let cfg = Config::default();
     assert_eq!(
-        cfg.endpoints.xai_api_base_url, "https://llm.chutes.ai/v1",
+        cfg.endpoints.public_api_base_url, "https://llm.chutes.ai/v1",
         "API-key inference default must be the Chutes LLM host"
     );
     assert_eq!(
@@ -8682,4 +8733,3 @@ fn stock_endpoints_resolve_to_chutes_only() {
         creds.base_url
     );
 }
-

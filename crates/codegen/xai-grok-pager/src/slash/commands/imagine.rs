@@ -1,11 +1,12 @@
 use agent_client_protocol as acp;
+use xai_grok_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
 use xai_grok_tools::implementations::grok_build::{
-    IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
+    IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
 };
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-const REQUIRED_TOOLS: &[&str] = &[IMAGE_GEN_TOOL_NAME];
+const REQUIRED_TOOLS: &[&str] = &[GENERATE_MEDIA_TOOL_NAME];
 
 pub struct ImagineCommand;
 
@@ -42,8 +43,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_image_gen_tool() {
-        assert_eq!(ImagineCommand.required_tools(), &["image_gen"]);
+    fn requires_generate_media_tool() {
+        assert_eq!(ImagineCommand.required_tools(), &["generate_media"]);
     }
 
     #[test]
@@ -81,7 +82,7 @@ mod tests {
                     panic!("expected Text block, got {prompt_blocks:?}");
                 };
                 let text = &t.text;
-                assert!(text.contains("image_gen"));
+                assert!(text.contains("generate_media"));
                 assert!(text.contains("a golden sunset"));
             }
             other => panic!("expected InjectSkill, got {other:?}"),

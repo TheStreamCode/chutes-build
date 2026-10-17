@@ -142,7 +142,9 @@ mod tests {
         assert!(text.contains("- review-pr: Review a GitHub PR and post findings."));
         assert!(text.contains("  Use when: Review a pull request"));
         assert!(!text.contains("Source:"));
-        assert!(text.contains("  Absolute path: /Users/dev/.chutes-build/workflows/review-pr.rhai"));
+        assert!(
+            text.contains("  Absolute path: /Users/dev/.chutes-build/workflows/review-pr.rhai")
+        );
     }
 
     #[test]

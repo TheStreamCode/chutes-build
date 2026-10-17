@@ -76,8 +76,10 @@ pub enum PreferredAuthMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GrokComConfig {
-    pub grok_ws_origin: String,
-    pub grok_ws_url: String,
+    #[serde(alias = "grok_ws_origin")]
+    pub ws_origin: String,
+    #[serde(alias = "grok_ws_url")]
+    pub ws_url: String,
     pub token_header: String,
     /// OIDC config for customer-provided IdPs. See [`OidcAuthConfig`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -205,8 +207,10 @@ pub const LEGACY_AUTH_SCOPE: &str = "disabled::legacy-auth";
 /// parsing the section as a [`GrokComConfig`] would drop the default provider instead.
 #[derive(Deserialize)]
 struct GrokComConfigSection {
-    grok_ws_origin: Option<String>,
-    grok_ws_url: Option<String>,
+    #[serde(alias = "grok_ws_origin")]
+    ws_origin: Option<String>,
+    #[serde(alias = "grok_ws_url")]
+    ws_url: Option<String>,
     token_header: Option<String>,
     oidc: Option<toml::Value>,
     oauth2: Option<toml::Value>,
@@ -234,8 +238,8 @@ impl GrokComConfigSection {
             }
         };
         Ok(GrokComConfig {
-            grok_ws_origin: self.grok_ws_origin.unwrap_or(base.grok_ws_origin),
-            grok_ws_url: self.grok_ws_url.unwrap_or(base.grok_ws_url),
+            ws_origin: self.ws_origin.unwrap_or(base.ws_origin),
+            ws_url: self.ws_url.unwrap_or(base.ws_url),
             token_header: self.token_header.unwrap_or(base.token_header),
             oidc,
             oauth2,
@@ -426,11 +430,11 @@ impl Default for GrokComConfig {
             OAuth2ProviderConfig::from_env()
         };
         let mut config = Self {
-            grok_ws_origin: std::env::var("CHUTES_BUILD_WS_ORIGIN")
+            ws_origin: std::env::var("CHUTES_BUILD_WS_ORIGIN")
                 .unwrap_or_else(|_| PROD_WS_ORIGIN.to_owned()),
-            grok_ws_url: std::env::var("CHUTES_BUILD_WS_URL")
+            ws_url: std::env::var("CHUTES_BUILD_WS_URL")
                 .unwrap_or_else(|_| PROD_RELAY_WS_URL.to_owned()),
-            token_header: "xai-grok-cli".to_owned(),
+            token_header: "chutes-build-cli".to_owned(),
             oidc,
             oauth2,
             auth_provider_command: std::env::var("CHUTES_BUILD_AUTH_PROVIDER_COMMAND").ok(),
@@ -506,20 +510,33 @@ pub fn force_login_team_from_requirements_value(
 /// If `config` contains `[auth]`, copy its contents under `[grok_com_config]`.
 /// `[grok_com_config]` takes precedence if both are present (explicit wins).
 /// This lets customers write the shorter `[auth.oidc]` instead of `[grok_com_config.oidc]`.
+/// `[auth]` is the canonical table; `[grok_com_config]` is a deprecated silent
+/// alias. Both normalize onto the internal table, with `[auth]` winning on
+/// conflicting keys.
 pub fn expand_auth_alias(config: &toml::Value) -> toml::Value {
     let mut config = config.clone();
-    if let toml::Value::Table(ref mut table) = config
-        && let Some(auth) = table.remove("auth")
-    {
-        if let Some(gcc) = table.get_mut("grok_com_config") {
-            if let (toml::Value::Table(gcc_table), toml::Value::Table(auth_table)) = (gcc, &auth) {
-                for (k, v) in auth_table {
-                    gcc_table.entry(k.clone()).or_insert(v.clone());
-                }
+    let toml::Value::Table(ref mut table) = config else {
+        return config;
+    };
+    let gcc = table.remove("grok_com_config");
+    let auth = table.remove("auth");
+    match (gcc, auth) {
+        (Some(toml::Value::Table(gcc_table)), Some(toml::Value::Table(auth_table))) => {
+            let mut merged = gcc_table;
+            for (key, value) in auth_table {
+                merged.insert(key, value);
             }
-        } else {
+            table.insert("grok_com_config".to_owned(), toml::Value::Table(merged));
+        }
+        // Non-table shapes keep the historical leniency: the legacy table
+        // survives, the alias is dropped.
+        (Some(gcc), _) => {
+            table.insert("grok_com_config".to_owned(), gcc);
+        }
+        (None, Some(auth)) => {
             table.insert("grok_com_config".to_owned(), auth);
         }
+        (None, None) => {}
     }
     config
 }
@@ -573,6 +590,38 @@ impl OidcAuthConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn expand_auth_alias_prefers_auth_and_keeps_legacy_keys() {
+        let raw: toml::Value = toml::from_str(
+            "[grok_com_config]\n\
+             token_header = \"legacy\"\n\
+             [auth]\n\
+             token_header = \"canonical\"\n",
+        )
+        .expect("fixture parses");
+        let expanded = expand_auth_alias(&raw);
+        let merged = expanded.get("grok_com_config").expect("merged table");
+        assert_eq!(
+            merged.get("token_header").and_then(toml::Value::as_str),
+            Some("canonical"),
+            "[auth] must win conflicts"
+        );
+        assert!(expanded.get("auth").is_none(), "alias must fold away");
+    }
+    #[test]
+    fn expand_auth_alias_accepts_legacy_table_alone() {
+        let raw: toml::Value = toml::from_str("[grok_com_config]\ntoken_header = \"legacy\"\n")
+            .expect("fixture parses");
+        let expanded = expand_auth_alias(&raw);
+        assert_eq!(
+            expanded
+                .get("grok_com_config")
+                .and_then(|table| table.get("token_header"))
+                .and_then(toml::Value::as_str),
+            Some("legacy"),
+            "legacy table must keep working"
+        );
+    }
     #[test]
     fn a_build_without_account_logins_has_no_auth_provider_command() {
         let named = GrokComConfig {

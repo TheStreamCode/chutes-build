@@ -301,6 +301,147 @@ pub(super) fn dispatch_submit_auth_code(app: &mut AppView, code: String) -> Vec<
     vec![Effect::SubmitAuthCode { request_seq, code }]
 }
 
+/// Enter API-key entry from the welcome menu (API-key-only builds). Only from
+/// `Pending`: anywhere else this is a no-op.
+pub(super) fn dispatch_enter_api_key(app: &mut AppView) -> Vec<Effect> {
+    if !matches!(app.auth_state, AuthState::Pending { .. }) {
+        return vec![];
+    }
+    let request_seq = app.next_auth_request_seq;
+    app.next_auth_request_seq += 1;
+    app.auth_code_input.reset();
+    app.api_key_entry_error = None;
+    app.api_key_entry_validating = false;
+    app.auth_state = AuthState::Authenticating {
+        request_seq,
+        handle: None,
+        auth_url: None,
+        mode: AuthMode::ApiKeyEntry,
+    };
+    vec![]
+}
+
+/// User submitted a pasted Chutes API key: validate it over the network.
+/// Only in entry mode; anything else (or a blank key) is a no-op.
+pub(super) fn dispatch_submit_api_key(
+    app: &mut AppView,
+    key: crate::app::actions::RedactedSecret,
+) -> Vec<Effect> {
+    let request_seq = match &app.auth_state {
+        AuthState::Authenticating {
+            mode: AuthMode::ApiKeyEntry,
+            request_seq,
+            ..
+        } => *request_seq,
+        _ => return vec![],
+    };
+    if key.expose().trim().is_empty() {
+        return vec![];
+    }
+    app.api_key_entry_error = None;
+    app.api_key_entry_validating = true;
+    vec![Effect::ValidateApiKey { request_seq, key }]
+}
+
+/// Back out of API-key entry to the welcome menu. Bumps the sequence so a
+/// late validation result cannot flip the state after the cancel.
+pub(super) fn dispatch_cancel_api_key_entry(app: &mut AppView) -> Vec<Effect> {
+    if !matches!(
+        app.auth_state,
+        AuthState::Authenticating {
+            mode: AuthMode::ApiKeyEntry,
+            ..
+        }
+    ) {
+        return vec![];
+    }
+    app.next_auth_request_seq += 1;
+    app.auth_state = AuthState::Pending { error: None };
+    app.auth_code_input.reset();
+    app.api_key_entry_error = None;
+    app.api_key_entry_validating = false;
+    vec![]
+}
+
+/// A pasted key validated: persist it, make it live, and finish startup auth
+/// exactly as a launch with the key set (same method advertisement, same
+/// flags). Stale results (sequence mismatch) are dropped.
+pub(super) fn handle_api_key_accepted(app: &mut AppView, request_seq: u64) -> Vec<Effect> {
+    let current = match &app.auth_state {
+        AuthState::Authenticating {
+            mode: AuthMode::ApiKeyEntry,
+            request_seq,
+            ..
+        } => *request_seq,
+        _ => return vec![],
+    };
+    if current != request_seq {
+        return vec![];
+    }
+    let key = app.auth_code_input.text().trim().to_string();
+    if key.is_empty() {
+        return vec![];
+    }
+    // Live resolve (not the cached home): honors `$CHUTES_BUILD_HOME`, so
+    // tests and redirected homes save to the right place.
+    let home =
+        xai_dirs::resolve_grok_home().unwrap_or_else(xai_grok_shell::util::grok_home::grok_home);
+    if let Err(error) = chutes_build_core::api_key_store::save(&home, &key) {
+        app.api_key_entry_validating = false;
+        app.api_key_entry_error = Some(format!("Could not save the API key: {error}"));
+        return vec![];
+    }
+    // SAFETY: same pattern as startup injection — the key is only ever read
+    // afterwards, and no other thread touches this variable concurrently.
+    unsafe {
+        std::env::set_var("CHUTES_API_KEY", key);
+    }
+    // Mirror startup-with-key (event_loop connection-auth block): advertise
+    // the exact API-key method and recompute the derived flags from it.
+    app.auth_methods = vec![xai_grok_shell::agent::auth_method::xai_api_key_auth_method()];
+    app.has_external_auth_provider =
+        crate::slash::commands::usage::detect_external_auth_provider(&app.auth_methods);
+    app.is_api_key_auth = app.auth_methods.iter().any(|method| {
+        method.id().0.as_ref() == xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID
+    });
+    if !app.consumer_account() {
+        app.usage_visible = false;
+        app.sync_billing_surface_to_agents();
+    }
+    app.auth_state = AuthState::Done;
+    app.auth_code_input.reset();
+    app.api_key_entry_error = None;
+    app.api_key_entry_validating = false;
+    app.welcome_toast = Some((
+        "API key saved. Type below to start.".to_string(),
+        std::time::Instant::now(),
+    ));
+    vec![]
+}
+
+/// A pasted key was rejected (wrong key) or unverifiable (network): show the
+/// honest message under the input and stay in entry mode. Stale results drop.
+pub(super) fn handle_api_key_rejected(
+    app: &mut AppView,
+    request_seq: u64,
+    error: String,
+) -> Vec<Effect> {
+    let current = match &app.auth_state {
+        AuthState::Authenticating {
+            mode: AuthMode::ApiKeyEntry,
+            request_seq,
+            ..
+        } => *request_seq,
+        _ => return vec![],
+    };
+    if current != request_seq {
+        return vec![];
+    }
+    app.api_key_entry_validating = false;
+    app.api_key_entry_error = Some(error);
+    vec![]
+}
+
 // TaskResult handlers.
 
 pub(super) fn handle_auth_complete(

@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod account_summary;
+pub mod api_key_store;
 pub mod audio;
 pub mod catalog;
 pub mod context7;

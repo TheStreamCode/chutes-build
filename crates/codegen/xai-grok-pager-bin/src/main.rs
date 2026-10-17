@@ -135,12 +135,12 @@ mod test_seam {
         let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) => {
-                eprintln!("grok test-seams: cannot read {path}: {e}");
+                eprintln!("chutes-build test-seams: cannot read {path}: {e}");
                 return;
             }
         };
         let Some(separator) = bytes.iter().position(|byte| *byte == b'\n') else {
-            eprintln!("grok test-seams: pubkey file lacks a key_id separator");
+            eprintln!("chutes-build test-seams: pubkey file lacks a key_id separator");
             return;
         };
         let (key_id, rest) = bytes.split_at(separator);
@@ -148,13 +148,13 @@ mod test_seam {
             return;
         };
         let Ok(key_id) = std::str::from_utf8(key_id) else {
-            eprintln!("grok test-seams: key_id is not utf8");
+            eprintln!("chutes-build test-seams: key_id is not utf8");
             return;
         };
         let key_id = key_id.trim();
         if public_key.len() != 32 {
             eprintln!(
-                "grok test-seams: pubkey must be 32 bytes, found {}",
+                "chutes-build test-seams: pubkey must be 32 bytes, found {}",
                 public_key.len()
             );
             return;
@@ -165,11 +165,11 @@ mod test_seam {
 /// Apply headless args to an existing config, only overriding values that are explicitly set.
 /// Unset args leave the environment defaults in place.
 fn apply_headless_args_to_config(args: &HeadlessArgs, config: &mut AgentConfig) {
-    if let Some(v) = &args.grok_ws_origin {
-        config.grok_com_config.grok_ws_origin = v.clone();
+    if let Some(v) = &args.ws_origin {
+        config.grok_com_config.ws_origin = v.clone();
     }
-    if let Some(v) = &args.grok_ws_url {
-        config.grok_com_config.grok_ws_url = v.clone();
+    if let Some(v) = &args.ws_url {
+        config.grok_com_config.ws_url = v.clone();
     }
 }
 /// Apply global endpoint CLI args to an existing config.
@@ -180,8 +180,8 @@ fn apply_agent_endpoint_args(
     if let Some(v) = &agent_args.cli_chat_proxy_base_url {
         config.endpoints.cli_chat_proxy_base_url = Some(v.clone());
     }
-    if let Some(v) = &agent_args.xai_api_base_url {
-        config.endpoints.xai_api_base_url = v.clone();
+    if let Some(v) = &agent_args.public_api_base_url {
+        config.endpoints.public_api_base_url = v.clone();
     }
 }
 /// Resolve --agent-profile path: canonicalize and verify the file exists.
@@ -271,7 +271,9 @@ async fn run_setup_command(json: bool) {
     if !managed_config::has_principal() {
         eprintln!("No deployment key or team sign-in found.");
         eprintln!();
-        eprintln!("To install managed configuration, sign in with a team using `chutes-build login`,");
+        eprintln!(
+            "To install managed configuration, sign in with a team using `chutes-build login`,"
+        );
         eprintln!("or set a deployment key:");
         eprintln!();
         if cfg!(unix) {
@@ -299,7 +301,7 @@ async fn run_setup_command(json: bool) {
                 println!("{out}");
                 if !report.configured {
                     eprintln!(
-                        "Your team doesn't have a managed configuration yet. A team admin can set one up at console.chutes.ai."
+                        "Your team doesn't have a managed configuration yet. A team admin can set one up at https://chutes.ai."
                     );
                 }
             }
@@ -314,7 +316,7 @@ async fn run_setup_command(json: bool) {
         SetupOutcome::Installed => eprintln!("Applied managed configuration."),
         SetupOutcome::NothingConfigured => {
             eprintln!(
-                "Your team doesn't have a managed configuration yet. A team admin can set one up at console.chutes.ai."
+                "Your team doesn't have a managed configuration yet. A team admin can set one up at https://chutes.ai."
             );
         }
         SetupOutcome::Skipped => {
@@ -439,7 +441,7 @@ async fn connect_to_leader(
         .ok_or_else(|| anyhow::anyhow!("resolved leader target did not include a socket path"))?;
     let client = xai_grok_shell::leader::LeaderClient::connect(
         socket_path.to_path_buf(),
-        "grok-pager-leader-cli",
+        "chutes-build-leader-cli",
         ClientMode::Stdio,
         ClientCapabilities::default(),
     )
@@ -667,7 +669,7 @@ async fn connect_leader_control(
         let (_descriptor, client) = connect_to_leader(target).await?;
         return Ok(client);
     }
-    let ws_url = &agent_config.grok_com_config.grok_ws_url;
+    let ws_url = &agent_config.grok_com_config.ws_url;
     let socket = socket_path_for_ws_url(ws_url);
     LeaderClient::connect(
         socket,
@@ -1759,7 +1761,10 @@ fn configure_process_env(mut args: PagerArgs) -> Result<PagerArgs> {
             std::env::set_var("CHUTES_BUILD_COMPACTION_DETAIL", detail);
         }
         if args.chat() {
-            std::env::set_var(xai_grok_shell::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV, "1");
+            std::env::set_var(
+                xai_grok_shell::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV,
+                "1",
+            );
         }
         if let Some(socket) = args.leader_socket.as_deref() {
             std::env::set_var(xai_grok_shell::leader::LEADER_SOCKET_ENV, socket);
@@ -2002,6 +2007,67 @@ fn version_text(channel_label: &str) -> String {
 fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::io::Result<()> {
     writer.write_all(version_text(channel_label).as_bytes())
 }
+
+/// CHUTES-only `login`: interactive API-key setup (no account sign-in exists).
+/// Reads one line from stdin — prompted on a TTY, piped otherwise — validates
+/// it against Chutes, and saves it to the local key store. Closed/empty
+/// non-TTY stdin keeps the historical guidance (scripts calling `login` with
+/// no input still exit 1 fast instead of hanging). The key is never echoed.
+async fn run_chutes_login_setup() -> anyhow::Result<()> {
+    use std::io::{BufRead as _, IsTerminal as _, Write as _};
+    let home = xai_grok_shell::util::grok_home::grok_home();
+    let interactive = std::io::stdin().is_terminal();
+    if interactive {
+        eprint!("Enter your Chutes API key: ");
+        let _ = std::io::stderr().flush();
+    }
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    let key = line.trim();
+    if key.is_empty() {
+        if interactive {
+            anyhow::bail!("No API key entered.");
+        }
+        eprintln!(
+            "This build has no account sign-in: pipe your Chutes API key to `chutes-build login`, \
+             or set the CHUTES_API_KEY environment variable."
+        );
+        std::process::exit(1);
+    }
+    let client = chutes_build_core::account::ChutesAccountClient::from_key(key)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    match client.validate().await {
+        Ok(()) => {
+            chutes_build_core::api_key_store::save(&home, key)
+                .map_err(|error| anyhow::anyhow!("Could not save the API key: {error}"))?;
+            println!(
+                "API key saved to {}.",
+                chutes_build_core::api_key_store::key_path(&home).display()
+            );
+            Ok(())
+        }
+        Err(chutes_build_core::account::AccountError::Http { status, .. })
+            if status == 401 || status == 403 =>
+        {
+            anyhow::bail!(
+                "Invalid API key: Chutes rejected it (HTTP {status}). Check the key and try again."
+            )
+        }
+        Err(error) => anyhow::bail!("Could not validate the API key: {error}"),
+    }
+}
+
+/// CHUTES-only `logout`: delete the locally saved API key (idempotent).
+fn run_chutes_logout() -> anyhow::Result<()> {
+    let home = xai_grok_shell::util::grok_home::grok_home();
+    match chutes_build_core::api_key_store::remove(&home)
+        .map_err(|error| anyhow::anyhow!("Could not remove the saved API key: {error}"))?
+    {
+        true => println!("Removed the saved Chutes API key."),
+        false => println!("No saved Chutes API key found."),
+    }
+    Ok(())
+}
 /// The leader gets its own crash directory: `install()` opens `last-crash.bin` with `O_TRUNC`, so a pager and a
 /// leader sharing one directory would each wipe the other's pending crash blob on start.
 fn crash_dir_for(args: &PagerArgs) -> std::path::PathBuf {
@@ -2038,6 +2104,12 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
 fn main() {
     xai_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
     xai_grok_telemetry::startup::mark_process_start();
+    // A key saved by `login` (or the welcome screen) behaves like the env var
+    // for this process: inject it before any thread or agent reads credentials.
+    // Explicit env always wins (checked inside).
+    chutes_build_core::api_key_store::ensure_env_from_store(
+        &xai_grok_shell::util::grok_home::grok_home(),
+    );
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
     }
@@ -2082,7 +2154,7 @@ fn main() {
         std::process::exit(2);
     }
     let _sentry_guard = xai_grok_telemetry::sentry::init(xai_grok_telemetry::sentry::Config {
-        client: "grok-pager",
+        client: "chutes-build",
         client_version: PAGER_CLIENT_VERSION,
         release: env!("VERSION_WITH_COMMIT"),
         disabled: xai_grok_shell::agent::config::is_error_reporting_disabled_sync(),
@@ -2236,7 +2308,7 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                     };
                     anyhow::bail!(
                         "top-level {flag} applies to the pager TUI, not the agent subcommand. \
-                         Use `grok-pager agent {flag}` instead."
+                         Use `chutes-build agent {flag}` instead."
                     );
                 }
                 enforce_version_policy_or_exit();
@@ -2392,11 +2464,17 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 device_auth,
                 devbox,
             } => {
-                if let Some(refusal) = xai_grok_config::Distribution::current()
-                    .refusal(xai_grok_config::Capability::AccountLogin)
+                if !xai_grok_config::Distribution::current()
+                    .allows(xai_grok_config::Capability::AccountLogin)
                 {
-                    eprintln!("{refusal}");
-                    std::process::exit(1);
+                    if oauth || device_auth {
+                        eprintln!(
+                            "This build has no account sign-in: OAuth and device-code flows are unavailable. \
+                             Run `chutes-build login` without flags to save your Chutes API key."
+                        );
+                        std::process::exit(1);
+                    }
+                    return run_chutes_login_setup().await;
                 }
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
@@ -2419,11 +2497,10 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 xai_grok_shell::instrumentation::finalize_and_exit(0);
             }
             Command::Logout => {
-                if let Some(refusal) = xai_grok_config::Distribution::current()
-                    .refusal(xai_grok_config::Capability::AccountLogin)
+                if !xai_grok_config::Distribution::current()
+                    .allows(xai_grok_config::Capability::AccountLogin)
                 {
-                    eprintln!("{refusal}");
-                    std::process::exit(1);
+                    return run_chutes_logout();
                 }
                 init_tracing_simple("cli");
                 let config = xai_grok_shell::config::load_agent_config_disk_only()
@@ -2739,7 +2816,9 @@ async fn run_update_command(
         );
     }
     let telemetry_cfg = xai_grok_shell::config::load_agent_config_disk_only()
-        .map_err(|e| tracing::warn!("chutes-build update: telemetry init skipped (agent config: {e})"))
+        .map_err(|e| {
+            tracing::warn!("chutes-build update: telemetry init skipped (agent config: {e})")
+        })
         .ok();
     if let Some(agent_cfg) = telemetry_cfg {
         let auth_manager =

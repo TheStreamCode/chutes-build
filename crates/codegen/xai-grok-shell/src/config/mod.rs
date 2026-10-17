@@ -297,7 +297,8 @@ impl SubagentsConfig {
     pub const ENV_MAX_CONCURRENT: &'static str = "CHUTES_BUILD_MAX_CONCURRENT_SUBAGENTS";
     pub const ENV_SAMPLING_LIMIT: &'static str = "CHUTES_BUILD_SUBAGENT_SAMPLING_LIMIT";
     pub const ENV_LIMIT_BEHAVIOR: &'static str = "CHUTES_BUILD_SUBAGENT_LIMIT_BEHAVIOR";
-    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "CHUTES_BUILD_WORKFLOW_MAX_CONCURRENT_AGENTS";
+    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str =
+        "CHUTES_BUILD_WORKFLOW_MAX_CONCURRENT_AGENTS";
     pub(crate) fn resolve_max_concurrent(
         env: Option<&str>,
         config: Option<i64>,
@@ -503,7 +504,7 @@ pub(crate) struct ModelOverrideConfig {
     pub web_search: String,
     /// `None` = current model.
     pub session_summary: Option<String>,
-    /// Compiled default (`grok-4.6`) when unset locally, remotely, and via env.
+    /// Compiled default (`model-router`) when unset locally, remotely, and via env.
     pub image_description: Option<String>,
     /// Next-prompt suggestion model pin.
     /// Unlike the other overrides this does NOT fill a compiled default; see [`PromptSuggestModelPin`].
@@ -545,7 +546,7 @@ fn non_empty_model_override(value: Option<&str>) -> Option<String> {
     })
 }
 impl ModelOverrideConfig {
-    /// CLI flag > env var > config.toml > remote settings > compiled default. `image_description` and `session_summary` always resolve to `Some(_)` (default `grok-4.6`), never the session model.
+    /// CLI flag > env var > config.toml > remote settings > compiled default. `image_description` and `session_summary` always resolve to `Some(_)` (default `model-router`), never the session model.
     /// `prompt_suggestion` resolves to a [`PromptSuggestModelPin`] instead of a model string. It has no CLI flag; the default and the catalog guard live at the consumer, `handle_suggest_prompt`.
     pub(crate) fn resolve(
         cli_web_search_model: Option<&str>,
@@ -654,8 +655,10 @@ pub struct ToolsConfig {
     pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
-    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str = "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
-    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str = "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str =
+        "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str =
+        "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
     /// Resolve the final tools config, in priority order: Env vars `CHUTES_BUILD_RESPECT_GITIGNORE` and `CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS` (`0`/`false` off, `1`/`true` on). `[tools]` block from the merged effective config.
     /// Defaults (both `false`). Fields are read individually. A malformed `[tools.zdr_video_output_s3]` therefore cannot wipe `disable_zdr_incompatible_tools` or any other tools flag.
     pub fn resolve(config: &toml::Value) -> Self {
@@ -1249,11 +1252,12 @@ fn apply_requirements_inner(
         },
         &mut push,
     );
-    if let Some(val) = req_str(req, "endpoints", "xai_api_base_url")
-        && config.endpoints.xai_api_base_url != val
+    if let Some(val) = req_str(req, "endpoints", "public_api_base_url")
+        .or_else(|| req_str(req, "endpoints", "xai_api_base_url"))
+        && config.endpoints.public_api_base_url != val
     {
-        config.endpoints.xai_api_base_url = val.to_owned();
-        push("endpoints.xai_api_base_url", val.to_owned());
+        config.endpoints.public_api_base_url = val.to_owned();
+        push("endpoints.public_api_base_url", val.to_owned());
     }
     if let Some(val) = req_str(req, "endpoints", "cli_chat_proxy_base_url")
         && config.endpoints.cli_chat_proxy_base_url.as_deref() != Some(val)

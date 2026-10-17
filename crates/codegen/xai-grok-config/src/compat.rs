@@ -332,7 +332,7 @@ pub struct CompatSessions {
     pub codex: bool,
 }
 
-/// The `GROK_<VENDOR>_<SURFACE>_ENABLED` values set in the environment, which outrank every other
+/// The `CHUTES_BUILD_<VENDOR>_<SURFACE>_ENABLED` values set in the environment, which outrank every other
 /// source of their cell.
 #[derive(Debug, Clone, Default)]
 pub struct CompatEnv {

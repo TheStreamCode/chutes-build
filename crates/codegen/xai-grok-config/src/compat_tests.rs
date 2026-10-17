@@ -449,14 +449,20 @@ fn skill_config_dirs_all_on_lists_every_vendor() {
 fn skill_config_dirs_gates_each_vendor() {
     let mut c = CompatConfig::default();
     c.cursor.skills = false;
-    assert_eq!(vec![".chutes-build", ".agents", ".claude"], c.skill_config_dirs());
+    assert_eq!(
+        vec![".chutes-build", ".agents", ".claude"],
+        c.skill_config_dirs()
+    );
 
     c.claude.skills = false;
     assert_eq!(vec![".chutes-build", ".agents"], c.skill_config_dirs());
 
     let mut c2 = CompatConfig::default();
     c2.claude.skills = false;
-    assert_eq!(vec![".chutes-build", ".agents", ".cursor"], c2.skill_config_dirs());
+    assert_eq!(
+        vec![".chutes-build", ".agents", ".cursor"],
+        c2.skill_config_dirs()
+    );
 }
 
 #[test]

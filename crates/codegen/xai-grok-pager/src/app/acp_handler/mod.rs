@@ -644,7 +644,9 @@ fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> b
         "chutes.ai/leader/version_mismatch" => handle_version_mismatch(notif, app),
         "chutes.ai/mcp/init_progress" => handle_mcp_init_progress(notif, app),
         "chutes.ai/session/setup" => handle_session_setup_phase(notif, app),
-        "chutes.ai/mcp/tools_changed" | "chutes.ai/mcp_initialized" => handle_mcp_tools_changed(notif, app),
+        "chutes.ai/mcp/tools_changed" | "chutes.ai/mcp_initialized" => {
+            handle_mcp_tools_changed(notif, app)
+        }
         "chutes.ai/mcp/server_status" if push_server_status_enabled() => {
             handle_mcp_server_status(notif, app)
         }

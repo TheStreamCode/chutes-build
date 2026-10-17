@@ -2376,6 +2376,37 @@ pub(crate) fn execute(
                 });
             meta.auth_url_poll_handle = Some((request_seq, abort_handle));
         }
+        Effect::ValidateApiKey { request_seq, key } => {
+            tasks.spawn(async move {
+                let client = match chutes_build_core::account::ChutesAccountClient::from_key(
+                    key.expose(),
+                ) {
+                    Ok(client) => client,
+                    Err(error) => {
+                        return TaskResult::ApiKeyRejected {
+                            request_seq,
+                            error: error.to_string(),
+                        };
+                    }
+                };
+                match client.validate().await {
+                    Ok(()) => TaskResult::ApiKeyAccepted { request_seq },
+                    Err(chutes_build_core::account::AccountError::Http { status, .. })
+                        if status == 401 || status == 403 =>
+                    {
+                        TaskResult::ApiKeyRejected {
+                            request_seq,
+                            error: "Invalid API key: Chutes rejected it. Check the key and try again."
+                                .to_string(),
+                        }
+                    }
+                    Err(error) => TaskResult::ApiKeyRejected {
+                        request_seq,
+                        error: format!("Could not validate the key: {error}"),
+                    },
+                }
+            });
+        }
         Effect::SubmitAuthCode { request_seq, code } => {
             let tx = acp_tx.clone();
             tasks
@@ -5397,7 +5428,7 @@ fn format_auth_lines(is_api_key_auth: bool, api_key_env_set: bool) -> String {
         if xai_grok_config::Distribution::current().allows(xai_grok_config::Capability::AccountLogin)
         {
             return format!(
-                "{method}  Run `chutes-build login` to use your SuperGrok subscription instead.\n"
+                "{method}  Run `chutes-build login` to use your Chutes plan instead.\n"
             );
         }
         return method.to_string();

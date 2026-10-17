@@ -1019,7 +1019,8 @@ Step 2: Check for bugs.
 
     #[test]
     fn test_grok_plugin_aliases_substitution() {
-        let mut content = "Root ${CHUTES_BUILD_PLUGIN_ROOT}, data ${CHUTES_BUILD_PLUGIN_DATA}".to_string();
+        let mut content =
+            "Root ${CHUTES_BUILD_PLUGIN_ROOT}, data ${CHUTES_BUILD_PLUGIN_DATA}".to_string();
         apply_substitutions(
             &mut content,
             None,
@@ -1303,11 +1304,9 @@ Review code.
         assert!(result.starts_with("<skill_information>\n"));
         assert!(result.ends_with("\n</skill_information>"));
         assert!(result.contains("<skills_referenced>\n"));
-        assert!(
-            result.contains(
-                "<skill name=\"commit\" path=\"/home/user/.chutes-build/skills/commit/SKILL.md\"/>"
-            )
-        );
+        assert!(result.contains(
+            "<skill name=\"commit\" path=\"/home/user/.chutes-build/skills/commit/SKILL.md\"/>"
+        ));
         assert!(result.contains("<skill name=\"commit\" args=\"fix typo\">"));
     }
 

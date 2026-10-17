@@ -121,7 +121,7 @@ pub struct SubagentCompleted {
     pub tool_calls: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens_used: Option<u64>,
-    // Spawn-phase durations (`crate::subagent_spawn`, the `grok_code_subagent_spawn_*` taxonomy); absent when a phase did not run
+    // Spawn-phase durations (`crate::subagent_spawn`, the `chutes_build_subagent_spawn_*` taxonomy); absent when a phase did not run
     // Populated through `SubagentSpawnTimer::write_event_phases`' single match, which fails to compile until a new phase is given a field below
     // Phases are hierarchical (agent_build and tool_setup nest in session_bootstrap); summing all of them double-counts
     #[serde(skip_serializing_if = "Option::is_none")]

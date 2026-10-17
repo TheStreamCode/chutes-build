@@ -272,7 +272,8 @@ mod tests {
         // An unknown method yields None
         // Outbound `changed` is the other production `chutes.ai/queue/*` method and must not parse as an edit command
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/bogus", &serde_json::json!({}), None).is_none()
+            parse_queue_edit_command("chutes.ai/queue/bogus", &serde_json::json!({}), None)
+                .is_none()
         );
         assert!(
             parse_queue_edit_command(
@@ -293,7 +294,8 @@ mod tests {
         );
         // remove without id yields None (can't target an entry)
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/remove", &serde_json::json!({}), None).is_none()
+            parse_queue_edit_command("chutes.ai/queue/remove", &serde_json::json!({}), None)
+                .is_none()
         );
     }
 }

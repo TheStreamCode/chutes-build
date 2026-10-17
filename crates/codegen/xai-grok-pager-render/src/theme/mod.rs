@@ -8,10 +8,10 @@
 //! Runtime-generated colors (syntax highlighting, blending) are also quantized via [`color_support::quantize`].
 
 pub mod cache;
-pub mod color_support;
-pub mod env_appearance;
 mod chutesday;
 mod chutesnight;
+pub mod color_support;
+pub mod env_appearance;
 pub mod md_style;
 pub mod osc11;
 mod oscura;
@@ -130,9 +130,9 @@ impl ThemeKind {
     /// Alternate lowercase spellings accepted by [`from_name`](Self::from_name), excluding [`display_name`](Self::display_name).
     pub fn aliases(self) -> &'static [&'static str] {
         match self {
-            Self::ChutesNight => &["grok-night", "dark"],
+            Self::ChutesNight => &["dark"],
             Self::TokyoNight => &["tokyo-night", "tokyo"],
-            Self::ChutesDay => &["grok-day", "light", "day"],
+            Self::ChutesDay => &["light", "day"],
             Self::RosePineMoon => &["rosepine", "rose-pine", "rose-pine-moon"],
             Self::OscuraMidnight => &["oscura"],
             Self::Terminal => &["terminal-default", "transparent", "native"],
@@ -641,7 +641,10 @@ mod tests {
             other => panic!("expected RGB, got {other:?}"),
         };
         let night = Theme::chutesnight();
-        let faint = night.faint().fg.expect("ChutesNight blends to a hard colour");
+        let faint = night
+            .faint()
+            .fg
+            .expect("ChutesNight blends to a hard colour");
         assert!(luma(night.bg_base) < luma(faint) && luma(faint) < luma(night.gray_dim));
 
         let terminal = Theme::terminal_default();
@@ -1148,7 +1151,10 @@ mod tests {
             Some(ThemeKind::ChutesNight)
         );
         assert_eq!(ThemeKind::from_name("dark"), Some(ThemeKind::ChutesNight));
-        assert_eq!(ThemeKind::from_name("chutesday"), Some(ThemeKind::ChutesDay));
+        assert_eq!(
+            ThemeKind::from_name("chutesday"),
+            Some(ThemeKind::ChutesDay)
+        );
         assert_eq!(ThemeKind::from_name("light"), Some(ThemeKind::ChutesDay));
         assert_eq!(
             ThemeKind::from_name("tokyonight"),
@@ -1176,13 +1182,11 @@ mod tests {
             ("auto", ThemeKind::Auto),
             ("system", ThemeKind::Auto),
             ("chutesnight", ThemeKind::ChutesNight),
-            ("grok-night", ThemeKind::ChutesNight),
             ("dark", ThemeKind::ChutesNight),
             ("tokyonight", ThemeKind::TokyoNight),
             ("tokyo-night", ThemeKind::TokyoNight),
             ("tokyo", ThemeKind::TokyoNight),
             ("chutesday", ThemeKind::ChutesDay),
-            ("grok-day", ThemeKind::ChutesDay),
             ("light", ThemeKind::ChutesDay),
             ("day", ThemeKind::ChutesDay),
             ("rosepine", ThemeKind::RosePineMoon),

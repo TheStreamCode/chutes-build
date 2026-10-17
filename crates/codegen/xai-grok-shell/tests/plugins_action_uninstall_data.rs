@@ -15,8 +15,9 @@ fn action_outcome(response: &serde_json::Value) -> xai_hooks_plugins_types::Acti
 #[test]
 fn plugins_action_uninstall_removes_plugin_data_dir() {
     acp_harness::run_agent_test(|cwd, _server| async move {
-        let grok_home =
-            std::path::PathBuf::from(std::env::var("CHUTES_BUILD_HOME").expect("harness sets CHUTES_BUILD_HOME"));
+        let grok_home = std::path::PathBuf::from(
+            std::env::var("CHUTES_BUILD_HOME").expect("harness sets CHUTES_BUILD_HOME"),
+        );
 
         let plugin_dir = cwd.join("data-demo");
         std::fs::create_dir_all(&plugin_dir).unwrap();

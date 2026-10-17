@@ -363,7 +363,7 @@ impl acp::Agent for MvpAgent {
             }
         }
         let preferred_method_early = self.cfg.borrow().grok_com_config.preferred_method;
-        let xai_api_base_url = self.cfg.borrow().endpoints.xai_api_base_url.clone();
+        let public_api_base_url = self.cfg.borrow().endpoints.public_api_base_url.clone();
         let has_byok = self
             .models_manager
             .models()
@@ -376,7 +376,7 @@ impl acp::Agent for MvpAgent {
             preferred_method_early.is_some(),
         ) {
             xai_grok_login::first_party_env_key_allows_advertise(
-                    &xai_api_base_url,
+                    &public_api_base_url,
                     xai_grok_login::DEFAULT_PROBE_TIMEOUT,
                 )
                 .await

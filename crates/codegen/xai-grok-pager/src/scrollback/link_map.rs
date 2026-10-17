@@ -320,7 +320,11 @@ mod tests {
             vec![],
             &terminal,
         );
-        assert_eq!(map.len(), 1, "opaque relative paint stays Chutes Build-owned");
+        assert_eq!(
+            map.len(),
+            1,
+            "opaque relative paint stays Chutes Build-owned"
+        );
         assert!(!map.is_stale(state.generation()));
 
         let new_cwd = std::path::PathBuf::from("/worktree");

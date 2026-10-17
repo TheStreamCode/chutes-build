@@ -131,7 +131,9 @@ mod tests {
         assert_eq!(
             resolved,
             Some((
-                dunce::canonicalize(tmp.path()).unwrap().join(".chutes-build"),
+                dunce::canonicalize(tmp.path())
+                    .unwrap()
+                    .join(".chutes-build"),
                 GrokHomeSource::HomeDefault
             ))
         );
