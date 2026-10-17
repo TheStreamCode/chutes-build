@@ -1,7 +1,7 @@
 use crate::layout::util::add_dummy_node;
 use crate::{GraphConfig, GraphEdge, GraphNode};
-use graphlib_rust::Graph;
 use graphlib_rust::graph::GRAPH_NODE;
+use graphlib_rust::Graph;
 use ordered_hashmap::OrderedHashMap;
 
 #[derive(Debug, Clone, PartialEq)]

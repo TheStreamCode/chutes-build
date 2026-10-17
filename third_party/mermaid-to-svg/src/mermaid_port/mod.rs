@@ -4,9 +4,9 @@ mod flow_data;
 mod flow_db;
 mod flow_parser;
 
-use crate::RenderConfig;
 use crate::error::MermaidError;
 use crate::theme::MermaidTheme;
+use crate::RenderConfig;
 
 pub fn render_mermaid_to_svg_ported(
     mermaid_source: &str,

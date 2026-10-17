@@ -1,8 +1,8 @@
 use graphlib_rust::Graph;
 use ordered_hashmap::OrderedHashMap;
 
-use crate::layout::order::barycenter::{Barycenter, barycenter};
-use crate::layout::order::resolve_conflicts::{ResolvedBaryEntry, resolve_conflicts};
+use crate::layout::order::barycenter::{barycenter, Barycenter};
+use crate::layout::order::resolve_conflicts::{resolve_conflicts, ResolvedBaryEntry};
 use crate::layout::order::sort::sort;
 use crate::{GraphConfig, GraphEdge, GraphNode};
 

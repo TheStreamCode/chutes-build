@@ -8,14 +8,14 @@ pub mod sort;
 pub mod sort_subgraph;
 
 use crate::layout::order::add_subgraph_constraints::add_subgraph_constraints;
-use crate::layout::order::build_layer_graph::{GraphRelationship, build_layer_graph};
+use crate::layout::order::build_layer_graph::{build_layer_graph, GraphRelationship};
 use crate::layout::order::cross_count::cross_count;
 use crate::layout::order::init_order::init_order;
 use crate::layout::order::sort_subgraph::sort_subgraph;
 use crate::layout::util;
 use crate::{GraphConfig, GraphEdge, GraphNode};
-use graphlib_rust::Graph;
 use graphlib_rust::graph::GRAPH_NODE;
+use graphlib_rust::Graph;
 
 /*
  * Applies heuristics to minimize edge crossings in the graph and sets the best

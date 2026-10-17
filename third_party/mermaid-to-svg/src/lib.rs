@@ -29,7 +29,7 @@ mod theme;
 mod timeline_diagram;
 mod xychart_diagram;
 
-pub use config::{FlowchartConfig, ParsedMermaidSource, RenderConfig, parse_mermaid_frontmatter};
+pub use config::{parse_mermaid_frontmatter, FlowchartConfig, ParsedMermaidSource, RenderConfig};
 pub use error::MermaidError;
 pub use theme::{MermaidTheme, MermaidThemePreset, MermaidThemeVariables};
 

@@ -1,6 +1,6 @@
-use crate::layout::{GraphConfig, GraphEdge, GraphNode, util};
-use graphlib_rust::Graph;
+use crate::layout::{util, GraphConfig, GraphEdge, GraphNode};
 use graphlib_rust::graph::GRAPH_NODE;
+use graphlib_rust::Graph;
 use ordered_hashmap::OrderedHashMap;
 
 /*

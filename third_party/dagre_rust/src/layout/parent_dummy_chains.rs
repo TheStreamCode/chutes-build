@@ -1,6 +1,6 @@
 use crate::{GraphConfig, GraphEdge, GraphNode};
-use graphlib_rust::Graph;
 use graphlib_rust::graph::GRAPH_NODE;
+use graphlib_rust::Graph;
 use ordered_hashmap::OrderedHashMap;
 
 pub fn parent_dummy_chains(g: &mut Graph<GraphConfig, GraphNode, GraphEdge>) {

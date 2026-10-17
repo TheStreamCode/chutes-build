@@ -4,14 +4,14 @@ use crate::ast::{EdgeStyle, FlowchartGraph, GraphDirection, NodeShape};
 use crate::config::RenderConfig;
 use crate::layout::{LayoutEdge, LayoutNode, LayoutResult, LayoutSubgraph};
 use crate::text_wrap::{
-    DEFAULT_CHAR_WIDTH, DEFAULT_FONT_SIZE, DEFAULT_WRAP_WIDTH,
-    measure_wrapped_lines_with_font_size, scale_char_width, wrap_text_lines,
+    measure_wrapped_lines_with_font_size, scale_char_width, wrap_text_lines, DEFAULT_CHAR_WIDTH,
+    DEFAULT_FONT_SIZE, DEFAULT_WRAP_WIDTH,
 };
 use dagre_rust::layout::layout as dagre_layout;
 use dagre_rust::{GraphConfig, GraphEdge, GraphNode};
 use graphlib_rust::Graph;
 
-use super::cluster_adjust::{ExtractedCluster, adjust_clusters_and_edges};
+use super::cluster_adjust::{adjust_clusters_and_edges, ExtractedCluster};
 use super::{flow_data, flow_db};
 
 const FLOWCHART_PADDING: f64 = 15.0;

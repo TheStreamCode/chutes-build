@@ -1,5 +1,5 @@
-use crate::GraphEdgePoint;
 use crate::layout::{GraphConfig, GraphEdge, GraphNode};
+use crate::GraphEdgePoint;
 use graphlib_rust::{Graph, GraphOption};
 use ordered_hashmap::OrderedHashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

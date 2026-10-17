@@ -1,5 +1,5 @@
-use crate::Graph;
 use crate::algo::dfs::dfs;
+use crate::Graph;
 use std::fmt::Debug;
 
 // TODO: need to check if exceptions are required

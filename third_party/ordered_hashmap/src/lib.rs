@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry as StdEntry;
+use std::collections::HashMap;
 use std::hash::Hash;
 
 /// A custom `OrderedHashMap` struct that maintains the order of keys.
