@@ -3,8 +3,8 @@ use crate::layout::order::order;
 use crate::layout::parent_dummy_chains::parent_dummy_chains;
 use crate::layout::rank::rank;
 use crate::layout::util::{
-    as_non_compound_graph, intersect_rect, normalize_ranks, remove_empty_ranks,
-    transfer_node_edge_labels, Rect,
+    Rect, as_non_compound_graph, intersect_rect, normalize_ranks, remove_empty_ranks,
+    transfer_node_edge_labels,
 };
 use crate::{GraphConfig, GraphEdge, GraphEdgePoint, GraphNode};
 use graphlib_rust::{Graph, GraphOption};

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::error::MermaidError;
-use crate::text_wrap::{line_width, DEFAULT_CHAR_WIDTH};
+use crate::text_wrap::{DEFAULT_CHAR_WIDTH, line_width};
 use crate::theme::MermaidTheme;
 use dagre_rust::layout::layout as dagre_layout;
 use dagre_rust::{GraphConfig, GraphEdge, GraphNode};

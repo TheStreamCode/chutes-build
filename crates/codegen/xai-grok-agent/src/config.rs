@@ -2633,22 +2633,13 @@ description: Test default tool config
         use std::str::FromStr;
         for (s, expected) in [
             ("chutes-build", BuiltinAgentName::ChutesBuild),
-            (
-                "chutes-build-concise",
-                BuiltinAgentName::GrokBuildConcise,
-            ),
-            (
-                "chutes-build-plan",
-                BuiltinAgentName::GrokBuildPlan,
-            ),
+            ("chutes-build-concise", BuiltinAgentName::GrokBuildConcise),
+            ("chutes-build-plan", BuiltinAgentName::GrokBuildPlan),
             (
                 "chutes-build-plan-no-subagents",
                 BuiltinAgentName::GrokBuildPlanNoSubagents,
             ),
-            (
-                "chutes-build-ask-user",
-                BuiltinAgentName::GrokBuildAskUser,
-            ),
+            ("chutes-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
             ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),
             ("general-purpose", BuiltinAgentName::GeneralPurpose),

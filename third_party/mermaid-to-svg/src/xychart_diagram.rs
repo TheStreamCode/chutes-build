@@ -678,11 +678,7 @@ fn tick_step(start: f64, stop: f64, count: f64) -> f64 {
         step1
     };
 
-    if stop < start {
-        -step
-    } else {
-        step
-    }
+    if stop < start { -step } else { step }
 }
 
 fn format_tick(value: f64) -> String {

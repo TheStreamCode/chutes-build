@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::{EdgeStyle, FlowchartGraph, GraphDirection, Node, NodeShape, Statement};
 use crate::config::RenderConfig;
 use crate::text_wrap::{
-    measure_wrapped_lines_with_font_size, scale_char_width, wrap_text_lines, DEFAULT_CHAR_WIDTH,
-    DEFAULT_FONT_SIZE, DEFAULT_WRAP_WIDTH,
+    DEFAULT_CHAR_WIDTH, DEFAULT_FONT_SIZE, DEFAULT_WRAP_WIDTH,
+    measure_wrapped_lines_with_font_size, scale_char_width, wrap_text_lines,
 };
 use dagre_rust::layout::layout as dagre_layout;
 use dagre_rust::{GraphConfig, GraphEdge, GraphNode};

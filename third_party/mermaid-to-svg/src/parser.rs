@@ -811,11 +811,7 @@ fn split_ampersand_group(s: &str) -> Vec<&str> {
     if !part.is_empty() {
         parts.push(part);
     }
-    if parts.is_empty() {
-        vec![s]
-    } else {
-        parts
-    }
+    if parts.is_empty() { vec![s] } else { parts }
 }
 
 fn split_class_annotation(s: &str) -> (&str, Vec<String>) {

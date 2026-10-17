@@ -2,9 +2,9 @@ use crate::ast::{EdgeStyle, NodeShape};
 use crate::config::RenderConfig;
 use crate::layout::{LayoutEdge, LayoutNode, LayoutResult, LayoutSubgraph};
 use crate::text_wrap::{
+    DEFAULT_CHAR_WIDTH, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_WRAP_WIDTH,
     line_width_words, measure_wrapped_lines_with_font_size, scale_char_width, wrap_text_lines,
-    wrapped_text_height_with_font_size, DEFAULT_CHAR_WIDTH, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT,
-    DEFAULT_WRAP_WIDTH,
+    wrapped_text_height_with_font_size,
 };
 use crate::theme::MermaidTheme;
 
