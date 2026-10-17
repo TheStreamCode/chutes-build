@@ -4,6 +4,26 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-10-17
+
+### Fixed
+
+- **Welcome-screen key entry no longer strands the session.** 1.7.0 saved
+  and validated the pasted key in the pager but never told the agent
+  (a separate process whose env was fixed at spawn), so the first
+  session failed with `Session creation failed: "no auth method id
+  provided"` until restart. Accepting a key now pushes it into the
+  agent over `chutes.ai/setApiKey` and authenticates with it
+  (`Effect::AuthenticateWithApiKey`), then converges on the normal
+  login-completion path (bundle/billing/changelog/deferred startup);
+  a failed handshake rolls back to the setup screen with the error.
+- `chutes.ai/setApiKey` no longer requires the login store: on builds
+  without account login the key goes memory-only (runtime override
+  visible to sampling resolution), since the client persists to its
+  own key store first.
+- `/apikey` text now states welcome-screen entry applies immediately
+  and only changing an existing key needs a restart.
+
 ## [1.7.0] - 2026-10-17
 
 ### Added

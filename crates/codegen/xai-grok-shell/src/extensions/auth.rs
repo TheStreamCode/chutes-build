@@ -103,15 +103,24 @@ fn handle_set_api_key(args: &acp::ExtRequest) -> ExtResult {
     let params: serde_json::Value = parse_params(args)?;
     let key = params.get("key").and_then(|v| v.as_str());
     let grok_home = crate::util::grok_home::grok_home();
+    // A build without account login keeps no login store (writes are refused
+    // by design): the client persists to its own key store first, so here the
+    // key goes memory-only.
+    let keeps_login_store =
+        xai_grok_config::Distribution::current().allows(xai_grok_config::Capability::AccountLogin);
     match key {
         Some(k) if !k.is_empty() => {
-            xai_grok_login::store_api_key(&grok_home, k)
-                .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
+            if keeps_login_store {
+                xai_grok_login::store_api_key(&grok_home, k)
+                    .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
+            }
             xai_grok_login::auth_method::set_runtime_xai_api_key(k);
         }
         _ => {
-            xai_grok_login::clear_api_key(&grok_home)
-                .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
+            if keeps_login_store {
+                xai_grok_login::clear_api_key(&grok_home)
+                    .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
+            }
             xai_grok_login::auth_method::clear_runtime_xai_api_key();
         }
     }
@@ -270,4 +279,67 @@ fn handle_info(agent: &MvpAgent) -> ExtResult {
             .map(|a| a.coding_data_retention_opt_out)
             .unwrap_or_else(xai_grok_login::default_coding_data_retention_opt_out),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set_key_request(key: Option<&str>) -> acp::ExtRequest {
+        let params = serde_json::json!({ "key": key });
+        acp::ExtRequest::new(
+            "chutes.ai/setApiKey",
+            serde_json::value::to_raw_value(&params)
+                .expect("serialize setApiKey params")
+                .into(),
+        )
+    }
+
+    /// Without account login there is no login store: the key must land in
+    /// the runtime override (visible to sampling resolution) and nowhere on
+    /// disk. The client persists to its own key store first.
+    #[serial_test::serial(RUNTIME_API_KEY)]
+    #[test]
+    fn set_api_key_is_memory_only_without_account_login() {
+        assert!(
+            !xai_grok_config::Distribution::current()
+                .allows(xai_grok_config::Capability::AccountLogin)
+        );
+        let home = tempfile::tempdir().expect("temp home");
+        let _home_guard =
+            xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+        let prior_key = std::env::var_os("CHUTES_API_KEY");
+        let prior_legacy = std::env::var_os("CHUTES_BUILD_API_KEY");
+        // SAFETY: serialized via `serial_test`; restored below.
+        unsafe {
+            std::env::remove_var("CHUTES_API_KEY");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
+        }
+        xai_grok_login::auth_method::clear_runtime_xai_api_key();
+
+        handle_set_api_key(&set_key_request(Some("cpk-test-key"))).expect("set succeeds");
+        assert_eq!(
+            crate::agent::auth_method::read_chutes_api_key_env().expect("runtime key readable"),
+            "cpk-test-key"
+        );
+        assert!(
+            !home.path().join("auth.json").exists(),
+            "no login store may be written"
+        );
+
+        handle_set_api_key(&set_key_request(None)).expect("clear succeeds");
+        assert!(crate::agent::auth_method::read_chutes_api_key_env().is_err());
+
+        // SAFETY: serialized via `serial_test`; restore the env for other tests.
+        unsafe {
+            match prior_key {
+                Some(value) => std::env::set_var("CHUTES_API_KEY", value),
+                None => std::env::remove_var("CHUTES_API_KEY"),
+            }
+            match prior_legacy {
+                Some(value) => std::env::set_var("CHUTES_BUILD_API_KEY", value),
+                None => std::env::remove_var("CHUTES_BUILD_API_KEY"),
+            }
+        }
+    }
 }

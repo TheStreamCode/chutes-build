@@ -2328,6 +2328,36 @@ pub(crate) fn execute(
                 });
             meta.auth_abort_handle = Some((request_seq, abort_handle));
         }
+        Effect::AuthenticateWithApiKey { request_seq, key } => {
+            let tx = acp_tx.clone();
+            let abort_handle = tasks
+                .spawn(async move {
+                    let params = serde_json::json!({ "key": key.expose() });
+                    let req = acp::ExtRequest::new(
+                        "chutes.ai/setApiKey",
+                        serde_json::value::to_raw_value(&params)
+                            .expect("serialize setApiKey params")
+                            .into(),
+                    );
+                    if let Err(e) = acp_send(req, &tx).await {
+                        return TaskResult::AuthFailed {
+                            request_seq,
+                            error: sanitize_user_error(&e.to_string()),
+                        };
+                    }
+                    send_authenticate(
+                            &tx,
+                            request_seq,
+                            acp::AuthMethodId::new(
+                                xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID,
+                            ),
+                            false,
+                            false,
+                        )
+                        .await
+                });
+            meta.auth_abort_handle = Some((request_seq, abort_handle));
+        }
         Effect::PollAuthUrl { request_seq } => {
             let tx = acp_tx.clone();
             let abort_handle = tasks

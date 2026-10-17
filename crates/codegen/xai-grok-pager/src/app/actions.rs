@@ -1825,6 +1825,15 @@ pub enum Effect {
         request_seq: u64,
         key: RedactedSecret,
     },
+    /// Push a validated Chutes API key into the agent (`chutes.ai/setApiKey`)
+    /// then authenticate with it, sequentially in one task. The agent is a
+    /// separate process whose env was fixed at spawn, so the key must travel
+    /// over ACP: without this the agent's auth-method handle stays empty and
+    /// session creation fails with "no auth method id provided".
+    AuthenticateWithApiKey {
+        request_seq: u64,
+        key: RedactedSecret,
+    },
     /// Fetch MCP server list from the shell (chutes.ai/mcp/list).
     FetchMcpsList {
         agent_id: AgentId,

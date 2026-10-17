@@ -18,9 +18,9 @@ impl SlashCommand for ApiKeyCommand {
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
         CommandResult::Message(
             "Authenticate with a Chutes API key (get one at https://chutes.ai/app/settings/api-keys):\n\
-             - Save it with `chutes-build login`, or enter it on the welcome screen.\n\
+             - Save it with `chutes-build login`, or enter it on the welcome screen (applies immediately).\n\
              - Or set the `CHUTES_API_KEY` env var before starting; an explicit env key always wins.\n\
-             Then restart the app to pick up new credentials."
+             Changing an existing key requires restarting the app."
                 .to_string(),
         )
     }

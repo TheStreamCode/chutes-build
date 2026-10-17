@@ -951,7 +951,7 @@ fn redacted_secret_debug_hides_the_key() {
 
 #[serial_test::serial(CHUTES_BUILD_HOME)]
 #[test]
-fn api_key_accepted_saves_and_finishes_startup_auth() {
+fn api_key_accepted_saves_and_pushes_key_to_agent() {
     let home = tempfile::tempdir().expect("temp home");
     let _home_guard = xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let prior_key = std::env::var_os("CHUTES_API_KEY");
@@ -966,9 +966,30 @@ fn api_key_accepted_saves_and_finishes_startup_auth() {
         Action::TaskComplete(TaskResult::ApiKeyAccepted { request_seq: seq }),
         &mut app,
     );
-    assert!(effects.is_empty(), "unexpected effects: {effects:?}");
 
-    assert!(matches!(app.auth_state, AuthState::Done));
+    // The agent is a separate process: the key must travel over ACP before
+    // the flow can finish, or session creation fails with "no auth method
+    // id provided".
+    assert_eq!(effects.len(), 1, "unexpected effects: {effects:?}");
+    let AuthState::Authenticating {
+        request_seq: auth_seq,
+        mode: AuthMode::ApiKeyEntry,
+        ..
+    } = &app.auth_state
+    else {
+        panic!("accepted must stay in entry mode, got {:?}", app.auth_state);
+    };
+    assert_ne!(*auth_seq, seq, "handshake uses a fresh seq");
+    assert!(
+        matches!(
+            &effects[0],
+            Effect::AuthenticateWithApiKey { request_seq, key }
+                if *request_seq == *auth_seq && key.expose() == "cpk-test-key"
+        ),
+        "unexpected effects: {effects:?}"
+    );
+    assert!(app.api_key_entry_validating, "spinner covers the handshake");
+
     assert!(app.is_api_key_auth);
     assert_eq!(app.auth_methods.len(), 1);
     assert_eq!(
@@ -976,12 +997,6 @@ fn api_key_accepted_saves_and_finishes_startup_auth() {
         xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID
     );
     assert!(!app.usage_visible, "startup-with-key hides billing");
-    assert!(
-        app.welcome_toast
-            .as_ref()
-            .is_some_and(|(message, _)| message.contains("API key saved")),
-        "expected a saved-key toast"
-    );
     assert_eq!(
         chutes_build_core::api_key_store::load(home.path()).as_deref(),
         Some("cpk-test-key")
@@ -990,6 +1005,109 @@ fn api_key_accepted_saves_and_finishes_startup_auth() {
         std::env::var("CHUTES_API_KEY").as_deref(),
         Ok("cpk-test-key")
     );
+
+    // SAFETY: serialized via `serial_test`; restore the env for other tests.
+    unsafe {
+        match prior_key {
+            Some(value) => std::env::set_var("CHUTES_API_KEY", value),
+            None => std::env::remove_var("CHUTES_API_KEY"),
+        }
+    }
+}
+
+#[serial_test::serial(CHUTES_BUILD_HOME)]
+#[test]
+fn api_key_entry_auth_complete_finishes_and_resets_entry_flags() {
+    let home = tempfile::tempdir().expect("temp home");
+    let _home_guard = xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+    let prior_key = std::env::var_os("CHUTES_API_KEY");
+    // SAFETY: serialized via `serial_test`; restored below.
+    unsafe { std::env::remove_var("CHUTES_API_KEY") };
+
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let seq = entry_seq(&app);
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyAccepted { request_seq: seq }),
+        &mut app,
+    );
+    let AuthState::Authenticating { request_seq, .. } = &app.auth_state else {
+        panic!(
+            "accepted must stay authenticating, got {:?}",
+            app.auth_state
+        );
+    };
+    let auth_seq = *request_seq;
+
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::AuthComplete {
+            request_seq: auth_seq,
+            meta: None,
+        }),
+        &mut app,
+    );
+
+    assert!(matches!(app.auth_state, AuthState::Done));
+    assert!(!app.api_key_entry_validating);
+    assert!(app.api_key_entry_error.is_none());
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::FetchBundleStatus)),
+        "entry converges on the normal completion path, got: {effects:?}"
+    );
+
+    // SAFETY: serialized via `serial_test`; restore the env for other tests.
+    unsafe {
+        match prior_key {
+            Some(value) => std::env::set_var("CHUTES_API_KEY", value),
+            None => std::env::remove_var("CHUTES_API_KEY"),
+        }
+    }
+}
+
+#[serial_test::serial(CHUTES_BUILD_HOME)]
+#[test]
+fn api_key_entry_auth_failed_rolls_back_to_pending() {
+    let home = tempfile::tempdir().expect("temp home");
+    let _home_guard = xai_grok_test_support::env::EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+    let prior_key = std::env::var_os("CHUTES_API_KEY");
+    // SAFETY: serialized via `serial_test`; restored below.
+    unsafe { std::env::remove_var("CHUTES_API_KEY") };
+
+    let mut app = pending_app();
+    let _ = dispatch(Action::EnterApiKey, &mut app);
+    let _ = app.auth_code_input.insert_paste("cpk-test-key");
+    let seq = entry_seq(&app);
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::ApiKeyAccepted { request_seq: seq }),
+        &mut app,
+    );
+    let AuthState::Authenticating { request_seq, .. } = &app.auth_state else {
+        panic!(
+            "accepted must stay authenticating, got {:?}",
+            app.auth_state
+        );
+    };
+    let auth_seq = *request_seq;
+
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::AuthFailed {
+            request_seq: auth_seq,
+            error: "agent unreachable".to_string(),
+        }),
+        &mut app,
+    );
+
+    assert!(effects.is_empty());
+    assert!(matches!(
+        app.auth_state,
+        AuthState::Pending { error: Some(_) }
+    ));
+    assert!(!app.api_key_entry_validating);
+    assert!(!app.is_api_key_auth, "optimistic key auth rolls back");
+    assert!(app.auth_methods.is_empty());
 
     // SAFETY: serialized via `serial_test`; restore the env for other tests.
     unsafe {

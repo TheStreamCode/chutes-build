@@ -103,7 +103,10 @@ never a login command.
 as env at startup; env always wins),
 `xai-grok-pager/src/app/actions.rs|dispatch/auth.rs|effects` (`AuthMode::ApiKeyEntry`,
 `Action::EnterApiKey/SubmitApiKey/CancelApiKeyEntry`,
-`Effect::ValidateApiKey`, `TaskResult::ApiKeyAccepted/Rejected`).
+`Effect::ValidateApiKey`, `TaskResult::ApiKeyAccepted/Rejected`,
+`Effect::AuthenticateWithApiKey` pushing the key into the agent over
+`chutes.ai/setApiKey` + `authenticate`, memory-only agent-side when the
+login store is withheld).
 
 ## 3. Privacy and network
 
@@ -234,7 +237,7 @@ Any behavior change MUST, in one commit:
 | 4.5 inference speed | `xai-grok-pager` `turn_completed_message`, `status_blocks` `session_usage_block_*` + snapshots |
 | 1.5 OTLP taxonomy | `xai-grok-telemetry` `external::tests::*` + `external_otlp*` e2e (scope `ai.chutes.build`, `chutes_build.*` events) |
 | 1.6 legal links | `xai-grok-pager` privacy-banner/banner-URL tests pin `chutes.ai/terms` + `chutes.ai/privacy`; billing upsell pins `_s=usage` |
-| 2.3/2.4 key entry | `xai-grok-pager` `api_key_entry::*`, `api_key_accepted::*`, `api_key_rejected::*`, `welcome_entry::*`, `welcome_pending::*`, `dispatch::tests::auth::*` |
+| 2.3/2.4 key entry | `xai-grok-pager` `api_key_entry::*`, `api_key_accepted::*`, `api_key_rejected::*`, `welcome_entry::*`, `welcome_pending::*`, `dispatch::tests::auth::*`, `api_key_entry_auth_complete_finishes_and_resets_entry_flags`, `api_key_entry_auth_failed_rolls_back_to_pending`; `xai-grok-shell` `set_api_key_is_memory_only_without_account_login` |
 | 4.6 media routing | `xai-grok-tools-api` `imagine_instruction_carries_prompt_verbatim`, `imagine_video_instruction_carries_prompt_and_workflow`; `xai-grok-pager` `requires_generate_media_tool` ×2; `xai-grok-shell` `resolve_image_gen_gates`, `resolve_video_gen_gates`, `imagine_tools_disabled_gates_image_edit`; `xai-grok-tools` `generate_media_takes_image_budget_by_name` |
 | 1.3 CLI name | `xai-grok-pager` `cli_command_name_is_chutes_build`, `cli_help_output_header`, `zsh_completions_drop_prompt_slot_and_dispatch_on_line_1` |
 | 1.5 agent profiles | `xai-grok-pager` `effects::tests::{all_flags_meta, plan_only_meta, plan_with_ask_user_uses_plan_profile, plan_with_subagents_meta, runtime_default_flags_produce_plan_meta, ask_user_alone_meta, agent_profile_names_are_valid_builtins, agent_profile_definitions_have_correct_names}`; `xai-grok-agent` `test_builtin_agent_name_strum_round_trip` |

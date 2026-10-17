@@ -394,7 +394,7 @@ pub(super) fn handle_api_key_accepted(app: &mut AppView, request_seq: u64) -> Ve
     // SAFETY: same pattern as startup injection — the key is only ever read
     // afterwards, and no other thread touches this variable concurrently.
     unsafe {
-        std::env::set_var("CHUTES_API_KEY", key);
+        std::env::set_var("CHUTES_API_KEY", key.clone());
     }
     // Mirror startup-with-key (event_loop connection-auth block): advertise
     // the exact API-key method and recompute the derived flags from it.
@@ -408,15 +408,29 @@ pub(super) fn handle_api_key_accepted(app: &mut AppView, request_seq: u64) -> Ve
         app.usage_visible = false;
         app.sync_billing_surface_to_agents();
     }
-    app.auth_state = AuthState::Done;
+    // The agent is a separate process that never saw this key (its env was
+    // fixed at spawn): push the key over ACP and authenticate before
+    // finishing, or session creation fails with "no auth method id
+    // provided". Stay in entry mode with the spinner up; the resulting
+    // AuthComplete converges on the normal login-completion path
+    // (bundle/billing/changelog/deferred startup), AuthFailed on Pending.
+    let auth_seq = app.next_auth_request_seq;
+    app.next_auth_request_seq += 1;
+    app.auth_state = AuthState::Authenticating {
+        request_seq: auth_seq,
+        handle: None,
+        auth_url: None,
+        mode: AuthMode::ApiKeyEntry,
+    };
     app.auth_code_input.reset();
     app.api_key_entry_error = None;
-    app.api_key_entry_validating = false;
-    app.welcome_toast = Some((
-        "API key saved. Type below to start.".to_string(),
-        std::time::Instant::now(),
-    ));
-    vec![]
+    // The spinner now covers the agent handshake (normally already up from
+    // submit; set unconditionally so no caller can strand it down).
+    app.api_key_entry_validating = true;
+    vec![Effect::AuthenticateWithApiKey {
+        request_seq: auth_seq,
+        key: crate::app::actions::RedactedSecret::new(key),
+    }]
 }
 
 /// A pasted key was rejected (wrong key) or unverifiable (network): show the
@@ -466,6 +480,9 @@ pub(super) fn handle_auth_complete(
         app.auth_show_raw_url = false;
         app.welcome_prompt_focused = !app.is_access_blocked();
         app.auth_code_input.reset();
+        // Entry mode converges here too (AuthenticateWithApiKey): drop its flags.
+        app.api_key_entry_validating = false;
+        app.api_key_entry_error = None;
 
         // Mid-session re-auth (`/login` or a 401 prompt): restore the view the user was on instead of running the startup load-session flow
         // The session state lives in `app.agents`, independent of `active_view`, so it is preserved across the auth detour
