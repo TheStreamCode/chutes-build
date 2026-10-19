@@ -79,7 +79,11 @@ lowest:
 
 1. **Per-model `api_key` or `env_key`** — set under `[model.<name>]` in
    `config.toml`. Wins whenever present.
-2. **`CHUTES_API_KEY`** — the global key from the environment.
+2. **`CHUTES_API_KEY`** — the global key from the environment (the legacy
+   `CHUTES_BUILD_API_KEY` only when `CHUTES_API_KEY` is unset).
+3. **The saved key** — `~/.chutes-build/api_key`, written by
+   `chutes-build login` or the welcome-screen entry. An explicit env key
+   always wins over it.
 
 That is the whole list. There is no session token below or above the key.
 
@@ -87,16 +91,17 @@ That is the whole list. There is no session token below or above the key.
 
 ## Credential storage
 
-The API key lives where you put it — the process environment, or a
-per-model entry in `~/.chutes-build/config.toml` — and is never written
-anywhere else by this build. MCP OAuth tokens in
-`~/.chutes-build/mcp_credentials.json` are written with owner-only
-permissions (`0600` on Unix). Anyone with filesystem access to those paths
-can use the credentials, so:
+The API key lives where you put it — the process environment, a
+per-model entry in `~/.chutes-build/config.toml`, or the saved-key file
+`~/.chutes-build/api_key` written by `chutes-build login` and the
+welcome-screen entry (owner-only `0600` on Unix; default file
+permissions on Windows, with no extra ACL hardening). MCP OAuth tokens
+in `~/.chutes-build/mcp_credentials.json` are likewise owner-only. Anyone with filesystem access to those paths can use
+the credentials, so:
 
 - Prefer full-disk encryption (FileVault, BitLocker, LUKS, or equivalent).
-- Do not copy config files or `mcp_credentials.json` into shared directories,
-  tickets, or chat.
+- Do not copy config files, the saved `api_key`, or `mcp_credentials.json`
+  into shared directories, tickets, or chat.
 - On multi-user hosts, keep `$HOME` / `$CHUTES_BUILD_HOME` private to your
   account.
 
@@ -114,22 +119,25 @@ from Chutes Build: a `CHUTES_API_KEY` never grants Git access.
 ## Related settings
 
 Coding-data sharing — **Coding data, retention, and training** in Settings,
-which `/privacy` opens — does not change these config knobs:
+which `/privacy` opens — is the only one of these knobs that does anything
+here. Product analytics, session-trace upload, and the external OTEL stream
+are off and inert in this build; their keys are parsed for compatibility
+but change nothing:
 
 | Setting | How to set it |
 |---------|---------------|
-| `[features] telemetry` | `config.toml` or `CHUTES_BUILD_TELEMETRY_ENABLED` |
-| `[telemetry] trace_upload` | `config.toml` or `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` |
-| External OpenTelemetry | `CHUTES_BUILD_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
+| `[features] telemetry` | Inert — see [Monitoring Usage](24-monitoring-usage.md). |
+| `[telemetry] trace_upload` | Inert — see [Monitoring Usage](24-monitoring-usage.md). |
+| External OpenTelemetry | Inert — see [Monitoring Usage](24-monitoring-usage.md). |
 
-On team accounts, only a team admin can change coding-data sharing.
-Team admins can also enable or disable Zero Data Retention (ZDR) for their team.
-See [How to enable ZDR](https://docs.chutes.ai/developers/faq/security#how-to-enable-zdr).
-When ZDR is on, coding-data sharing cannot be changed at all — the settings
-row shows `ZDR` in place of the value. ZDR does not turn off external OTEL
-or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+Team-managed states exist for account-auth builds only: on a team account,
+only a team admin can change coding-data sharing, and admins can enable or
+disable Zero Data Retention (ZDR) for the team — with ZDR on, the settings
+row shows `ZDR` in place of the value instead of opening the chooser. This
+API-key-only build has no account auth, so the row always stays editable
+here.
 
-See [Monitoring Usage](24-monitoring-usage.md#related-settings) and [Configuration](05-configuration.md#telemetry).
+See [Monitoring Usage](24-monitoring-usage.md) and [Configuration](05-configuration.md#telemetry).
 
 ---
 

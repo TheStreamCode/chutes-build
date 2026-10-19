@@ -28,8 +28,8 @@ or secret manager, and never commit real credentials.
 | `CHUTES_API_KEY` | Ambient Chutes API credential for allowlisted official HTTPS endpoints. |
 | `CHUTES_MODELS_API_KEY` | Dedicated credential for a custom model-catalog endpoint. |
 | `CHUTES_AUTH_SCHEME=raw` | Send the management API key without the `Bearer` prefix. Default is `Bearer`. |
-| `CHUTES_BUILD_OAUTH2_CLIENT_ID` | Registered Chutes OAuth application ID. |
-| `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` | Confidential OAuth secret, used for exchange and refresh but never persisted. |
+| `CHUTES_BUILD_OAUTH2_CLIENT_ID` | Dormant: parsed but never honored — this build has no account login (API key only). |
+| `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` | Dormant: parsed but never honored — this build has no account login (API key only). |
 | `CHUTES_BUILD_DEFAULT_MODEL` | Default model ID; a concrete catalogue id, or a native routing string (see below). |
 | `CHUTES_FALLBACK_MODELS` | Ordered comma-separated model fallback chain. |
 | `CHUTES_STRICT_MODEL=1` | Disable automatic fallback. |

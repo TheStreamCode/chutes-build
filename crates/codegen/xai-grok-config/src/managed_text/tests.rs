@@ -227,7 +227,9 @@ fn invalid_inputs_and_all_marker_shapes_are_refused() {
         vec![b'x'; super::source::MAX_CONFIG_BYTES as usize + 1],
     )
     .unwrap();
-    let nul = temp.path().join("nul");
+    // Named `nul-byte`, not `nul`: NUL is a reserved device name on Windows,
+    // so a file by that name would silently discard the payload instead.
+    let nul = temp.path().join("nul-byte");
     fs::write(&nul, b"a\0b").unwrap();
     let non_utf8 = temp.path().join("non-utf8");
     fs::write(&non_utf8, [0xff]).unwrap();
@@ -356,6 +358,25 @@ fn stale_source_and_parent_swap_are_rejected_before_publication() {
         Err(ManagedConfigError::ParentChanged(_))
     ));
     assert!(!path.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn sibling_churn_does_not_trip_parent_changed_on_windows() {
+    // Directory (len, mtime) flaps when sibling entries come and go, so
+    // parallel tests sharing %TEMP% tripped ParentChanged. The NTFS
+    // volume+index identity must survive that churn.
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    fs::write(&path, "before\n").unwrap();
+    let plan = ManagedConfig::plan(request(&path, &[("item", "body")])).unwrap();
+    for i in 0..5 {
+        let sibling = temp.path().join(format!("sibling-{i}"));
+        fs::create_dir(&sibling).unwrap();
+        fs::write(sibling.join("f"), "x").unwrap();
+        fs::remove_dir_all(&sibling).unwrap();
+    }
+    ManagedConfig::apply(plan).unwrap();
 }
 
 #[cfg(unix)]

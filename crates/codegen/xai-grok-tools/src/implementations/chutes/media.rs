@@ -119,10 +119,12 @@ impl xai_tool_runtime::Tool for ListMediaModelsTool {
 
     async fn run(
         &self,
-        _: xai_tool_runtime::ToolCallContext,
+        ctx: xai_tool_runtime::ToolCallContext,
         input: ListMediaModelsInput,
     ) -> Result<ToolOutput, xai_tool_runtime::ToolError> {
-        let catalog = ChutesMediaClient::from_env()
+        let credentials = super::resolve_credentials(&ctx)
+            .map_err(|error| execution_error("list_media_models", error))?;
+        let catalog = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("list_media_models", error))?
             .list()
             .await
@@ -201,10 +203,12 @@ impl xai_tool_runtime::Tool for DescribeMediaModelTool {
 
     async fn run(
         &self,
-        _: xai_tool_runtime::ToolCallContext,
+        ctx: xai_tool_runtime::ToolCallContext,
         input: DescribeMediaModelInput,
     ) -> Result<ToolOutput, xai_tool_runtime::ToolError> {
-        let detail = ChutesMediaClient::from_env()
+        let credentials = super::resolve_credentials(&ctx)
+            .map_err(|error| execution_error("describe_media_model", error))?;
+        let detail = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("describe_media_model", error))?
             .describe(input.model.trim())
             .await
@@ -267,7 +271,9 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
     ) -> Result<ToolOutput, xai_tool_runtime::ToolError> {
         let resources = crate::types::tool_metadata::shared_resources(&ctx)?;
         let cwd = resources.lock().await.require::<Cwd>()?.0.clone();
-        let client = ChutesMediaClient::from_env()
+        let credentials = super::resolve_credentials(&ctx)
+            .map_err(|error| execution_error("generate_media", error))?;
+        let client = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("generate_media", error))?;
         let (detail, resolved_model, fallback_note) =
             resolve_with_fallback(&client, input.model.trim(), input.kind)

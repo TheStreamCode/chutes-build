@@ -33,6 +33,15 @@ ignore = [
     { id = "RUSTSEC-2026-0097", reason = "rand is unsound when a custom logger itself calls rand::rng(), which re-enters the thread RNG. Our logging stack does not: xai-grok-telemetry and xai-grok-shared do not depend on rand, and no tracing layer references it. The two rand::rng() calls in this tree pick a random announcement index in the pager. No patched release exists." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39 is build-time-only through wayland-scanner and processes trusted bundled protocol XML, not user input." },
     { id = "RUSTSEC-2026-0249", reason = "smartstring is unmaintained (repository archived 2026-05-03), not vulnerable — there is no affected API to avoid. It reaches us only as a non-optional dependency of rhai, the workflow scripting engine, and we are already on rhai's latest stable (1.25.1), so no bump closes it and nothing but dropping rhai would. Its own recommended alternatives (compact_str, smol_str) are rhai's migration to make." },
+    # Arrived with the 1.7.2 release gate (live DB, 2026-10-19). Same rule as
+    # above: each reason records the reachability check that was run.
+    { id = "RUSTSEC-2026-0367", reason = "zip preserves SUID/SGID bits through ZipArchive::extract(). We never call extract(): pptx reads entries in memory by name, the Windows updater copies entries manually behind enclosed_name() with symlinks refused and created files never take archive modes, and the transitive office_oxide copy (zip 8.6) has zero .extract( call sites. Only a major 3→9 migration closes it." },
+    { id = "RUSTSEC-2026-0368", reason = "zip extract() follows attacker symlinks. Same reachability as RUSTSEC-2026-0367: no extract() call anywhere in this tree or in transitive office_oxide, and our manual copy path refuses symlinks outright. Only a major 3→9 migration closes it." },
+    { id = "RUSTSEC-2026-0369", reason = "zip extract() applies Unix permissions through symlinks. Same reachability as RUSTSEC-2026-0367: no extract() call anywhere in this tree or in transitive office_oxide. Only a major 3→9 migration closes it." },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained (repository archived 2024-03-25), not vulnerable — there is no affected API to avoid. Transitive through serde_yaml 0.9 (mermaid-to-svg), already at its last release 0.2.11, so no bump closes it; the maintained replacement is serde_yaml's call to make." },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained as a standalone crate (merged into zbus 6), not vulnerable. Transitive through zbus 5.14 (ashpd, dark-light theme detection); only a zbus 5→6 migration closes it." },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained as a standalone crate (merged into zbus 6), not vulnerable. Transitive through zbus 5.14 (ashpd, dark-light theme detection); only a zbus 5→6 migration closes it." },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained as a standalone crate (provided by zbus 6), not vulnerable. Transitive through zbus 5.14 (ashpd, dark-light theme detection); only a zbus 5→6 migration closes it." },
 ]
 
 [licenses]

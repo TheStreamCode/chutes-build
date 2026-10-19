@@ -433,10 +433,12 @@ pub(crate) fn build_tools_meta(tool_names: &[String]) -> acp::Meta {
 /// Reserved when advertising skills so a colliding skill ships qualified (`acme:login`, `local:hooks-add`) instead of a bare name the pager drops.
 /// Synced by pager contract tests (`pager_builtin_triggers_are_reserved_in_shell`, `pager_blocked_acp_names_are_reserved_in_shell`).
 pub const PAGER_COMMAND_KEYS: &[&str] = &[
+    "account",
     "agents",
     "agents-dashboard",
     "always-approve",
     "announcements",
+    "apikey",
     "auto",
     "btw",
     "cd",

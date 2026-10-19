@@ -20,7 +20,7 @@ fn reap_request_for_task_kills_with_session_scope() {
     let session_id = acp::SessionId::new("sess-1");
     let work = super::BackgroundWork::Task("task-42".into());
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "x.ai/task/kill");
+    assert_eq!(request.method.as_ref(), "chutes.ai/task/kill");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(
         params.get("sessionId").and_then(|v| v.as_str()),
@@ -61,7 +61,7 @@ fn numeric_task_id_is_decoded_tracked_and_reaped() {
     );
     let session_id = acp::SessionId::new("sess-1");
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "x.ai/task/kill");
+    assert_eq!(request.method.as_ref(), "chutes.ai/task/kill");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params.get("taskId").and_then(|v| v.as_str()), Some("4242"));
     assert_eq!(
@@ -79,7 +79,7 @@ fn reap_request_for_subagent_cancels_with_typed_id() {
     let session_id = acp::SessionId::new("sess-1");
     let work = super::BackgroundWork::Subagent("sub-7".into());
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "x.ai/subagent/cancel");
+    assert_eq!(request.method.as_ref(), "chutes.ai/subagent/cancel");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(
         params.get("subagentId").and_then(|v| v.as_str()),

@@ -128,6 +128,10 @@ impl ParentPlan {
 pub(super) struct ParentAnchor {
     path: PathBuf,
     identity: FileIdentity,
+    // The open handle exists only for the Unix directory fsync in `sync()`;
+    // `File::open` on a directory fails with access-denied on Windows, where
+    // the anchor is metadata-only.
+    #[cfg(unix)]
     directory: fs::File,
 }
 
@@ -140,6 +144,7 @@ impl ParentAnchor {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(ManagedConfigError::ParentChanged(path.to_path_buf()));
         }
+        #[cfg(unix)]
         let directory = fs::File::open(path).map_err(|source| ManagedConfigError::Read {
             path: path.to_path_buf(),
             source,
@@ -147,6 +152,7 @@ impl ParentAnchor {
         Ok(Self {
             path: path.to_path_buf(),
             identity: FileIdentity::from_metadata(&metadata),
+            #[cfg(unix)]
             directory,
         })
     }
@@ -188,9 +194,16 @@ pub(super) struct FileIdentity {
     dev: u64,
     #[cfg(unix)]
     ino: u64,
-    #[cfg(not(unix))]
+    // Creation time is stable while siblings come and go (unlike dir
+    // mtime, which flaps and made parallel tests sharing %TEMP% trip
+    // ParentChanged) yet still changes when the entry is replaced.
+    // (`volume_serial_number`/`file_index` would be ideal but are
+    // `windows_by_handle`-gated on stable.)
+    #[cfg(windows)]
+    created: Option<std::time::SystemTime>,
+    #[cfg(not(any(unix, windows)))]
     len: u64,
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     modified: Option<std::time::SystemTime>,
 }
 
@@ -204,7 +217,13 @@ impl FileIdentity {
                 ino: metadata.ino(),
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            Self {
+                created: metadata.created().ok(),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             Self {
                 len: metadata.len(),

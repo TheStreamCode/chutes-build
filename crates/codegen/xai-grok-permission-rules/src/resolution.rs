@@ -118,7 +118,16 @@ fn parse_toml_permission_section(
                 if let Some(s) = item.as_str() {
                     match parse_permission_rule(s, action) {
                         Ok(rule) => rules.push(rule),
-                        Err(e) => warn!("permission.{key}[{i}]: \"{s}\" -- {e}"),
+                        Err(e) => {
+                            if let Some(rule) = fail_closed_rule(s, action) {
+                                warn!(
+                                    "permission.{key}[{i}]: \"{s}\" -- {e}; keeping a tool-wide {key} rule instead"
+                                );
+                                rules.push(rule);
+                            } else {
+                                warn!("permission.{key}[{i}]: \"{s}\" -- {e}");
+                            }
+                        }
                     }
                 } else {
                     warn!(

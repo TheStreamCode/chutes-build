@@ -171,7 +171,7 @@ impl Agent {
         xai_token_estimation::exceeds_threshold(
             total_tokens,
             cw,
-            self.compaction_policy.auto_compact_threshold_percent as u8,
+            self.compaction_policy.auto_compact_threshold_percent,
         )
     }
 

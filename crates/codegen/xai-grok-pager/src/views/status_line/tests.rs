@@ -174,7 +174,7 @@ fn render_ansi_emits_absolute_link_spans() {
     let Some(span) = spans.first() else {
         panic!("expected a link span: {spans:?}");
     };
-    // Area x 3, plus 2 columns of padding, plus the 7 of `[Chutes Build] `.
-    assert_eq!((span.row, span.col_start, span.col_end), (5, 12, 16));
+    // Area x 3, plus 2 columns of padding, plus the 15 of `[Chutes Build] `.
+    assert_eq!((span.row, span.col_start, span.col_end), (5, 20, 24));
     assert_eq!(span.url.as_ref(), "https://example.com/repo");
 }

@@ -90,7 +90,7 @@ screen_mode = "fullscreen"             # default render mode: "fullscreen" | "mi
                                        # (unset → fullscreen); set via /settings → Default screen mode
 
 [features]
-telemetry = false                      # anonymous usage telemetry
+telemetry = false                      # inert in this build (see Telemetry below)
 feedback = true                        # feedback system (default: true)
 lsp_tools = false                      # expose the lsp tool
 codebase_indexing = true               # code graph indexing (default: true)
@@ -554,47 +554,20 @@ Keyboard shortcuts are **not** configurable — all bindings are built in. See [
 
 ### Telemetry
 
-These are independent knobs (see [Monitoring Usage](24-monitoring-usage.md#related-settings)):
+Product analytics, session-trace upload, and the external OpenTelemetry
+stream are **off in this build and cannot be turned on**: the distribution
+withholds the telemetry capability, so `[features] telemetry` and
+`[telemetry] trace_upload` always resolve to disabled, and the external
+OTEL `init` is a compile-time no-op. The keys below are parsed for
+compatibility but change nothing (see
+[Monitoring Usage](24-monitoring-usage.md)):
 
-- **`[features] telemetry`** / `CHUTES_BUILD_TELEMETRY_ENABLED` — the product-analytics master switch. `/privacy` doesn't change it.
-- **Coding data, retention, and training** — the Settings row `/privacy` opens; coding-data sharing, separate from telemetry.
-- **`[telemetry] trace_upload`** / `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` — session traces; follows telemetry when unset.
-- **`[telemetry] otel_*`** / `CHUTES_BUILD_EXTERNAL_OTEL` — external OTEL to your own collector (below).
-
-When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `[telemetry]`:
-
-```toml
-[telemetry]
-events_url = "https://telemetry.your-company.com/events"  # send events to your own collector
-events_api_key = "your-collector-token"                   # auth for your collector, if required
-mixpanel_enabled = false                                  # disable Mixpanel product analytics
-trace_upload = false                                      # disable session/trace uploads (inherits the telemetry toggle when unset)
-```
-
-Set these only to point telemetry at your own infrastructure or to switch parts off. The built-in endpoint and credentials are managed by Chutes Build — leave them unset to use the defaults.
-
-The same `[telemetry]` table also configures the **external OpenTelemetry stream**, an independent opt-in (it doesn't require the telemetry toggle above) that ships a curated, content-free usage schema to your *own* OTLP collector. Collector auth comes from `OTEL_EXPORTER_OTLP_HEADERS` and is never stored on disk. See [Monitoring & Usage](24-monitoring-usage.md) for the full schema, env vars, and privacy model.
-
-```toml
-[telemetry]
-otel_enabled = true                                       # external OTEL master switch (= CHUTES_BUILD_EXTERNAL_OTEL)
-otel_metrics_exporter = "otlp"                            # otlp | console | none
-otel_logs_exporter = "otlp"                               # otlp | console | none
-otel_endpoint = "https://collector.corp.example:4318"     # OTLP base endpoint
-otel_protocol = "http/protobuf"                           # http/protobuf | grpc
-otel_certificate = "/etc/ssl/corp-ca.pem"                 # optional: trust private CA (path only)
-otel_client_certificate = "/etc/ssl/client.crt"           # optional: mTLS client cert (path only)
-otel_client_key = "/etc/ssl/client.key"                   # optional: mTLS client key (path only)
-otel_log_user_prompts = false                             # content gate (admins pin via requirements)
-otel_log_assistant_responses = false                      # unset follows prompts; pin false for prompts-only
-otel_log_tool_details = true                              # metadata/preview; enterprise default on for SIEM join
-otel_log_tool_content = false                             # full-body gate; independent of details — does not imply names/paths
-```
-
-Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over
-process env (destination lock). `managed_config.toml` does not. There is no
-`headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See
-[Monitoring & Usage](24-monitoring-usage.md).
+- **`[features] telemetry`** / `CHUTES_BUILD_TELEMETRY_ENABLED` — inert.
+- **Coding data, retention, and training** — the Settings row `/privacy`
+  opens; coding-data sharing, separate from telemetry.
+- **`[telemetry] trace_upload`** / `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` —
+  inert.
+- **`[telemetry] otel_*`** / `CHUTES_BUILD_EXTERNAL_OTEL` — inert.
 
 ### Version pinning
 
@@ -654,7 +627,7 @@ name = "My Model (Proxy)"
 context_window = 128000
 
 [features]
-telemetry = false
+telemetry = false                      # inert in this build (see Telemetry below)
 ```
 
 ---
@@ -815,10 +788,10 @@ The key ones. See the README for the complete list.
 
 | Variable | Description |
 |----------|-------------|
-| `CHUTES_BUILD_TELEMETRY_ENABLED` | Enable/disable telemetry |
-| `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` | Enable/disable session trace upload |
-| `CHUTES_BUILD_TELEMETRY_MIXPANEL_ENABLED` | Enable/disable Mixpanel specifically |
-| `CHUTES_BUILD_EXTERNAL_OTEL` | External OTEL to your collector (see [24-monitoring-usage.md](24-monitoring-usage.md)) |
+| `CHUTES_BUILD_TELEMETRY_ENABLED` | Inert in this build (telemetry withheld) |
+| `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` | Inert in this build (telemetry withheld) |
+| `CHUTES_BUILD_TELEMETRY_MIXPANEL_ENABLED` | Inert in this build (telemetry withheld) |
+| `CHUTES_BUILD_EXTERNAL_OTEL` | Inert in this build (external OTEL deadened; see [24-monitoring-usage.md](24-monitoring-usage.md)) |
 | `CHUTES_BUILD_FEEDBACK_ENABLED` | Enable/disable feedback system |
 | `CHUTES_BUILD_DEPLOYMENT_KEY` | Management API key for enterprise |
 

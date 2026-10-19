@@ -502,6 +502,22 @@ fn parse_remote_model_value_context_window_is_default_and_context_windows_are_ch
         assert_eq!(windows, [500_000, 256_000], "{listed}");
     }
 }
+/// Chutes `/v1/models` publishes the window as `context_length`; without
+/// this branch every Chutes model silently inherited `DEFAULT_CONTEXT_WINDOW`.
+#[test]
+fn parse_remote_model_value_honors_chutes_context_length() {
+    let plain = serde_json::json!({ "model": "qwen", "context_length": 131_072 });
+    let via_meta = serde_json::json!({ "model": "qwen", "_meta": { "context_length": 262_144 } });
+    let result = parse_remote_model_value(&plain, "https://default.url").expect("model parses");
+    assert_eq!(result.context_window.get(), 131_072);
+    let result = parse_remote_model_value(&via_meta, "https://default.url").expect("model parses");
+    assert_eq!(result.context_window.get(), 262_144);
+    // An explicitly configured window still wins over the model card.
+    let capped =
+        serde_json::json!({ "model": "qwen", "context_window": 32_768, "context_length": 131_072 });
+    let result = parse_remote_model_value(&capped, "https://default.url").expect("model parses");
+    assert_eq!(result.context_window.get(), 32_768);
+}
 #[test]
 fn parse_remote_model_value_bad_context_windows_fall_back_to_context_window() {
     for bad in [

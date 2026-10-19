@@ -58,7 +58,10 @@ pub(super) fn read_session_list_response(raw: &str) -> Result<Value, String> {
 }
 /// `None` when the conversations lane completed (or was skipped); unknown reasons degrade to [`ConversationsPartial::Error`].
 pub(super) fn parse_session_list_partial(payload: &Value) -> Option<ConversationsPartial> {
-    let partial = payload.get("_meta")?.get("x.ai/partial")?;
+    let meta = payload.get("_meta")?;
+    let partial = meta
+        .get("chutes.ai/partial")
+        .or_else(|| meta.get("x.ai/partial"))?;
     if partial.get("conversations").and_then(Value::as_bool) != Some(true) {
         return None;
     }
@@ -69,11 +72,13 @@ pub(super) fn parse_session_list_partial(payload: &Value) -> Option<Conversation
     })
 }
 pub(super) fn parse_session_list_scope(payload: &Value) -> ListScope {
-    match payload
-        .get("_meta")
-        .and_then(|m| m.get("x.ai/listScope"))
-        .and_then(Value::as_str)
-    {
+    // The shell sends `chutes.ai/*`; `x.ai/*` stays as retained wire compat.
+    let scope = payload.get("_meta").and_then(|meta| {
+        meta.get("chutes.ai/listScope")
+            .or_else(|| meta.get("x.ai/listScope"))
+            .and_then(Value::as_str)
+    });
+    match scope {
         Some("repo") => ListScope::Repo,
         Some("all") => ListScope::All,
         _ => ListScope::Cwd,

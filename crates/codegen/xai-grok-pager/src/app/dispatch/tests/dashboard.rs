@@ -3,7 +3,7 @@ use super::*;
 use crate::app::app_view::InputOutcome;
 use crate::app::dispatch::queue::maybe_drain_queue;
 use crate::app::workspace_test_fixtures::{
-    member, new_member, snapshot as workspace_snapshot, temp_store,
+    fixture_cwd, member, new_member, snapshot as workspace_snapshot, temp_store,
 };
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -524,6 +524,13 @@ fn ready_workspace_app(
     app.workspace_dashboard_enabled = true;
     app.workspace_membership.set_ready_for_test(store, snapshot);
     app
+}
+
+/// Point an agent's session cwd at scratch that is absolute on every
+/// platform: the `/tmp` fixture literal is not absolute on Windows, where
+/// the agent would be inadoptable and its row would never render.
+fn adoptable_cwd(app: &mut AppView, id: AgentId) {
+    app.agents.get_mut(&id).unwrap().session.cwd = fixture_cwd("/tmp").into();
 }
 #[test]
 fn local_workspace_row_uses_the_same_strict_load_path() {
@@ -2233,6 +2240,7 @@ fn workspace_snapshot_load_requests_live_adoption() {
     let (_temp, store) = temp_store();
     let snapshot = store.snapshot().unwrap();
     let mut app = test_app_with_agent();
+    adoptable_cwd(&mut app, AgentId(0));
     app.workspace_dashboard_enabled = true;
     crate::app::workspace_sync::activate(&mut app);
     let effects = dispatch(
@@ -2451,6 +2459,7 @@ fn workspace_dashboard_reopens_store_when_only_stale_snapshot_remains() {
 fn workspace_session_created_becomes_an_upsert_candidate() {
     let (_temp, store) = temp_store();
     let mut app = ready_workspace_app(test_app_with_agent(), store);
+    adoptable_cwd(&mut app, AgentId(0));
     app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
     let _ = dispatch(
         Action::TaskComplete(TaskResult::SessionCreated {
@@ -2491,6 +2500,7 @@ fn workspace_dispatch_shows_row_before_session_created_and_keeps_its_id() {
         })
         .expect("dispatch creates a session");
     assert!(test_agent(&app, new_id).session.session_id.is_none());
+    adoptable_cwd(&mut app, new_id);
     assert_eq!(
         dashboard_row_order(&app),
         vec![DashboardRowId::TopLevel(new_id)],
@@ -2586,6 +2596,7 @@ fn workspace_dispatch_with_attach_selects_the_provisional_row() {
     let ActiveView::Agent(new_id) = app.active_view else {
         panic!("attach must open the new agent");
     };
+    adoptable_cwd(&mut app, new_id);
     let dashboard = app.dashboard.as_ref().unwrap();
     assert_eq!(dashboard.selected, Some(DashboardRowId::TopLevel(new_id)));
     assert_eq!(dashboard.attached_agent, Some(new_id));
@@ -2617,6 +2628,7 @@ fn workspace_worktree_dispatch_shows_row_while_worktree_is_created() {
         })
         .expect("confirm creates a worktree session");
     assert!(matches!(app.active_view, ActiveView::AgentDashboard));
+    adoptable_cwd(&mut app, new_id);
     let (rows, _) =
         super::super::dashboard::workspace_rows(&app, &crate::views::dashboard::Filter::None);
     assert_eq!(rows.len(), 1);
@@ -2854,6 +2866,8 @@ fn workspace_overlay_cycle_reaches_provisional_but_not_hidden_live_agents() {
     mark_agent_nonempty(&mut app, AgentId(0));
     let second = insert_second_agent(&mut app);
     mark_agent_nonempty(&mut app, second);
+    adoptable_cwd(&mut app, AgentId(0));
+    adoptable_cwd(&mut app, second);
     app.workspace_dashboard_enabled = true;
     app.workspace_membership
         .set_snapshot_for_test(xai_grok_dashboard_store::WorkspaceSnapshot {
@@ -2862,7 +2876,7 @@ fn workspace_overlay_cycle_reaches_provisional_but_not_hidden_live_agents() {
                 session_id: xai_grok_dashboard_store::SessionId::new("test-session").unwrap(),
                 kind: xai_grok_dashboard_store::MemberKind::Build,
                 origin: xai_grok_dashboard_store::MemberOrigin::Local,
-                cwd: Some("/tmp".to_owned()),
+                cwd: Some(fixture_cwd("/tmp")),
                 title: Some("Saved".to_owned()),
                 model: None,
                 last_turn_summary: None,

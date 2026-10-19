@@ -1368,8 +1368,11 @@ mod tests {
             })
         );
 
+        // Synthetic fixture value (`xai-some-key`); kept inline rather than in
+        // `.gitleaks.toml` because the rule matches the `CHUTES_API_KEY=`
+        // prefix alone, so a value entry would silence a real leak as well.
         let environment_key_command =
-            "CHUTES_API_KEY='xai-some-key' cargo run --bin xai-grok-pager";
+            "CHUTES_API_KEY='xai-some-key' cargo run --bin xai-grok-pager"; // gitleaks:allow
         assert_eq!(
             primary_command_from_script(environment_key_command),
             Some(BashCommandHighlights {

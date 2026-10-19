@@ -127,6 +127,12 @@ fn parse_prompt_json(json_str: &str) -> anyhow::Result<Vec<acp::ContentBlock>> {
     if blocks.is_empty() {
         anyhow::bail!("content blocks array is empty");
     }
+    let all_blank_text = blocks
+        .iter()
+        .all(|block| matches!(block, acp::ContentBlock::Text(text) if text.text.trim().is_empty()));
+    if all_blank_text {
+        anyhow::bail!("prompt is empty");
+    }
     Ok(blocks)
 }
 
@@ -247,3 +253,7 @@ pub(crate) fn apply_agent_flag(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod tests;

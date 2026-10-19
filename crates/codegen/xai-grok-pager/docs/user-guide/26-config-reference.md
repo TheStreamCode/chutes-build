@@ -98,8 +98,8 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | --- | --- | --- | --- | --- |
 | `cli.auto_update` | `boolean` | `pin` | `user` | Check for CLI updates on launch. Also CHUTES_BUILD_DISABLE_AUTOUPDATER to suppress. |
 | `cli.channel` | `stable / alpha` | `pin` | `user` | Release channel preference. |
-| `cli.grove` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `all` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Convenience that turns **both** `grok clone` and session / `-w` Grove on when the specific knobs are unset. Also `CHUTES_BUILD_GROVE`. `false` / `copy` / `off` means enable-all is off (fall through); it does not force both surfaces off. `[cli] grove_worktree` and `CHUTES_BUILD_WORKTREE_TYPE` still win for worktrees; `CHUTES_BUILD_CLONE` still wins for clone. Remote `grove_worktree = false` still kills worktrees only. |
-| `cli.grove_worktree` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Session / `-w` Grove vs copy. Default copy. Distinct from creation-mode `cli.worktree_type`. Also `CHUTES_BUILD_WORKTREE_TYPE`. Layer order: request → env → local → enable-all (`CHUTES_BUILD_GROVE` / `[cli] grove`) → remote-true; then kill last: remote `grove_worktree = false` → copy (`remote_kill`). Missing remote settings are not a kill: local/env/request/enable-all still apply. Does not enable `grok clone`. |
+| `cli.grove` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `all` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Convenience that turns session / `-w` Grove on when the specific knobs are unset (the upstream clone surface is not in this build). Also `CHUTES_BUILD_GROVE`. `false` / `copy` / `off` means enable-all is off (fall through). `[cli] grove_worktree` and `CHUTES_BUILD_WORKTREE_TYPE` still win for worktrees. Remote `grove_worktree = false` still kills worktrees only. |
+| `cli.grove_worktree` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Session / `-w` Grove vs copy. Default copy. Distinct from creation-mode `cli.worktree_type`. Also `CHUTES_BUILD_WORKTREE_TYPE`. Layer order: request → env → local → enable-all (`CHUTES_BUILD_GROVE` / `[cli] grove`) → remote-true; then kill last: remote `grove_worktree = false` → copy (`remote_kill`). Missing remote settings are not a kill: local/env/request/enable-all still apply. |
 | `cli.installer` | `string` | `—` | `user` | Which installer last set up this CLI, used to pick the update path. |
 | `cli.maximum_version` | `string` | `pin` | `user` | Highest CLI version that still runs without a hard block. Also CHUTES_BUILD_MAXIMUM_VERSION. |
 | `cli.minimum_version` | `string` | `pin` | `user` | Lowest CLI version that still runs without a hard block. Also CHUTES_BUILD_MINIMUM_VERSION. |
@@ -183,12 +183,12 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `endpoints.managed_config_url` | `string` | `yes` | `user` | Override managed config endpoint. Also CHUTES_BUILD_MANAGED_CONFIG_URL. |
 | `endpoints.models_base_url` | `string` | `pin` | `user` | Custom inference base URL. With `auth_provider_command` set, `{models_base_url}/models` decides which models are offered. Also CHUTES_BUILD_MODELS_BASE_URL. |
 | `endpoints.models_list_url` | `string` | `pin` | `user` | Override model-list URL. With `auth_provider_command` set, this list decides which models are offered. Also CHUTES_BUILD_MODELS_LIST_URL. Alias `models_endpoint`. |
-| `endpoints.trace_upload_bucket` | `string` | `yes` | `user` | Direct gs:// or s3:// bucket for traces; bypasses the proxy. Also CHUTES_BUILD_TRACE_UPLOAD_BUCKET. |
-| `endpoints.trace_upload_credentials` | `string` | `yes` | `user` | Inline GCS service-account JSON or AWS credentials for that bucket; wins over `trace_upload_credentials_file` and has no environment variable. |
-| `endpoints.trace_upload_credentials_file` | `string (path)` | `yes` | `user` | Path to a GCS service-account JSON or AWS credentials file for that bucket. Also CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE. |
-| `endpoints.trace_upload_endpoint_url` | `string` | `yes` | `user` | Custom S3-compatible endpoint for s3:// bucket uploads. Also CHUTES_BUILD_TRACE_UPLOAD_ENDPOINT_URL. |
-| `endpoints.trace_upload_region` | `string` | `yes` | `user` | AWS region for s3:// bucket uploads; default us-east-1. Also CHUTES_BUILD_TRACE_UPLOAD_REGION. |
-| `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces when no direct bucket is set. Also CHUTES_BUILD_TRACE_UPLOAD_URL. |
+| `endpoints.trace_upload_bucket` | `string` | `yes` | `user` | Direct gs:// or s3:// bucket for traces (inert: trace upload is off in this build). Also CHUTES_BUILD_TRACE_UPLOAD_BUCKET. |
+| `endpoints.trace_upload_credentials` | `string` | `yes` | `user` | Inline GCS service-account JSON or AWS credentials for that bucket (inert: trace upload is off in this build); wins over `trace_upload_credentials_file` and has no environment variable. |
+| `endpoints.trace_upload_credentials_file` | `string (path)` | `yes` | `user` | Path to a GCS service-account JSON or AWS credentials file for that bucket (inert: trace upload is off in this build). Also CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE. |
+| `endpoints.trace_upload_endpoint_url` | `string` | `yes` | `user` | Custom S3-compatible endpoint for s3:// bucket uploads (inert: trace upload is off in this build). Also CHUTES_BUILD_TRACE_UPLOAD_ENDPOINT_URL. |
+| `endpoints.trace_upload_region` | `string` | `yes` | `user` | AWS region for s3:// bucket uploads (inert: trace upload is off in this build); default us-east-1. Also CHUTES_BUILD_TRACE_UPLOAD_REGION. |
+| `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces when no direct bucket is set (inert: trace upload is off in this build). Also CHUTES_BUILD_TRACE_UPLOAD_URL. |
 | `endpoints.public_api_base_url` | `string` | `pin` | `user` | Base URL for API-key inference. Also CHUTES_BUILD_PUBLIC_API_BASE_URL (`xai_api_base_url` / CHUTES_BUILD_XAI_API_BASE_URL still work as deprecated aliases). |
 
 ### `features`
@@ -211,7 +211,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.feedback_trace_card` | `boolean` | `pin` | `user` | Show a trace-upload consent question after `/feedback`. Default false. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
 | `features.file_acceleration` | `boolean` | `pin` | `user` | Hand local sessions' file systems to a file accelerator when the build installs one. Default false. Also `CHUTES_BUILD_FILE_ACCELERATION`. |
 | `features.image_edit_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_edit. `/imagine` uses the native `generate_media` tool instead. |
-| `features.image_gen` | `boolean` | `pin` | `user` | Enable the legacy image_gen tool (xAI Imagine API; off by default — `/imagine` uses `generate_media`). Also `CHUTES_BUILD_IMAGE_GEN`. |
+| `features.image_gen` | `boolean` | `pin` | `user` | Enable the legacy image_gen tool (legacy Imagine API; off by default — `/imagine` uses `generate_media`). Also `CHUTES_BUILD_IMAGE_GEN`. |
 | `features.image_gen_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_gen. Empty defers to the remotely configured default. |
 | `features.lsp_tools` | `boolean` | `pin` | `user` | Enable or disable `lsp_tools`. Default false. Also `CHUTES_BUILD_LSP_TOOLS`. |
 | `features.managed_config` | `boolean` | `yes` | `user` | Fetch managed_config.toml and requirements.toml from the deployment. |
@@ -227,12 +227,12 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.subagent_model_inheritance` | `boolean` | `pin` | `user` | Hide the subagent `model` argument when every model you can pick is a first-party model, so subagents inherit the parent's model. Default false. Also `CHUTES_BUILD_SUBAGENT_MODEL_INHERITANCE`. Read when a session starts; changing it requires a restart. |
 | `features.subagent_worktree_snapshot` | `boolean` | `pin` | `user` | Enable or disable `subagent_worktree_snapshot`. Default false. Also `CHUTES_BUILD_SUBAGENT_WORKTREE_SNAPSHOT`. |
 | `features.support_permission` | `boolean` | `yes` | `user` | Allow the agent to ask permission for tool executions. |
-| `features.telemetry` | `boolean / session_metrics / off` | `pin` | `user` | Product telemetry mode. Enterprise default is off. |
+| `features.telemetry` | `boolean / session_metrics / off` | `pin` | `user` | Product telemetry mode. Inert in this build (telemetry withheld). |
 | `features.terminal_theme` | `boolean` | `pin` | `user` | Reveal the terminal-native `terminal` color theme during its rollout. Default false. Also `CHUTES_BUILD_TERMINAL_THEME`. |
 | `features.title_refresh` | `boolean` | `pin` | `user` | Early-session auto-title refresh. Pin this in requirements to beat CHUTES_BUILD_TITLE_REFRESH. |
 | `features.turn_summary` | `boolean` | `pin` | `user` | Enable or disable `turn_summary`. Default true. Also `CHUTES_BUILD_TURN_SUMMARY`. |
 | `features.two_pass_compaction` | `boolean` | `pin` | `user` | Enable or disable `two_pass_compaction`. Default true. Also `CHUTES_BUILD_TWO_PASS_COMPACTION`. |
-| `features.video_gen` | `boolean` | `pin` | `user` | Enable the legacy video tools (xAI Imagine API; off by default — `/imagine-video` uses `generate_media`). Also `CHUTES_BUILD_VIDEO_GEN`. |
+| `features.video_gen` | `boolean` | `pin` | `user` | Enable the legacy video tools (legacy Imagine API; off by default — `/imagine-video` uses `generate_media`). Also `CHUTES_BUILD_VIDEO_GEN`. |
 | `features.voice_mode` | `boolean` | `pin` | `user` | Enable or disable `voice_mode`. Default true. Also `CHUTES_BUILD_VOICE_MODE`. |
 | `features.web_fetch` | `boolean` | `pin` | `user` | Enable or disable `web_fetch`. Default false. Also `CHUTES_BUILD_WEB_FETCH`. |
 | `features.write_file` | `boolean` | `pin` | `user` | Enable or disable `write_file`. Default true. Also `CHUTES_BUILD_WRITE_FILE`. |
@@ -267,22 +267,22 @@ this build authenticates by Chutes API key only.
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
 | `grok_com_config` | `table` | `yes` | `user` | Legacy alias of `[auth]`. |
-| `grok_com_config.auth_provider_command` | `string` | `yes` | `user` | External auth binary; stdout is the token. With `endpoints.models_base_url` or `models_list_url` set, that endpoint's list decides which models are offered. Also CHUTES_BUILD_AUTH_PROVIDER_COMMAND. |
-| `grok_com_config.auth_provider_label` | `string` | `yes` | `user` | Login button label for an external auth provider. Also CHUTES_BUILD_AUTH_PROVIDER_LABEL. |
-| `grok_com_config.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token. Also CHUTES_BUILD_AUTH_TOKEN_TTL. |
-| `grok_com_config.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth so only the deployment IdP can log in. Also CHUTES_BUILD_DISABLE_API_KEY_AUTH. |
-| `grok_com_config.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID, or any of an array; empty array fails closed. Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID. |
+| `grok_com_config.auth_provider_command` | `string` | `yes` | `user` | External auth binary (dormant: parsed but never honored; API key only). Also CHUTES_BUILD_AUTH_PROVIDER_COMMAND. |
+| `grok_com_config.auth_provider_label` | `string` | `yes` | `user` | Login button label for an external auth provider (dormant). Also CHUTES_BUILD_AUTH_PROVIDER_LABEL. |
+| `grok_com_config.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token (dormant). Also CHUTES_BUILD_AUTH_TOKEN_TTL. |
+| `grok_com_config.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth (dormant: parsed but never honored; API key only). Also CHUTES_BUILD_DISABLE_API_KEY_AUTH. |
+| `grok_com_config.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID (dormant: parsed but never honored; API key only). Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID. |
 | `grok_com_config.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for remote control. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_ORIGIN. |
 | `grok_com_config.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_URL. |
 | `grok_com_config.oauth2` | `table` | `yes` | `user` | OAuth2 provider (dormant: parsed but never honored; API key only). |
 | `grok_com_config.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id (dormant). Also CHUTES_BUILD_OAUTH2_CLIENT_ID. |
 | `grok_com_config.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL (dormant). Also CHUTES_BUILD_OAUTH2_ISSUER. |
-| `grok_com_config.oauth2.principal_id` | `string` | `yes` | `user` | Required principal id when `principal_type` is set. Also CHUTES_BUILD_OAUTH2_PRINCIPAL_ID. |
-| `grok_com_config.oauth2.principal_type` | `string` | `yes` | `user` | Token principal type, such as Team. Also CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE. |
-| `grok_com_config.oauth2.referrer` | `string` | `yes` | `user` | Referrer for OAuth usage attribution. Also CHUTES_BUILD_OAUTH2_REFERRER. |
+| `grok_com_config.oauth2.principal_id` | `string` | `yes` | `user` | Required principal id when `principal_type` is set (dormant). Also CHUTES_BUILD_OAUTH2_PRINCIPAL_ID. |
+| `grok_com_config.oauth2.principal_type` | `string` | `yes` | `user` | Token principal type, such as Team (dormant). Also CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE. |
+| `grok_com_config.oauth2.referrer` | `string` | `yes` | `user` | Referrer for OAuth usage attribution (dormant). Also CHUTES_BUILD_OAUTH2_REFERRER. |
 | `grok_com_config.oauth2.scopes` | `string[]` | `yes` | `user` | OAuth2 scopes (dormant). Also CHUTES_BUILD_OAUTH2_SCOPES. |
 | `grok_com_config.oidc` | `table` | `yes` | `user` | Customer OIDC identity-provider settings (dormant: parsed but never honored; API key only). |
-| `grok_com_config.oidc.audience` | `string` | `yes` | `user` | Optional OIDC audience. Also CHUTES_BUILD_OIDC_AUDIENCE. |
+| `grok_com_config.oidc.audience` | `string` | `yes` | `user` | Optional OIDC audience (dormant). Also CHUTES_BUILD_OIDC_AUDIENCE. |
 | `grok_com_config.oidc.client_id` | `string` | `yes` | `user` | OIDC client id (dormant). Also CHUTES_BUILD_OIDC_CLIENT_ID. |
 | `grok_com_config.oidc.issuer` | `string` | `yes` | `user` | OIDC issuer URL (dormant). Also CHUTES_BUILD_OIDC_ISSUER. |
 | `grok_com_config.oidc.scopes` | `string[]` | `yes` | `user` | OIDC scopes (dormant). Also CHUTES_BUILD_OIDC_SCOPES. |
@@ -551,6 +551,10 @@ this build authenticates by Chutes API key only.
 | `subagents.toggle.<name>` | `boolean` | `yes` | `user` | Enable or disable an individual subagent type. Omitted agents default on. |
 
 ### `telemetry`
+
+Every key in this table is inert in this build: product telemetry is
+withheld and the external OTEL stream is deadened (see
+[Monitoring Usage](24-monitoring-usage.md)). Parsed for compatibility only.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |

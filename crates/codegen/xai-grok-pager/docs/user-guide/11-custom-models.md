@@ -451,7 +451,7 @@ name = "My Model (Proxy)"
 context_window = 128000
 
 [features]
-telemetry = false
+telemetry = false                      # inert in this build (see Configuration → Telemetry)
 ```
 
 ---

@@ -5298,6 +5298,10 @@ fn suggestions_landing_after_bash_exit_are_dropped() {
 /// The always-on pipeline end to end, with the `CHUTES_BUILD_SUGGESTIONS` env flag OFF.
 /// Tab fires a deterministic fetch, and the response that lands behaves like Tab in a terminal.
 /// A single file candidate splices in place immediately and the drill-down refetch rides out with the dispatch.
+// Presses Tab, which routes to shell completion only off Windows —
+// see the `cfg!(not(windows))` arm in `prompt.rs` and its reason: the
+// tokenizer is POSIX-only, so Windows keeps focus-cycling Tab.
+#[cfg(not(windows))]
 #[test]
 fn tab_fetch_landing_insta_accepts_single_candidate_always_on() {
     use crate::views::suggestion_controller::{
@@ -5376,6 +5380,10 @@ fn tab_fetch_landing_insta_accepts_single_candidate_always_on() {
 
 /// Same pipeline with an ambiguous candidate set: the response that lands opens the dropdown (and installs no ghost); the user picks with arrows and Tab.
 /// History rows model an OLD shell (new shells honor `tokenOnly` and send none on Tab fetches); a whole-line set must still just open the dropdown.
+// Presses Tab, which routes to shell completion only off Windows —
+// see the `cfg!(not(windows))` arm in `prompt.rs` and its reason: the
+// tokenizer is POSIX-only, so Windows keeps focus-cycling Tab.
+#[cfg(not(windows))]
 #[test]
 fn tab_fetch_landing_opens_dropdown_for_ambiguous_set_always_on() {
     use crate::views::suggestion_controller::{

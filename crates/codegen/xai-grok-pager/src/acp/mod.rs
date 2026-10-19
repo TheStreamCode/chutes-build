@@ -17,9 +17,15 @@ pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_b
 /// TUI dispatch, headless dispatch, and the session-load ACP barrier all share this list.
 /// A new method thus cannot be handled in one path and classified `Unrelated` in another.
 pub(crate) fn is_session_update_ext_method(method: &str) -> bool {
+    // SPEC 1.5: `x.ai/*` is retained wire compat and must be matched. Shell
+    // emitters still send it (subagent spawn, background tasks); without this
+    // arm the pager silently drops their session notifications.
     matches!(
         method,
-        "chutes.ai/session_notification" | "chutes.ai/session/update"
+        "chutes.ai/session_notification"
+            | "chutes.ai/session/update"
+            | "x.ai/session_notification"
+            | "x.ai/session/update"
     )
 }
 use crate::client_identity::{HEADLESS_CLIENT_TYPE, PAGER_CLIENT_TYPE, PAGER_CLIENT_VERSION};
@@ -764,6 +770,8 @@ mod tests {
             "chutes.ai/session_notification"
         ));
         assert!(is_session_update_ext_method("chutes.ai/session/update"));
+        assert!(is_session_update_ext_method("x.ai/session_notification"));
+        assert!(is_session_update_ext_method("x.ai/session/update"));
         assert!(!is_session_update_ext_method("chutes.ai/task_completed"));
         assert!(!is_session_update_ext_method("session/update"));
     }

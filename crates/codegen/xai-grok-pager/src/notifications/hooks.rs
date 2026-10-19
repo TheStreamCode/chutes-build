@@ -129,6 +129,10 @@ mod tests {
         }
     }
 
+    // Needs a POSIX shell: hooks run `sh -c`, which stock Windows lacks
+    // (graceful no-op, pinned by the graceful tests below), and a sh that
+    // exists would still mangle the backslash temp paths. Not the surface.
+    #[cfg(unix)]
     #[test]
     fn sets_environment_variables() {
         let dir = tempfile::tempdir().unwrap();
@@ -162,6 +166,10 @@ mod tests {
         );
     }
 
+    // Needs a POSIX shell: hooks run `sh -c`, which stock Windows lacks
+    // (graceful no-op, pinned by the graceful tests below), and a sh that
+    // exists would still mangle the backslash temp paths. Not the surface.
+    #[cfg(unix)]
     #[test]
     fn omits_session_id_when_none() {
         let dir = tempfile::tempdir().unwrap();
@@ -183,6 +191,10 @@ mod tests {
         );
     }
 
+    // Needs a POSIX shell: hooks run `sh -c`, which stock Windows lacks
+    // (graceful no-op, pinned by the graceful tests below), and a sh that
+    // exists would still mangle the backslash temp paths. Not the surface.
+    #[cfg(unix)]
     #[test]
     fn kills_descendants_on_timeout() {
         let dir = tempfile::tempdir().unwrap();
@@ -224,6 +236,10 @@ mod tests {
         );
     }
 
+    // Needs a POSIX shell: hooks run `sh -c`, which stock Windows lacks
+    // (graceful no-op, pinned by the graceful tests below), and a sh that
+    // exists would still mangle the backslash temp paths. Not the surface.
+    #[cfg(unix)]
     #[test]
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -253,6 +269,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
     }
 
+    // Needs a POSIX shell: hooks run `sh -c`, which stock Windows lacks
+    // (graceful no-op, pinned by the graceful tests below), and a sh that
+    // exists would still mangle the backslash temp paths. Not the surface.
+    #[cfg(unix)]
     #[test]
     fn timeout_clamped_to_minimum_one_second() {
         let dir = tempfile::tempdir().unwrap();
@@ -279,6 +299,10 @@ mod tests {
         );
     }
 
+    // Needs a POSIX shell: hooks run `sh -c`, which stock Windows lacks
+    // (graceful no-op, pinned by the graceful tests below), and a sh that
+    // exists would still mangle the backslash temp paths. Not the surface.
+    #[cfg(unix)]
     #[test]
     fn run_hook_passes_correct_env_via_thread() {
         let dir = tempfile::tempdir().unwrap();

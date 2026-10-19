@@ -442,7 +442,11 @@ fn foreign_resume_hint(
 
 #[test]
 fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
+    // Both apps canonicalize their cwd below: point them at a directory that
+    // exists on every platform (`/tmp` does not canonicalize on Windows).
+    let foreign_cwd = tempfile::tempdir().unwrap();
     let mut launch = test_app();
+    launch.cwd = foreign_cwd.path().to_path_buf();
     launch.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
         cursor: true,
         ..Default::default()
@@ -491,6 +495,7 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
     );
 
     let mut stale = test_app();
+    stale.cwd = foreign_cwd.path().to_path_buf();
     stale.foreign_session_compat = launch.foreign_session_compat;
     let Effect::CanonicalizeForeignResumeCwd {
         requested_cwd,
@@ -527,6 +532,10 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
 #[test]
 fn foreign_resume_result_rejects_startup_conflict_before_completion() {
     let mut app = test_app();
+    // The flow canonicalizes `app.cwd`: point it at a directory that exists
+    // on every platform (`/tmp` does not canonicalize on Windows).
+    let foreign_cwd = tempfile::tempdir().unwrap();
+    app.cwd = foreign_cwd.path().to_path_buf();
     app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
         cursor: true,
         ..Default::default()

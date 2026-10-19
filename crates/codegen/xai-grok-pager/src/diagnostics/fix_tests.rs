@@ -99,6 +99,7 @@ fn canonical_and_short_ids_resolve_to_canonical_id() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn applicable_fix_listing_uses_report_metadata_and_planner_availability() {
     let temp = tempfile::tempdir().unwrap();
@@ -143,7 +144,7 @@ fn applicable_fix_listing_uses_report_metadata_and_planner_availability() {
     );
 }
 
-fn tmux_terminal(byobu: bool) -> TerminalContext {
+pub(super) fn tmux_terminal(byobu: bool) -> TerminalContext {
     TerminalContext {
         multiplexer: MultiplexerKind::Tmux,
         byobu: byobu.then_some(crate::terminal::ByobuBackend::Tmux),
@@ -153,7 +154,7 @@ fn tmux_terminal(byobu: bool) -> TerminalContext {
     }
 }
 
-fn tmux_report(id: DiagnosticId, evidence: TmuxEvidence) -> DiagnosticReport {
+pub(super) fn tmux_report(id: DiagnosticId, evidence: TmuxEvidence) -> DiagnosticReport {
     let mut report = report();
     report.findings.clear();
     report.facts.multiplexer = MultiplexerKind::Tmux;
@@ -200,7 +201,7 @@ fn tmux_report(id: DiagnosticId, evidence: TmuxEvidence) -> DiagnosticReport {
     report
 }
 
-fn tmux_request(home: &Path, id: DiagnosticId) -> FixRequest {
+pub(super) fn tmux_request(home: &Path, id: DiagnosticId) -> FixRequest {
     FixRequest::new_for_test(id, home, None, None, None).unwrap()
 }
 
@@ -716,6 +717,7 @@ fn tmux_stale_plan_and_idempotence_reuse_managed_writer_safety() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn bash_zsh_and_fish_plans_use_exact_paths_and_aliases() {
     let temp = tempfile::tempdir().unwrap();
@@ -752,6 +754,7 @@ fn bash_zsh_and_fish_plans_use_exact_paths_and_aliases() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn remote_vscode_and_unsupported_shell_are_refused() {
     let temp = tempfile::tempdir().unwrap();
@@ -786,6 +789,7 @@ fn windows_is_manual_only_before_shell_selection() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn existing_alias_and_function_conflicts_are_preserved() {
     let cases = [
@@ -875,6 +879,7 @@ fn posix_function_scanner_requires_exact_ssh_name_boundary() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn conflict_scan_uses_the_exact_validated_source_snapshot() {
     let temp = tempfile::tempdir().unwrap();
@@ -894,6 +899,7 @@ fn conflict_scan_uses_the_exact_validated_source_snapshot() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn non_utf8_source_fails_closed_before_conflict_policy() {
     let temp = tempfile::tempdir().unwrap();
@@ -943,6 +949,7 @@ fn validator_prefers_custom_executable_shell_and_uses_path_for_basename_only() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn comments_and_managed_alias_do_not_create_false_conflicts() {
     let temp = tempfile::tempdir().unwrap();
@@ -979,6 +986,7 @@ fn managed_alias_with_later_unmanaged_conflict_is_not_configured() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
     let temp = tempfile::tempdir().unwrap();
@@ -1003,6 +1011,7 @@ fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
     assert!(outcome.managed_alias_is_configured());
 }
 
+#[cfg(unix)]
 #[test]
 fn ssh_wrap_outcome_verifies_with_planned_shell_not_process_shell() {
     // Post-apply verification must use the shell stored on the outcome
@@ -1033,6 +1042,7 @@ fn ssh_wrap_outcome_verifies_with_planned_shell_not_process_shell() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn configured_report_reaches_pass_state_only_for_exact_managed_alias() {
     let mut diagnostic = report();

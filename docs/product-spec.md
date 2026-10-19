@@ -106,7 +106,11 @@ as env at startup; env always wins),
 `Effect::ValidateApiKey`, `TaskResult::ApiKeyAccepted/Rejected`,
 `Effect::AuthenticateWithApiKey` pushing the key into the agent over
 `chutes.ai/setApiKey` + `authenticate`, memory-only agent-side when the
-login store is withheld).
+login store is withheld),
+`xai-grok-shell/src/session/acp_session_impl/tool_dispatch.rs` (dispatch
+publishes the resolved credentials on the call context) +
+`xai-grok-tools/src/implementations/chutes/mod.rs`
+(`resolve_credentials`, context first, env fallback).
 
 ## 3. Privacy and network
 

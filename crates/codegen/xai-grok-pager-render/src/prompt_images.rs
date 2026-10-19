@@ -893,11 +893,48 @@ fn token_to_path(token: &str) -> Option<PathBuf> {
         if url.scheme() != "file" {
             return None;
         }
-        return url.to_file_path().ok();
+        if let Ok(path) = url.to_file_path() {
+            return Some(path);
+        }
+        // `to_file_path` rejects drive-less local URLs on Windows
+        // (`file:///tmp/x` has no drive letter), but `file://` is still an
+        // unambiguous drop URI there: fall back to the decoded path text so
+        // the paste inserts instead of vanishing. Remote hosts stay dropped,
+        // since the path alone would name the wrong file.
+        if cfg!(windows) && matches!(url.host_str(), None | Some("localhost")) {
+            return percent_decode(url.path()).map(PathBuf::from);
+        }
+        return None;
     }
 
     let unescaped = shell_unescape(unquoted);
     Some(PathBuf::from(unescaped.into_owned()))
+}
+
+/// Minimal `%XX` decoder for the drive-less `file://` fallback above.
+/// `None` on malformed sequences or non-UTF8 bytes, in which case the paste
+/// falls through to plain text via the caller. `+` is left alone: it is a
+/// legal filename character, not an encoded space.
+fn percent_decode(encoded: &str) -> Option<String> {
+    fn hex_val(byte: u8) -> Option<u8> {
+        (byte as char).to_digit(16).map(|digit| digit as u8)
+    }
+    let mut out = Vec::with_capacity(encoded.len());
+    let mut bytes = encoded.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let (Some(hi), Some(lo)) = (bytes.next(), bytes.next()) else {
+                return None;
+            };
+            let (Some(hi), Some(lo)) = (hex_val(hi), hex_val(lo)) else {
+                return None;
+            };
+            out.push(hi * 16 + lo);
+        } else {
+            out.push(byte);
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 /// Validate that `path` points to a readable image file and load it as a [`PastedImage`].
@@ -2038,8 +2075,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn token_to_path_maps_driveless_file_url_to_path_text() {
+        // `file:///unix/abs` has no drive letter: Unix resolves it via
+        // `to_file_path`, Windows via the decoded-text fallback. Either way
+        // the paste resolves instead of vanishing (missing-file URLs are an
+        // explicit NonImage case).
+        let path = token_to_path("file:///definitely/missing/xai-paste.png").unwrap();
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/definitely/missing/xai-paste.png")
+        );
+    }
+
+    #[test]
+    fn token_to_path_decodes_escapes_in_driveless_file_url() {
+        let path = token_to_path("file:///tmp/my%20file.txt").unwrap();
+        assert_eq!(path, std::path::PathBuf::from("/tmp/my file.txt"));
+        // `+` is a filename character, not an encoded space.
+        let path = token_to_path("file:///tmp/a+b.txt").unwrap();
+        assert_eq!(path, std::path::PathBuf::from("/tmp/a+b.txt"));
+        // (Remote hosts and malformed `%` sequences keep their own tests:
+        // a host resolves to UNC on Windows and nowhere on Unix, and the
+        // tolerated-outcome test owns the `%ZZ` variance.)
+    }
+
     // ----- try_read_image_from_path ----------------------------------------
 
+    // Backslash escapes are Unix-terminal paste behavior; on Windows `\` is a
+    // separator and Windows paths pass through `shell_unescape` unchanged.
+    #[cfg(unix)]
     #[test]
     fn try_read_image_with_escaped_parens() {
         let dir = tempfile::tempdir().unwrap();
@@ -2062,6 +2127,8 @@ mod tests {
         );
     }
 
+    // See `try_read_image_with_escaped_parens`: backslash-escape paste is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn try_read_image_with_escaped_spaces() {
         let dir = tempfile::tempdir().unwrap();
@@ -2410,6 +2477,8 @@ mod tests {
         );
     }
 
+    // See `try_read_image_with_escaped_parens`: backslash-escape paste is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn quoted_path_with_internal_backslash_escape() {
         let dir = tempfile::tempdir().unwrap();
@@ -2431,7 +2500,8 @@ mod tests {
         write_png(&p, 2, 2);
 
         // `file://localhost/...` is accepted by the `url` crate and yields the same local path as `file:///...`. Pins behavior.
-        let pasted = format!("file://localhost{}", p.display());
+        let normalized = p.display().to_string().replace('\\', "/");
+        let pasted = format!("file://localhost/{}", normalized.trim_start_matches('/'));
         assert!(try_read_image_from_path(&pasted).is_some());
     }
 
@@ -2721,6 +2791,8 @@ mod tests {
         assert_eq!(*nth(&non_images, 0), canon(&txt));
     }
 
+    // `?` is not a legal Windows filename character; the fixture cannot exist there.
+    #[cfg(unix)]
     #[test]
     fn dropped_path_percent_encoded_question_round_trips() {
         // `%3F` decodes to `?`. The URL parser must not treat the suffix as a query string.

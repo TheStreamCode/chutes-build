@@ -108,8 +108,8 @@ cargo build -p chutes-build --release  # release binary: target/release/chutes-b
 cargo check --workspace                # fast validation
 ```
 
-The binary artifact is named `xai-grok-pager`; official installs ship it as
-`chutes-build`. The only credential is a Chutes API key, created at
+The binary artifact is named `chutes-build`. The only credential is a
+Chutes API key, created at
 [chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys)
 and provided via `chutes-build login`, the welcome screen, or
 `CHUTES_API_KEY`. There is no browser login; see the
@@ -156,7 +156,8 @@ cargo clippy -p <crate>       # lint config: clippy.toml at the repo root
 ### Missing `CHUTES_API_KEY`
 
 On first launch `chutes-build` asks for a Chutes API key (created at
-[chutes.ai/app/api](https://chutes.ai/app/api)); it is also readable from the
+[chutes.ai/app/settings/api-keys](https://chutes.ai/app/settings/api-keys));
+it is also readable from the
 `CHUTES_API_KEY` environment variable. If requests fail with authentication
 errors, check that the variable is exported in the launching shell — Chutes
 Build reads the process environment and does not load `.env` files

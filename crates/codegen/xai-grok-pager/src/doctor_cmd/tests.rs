@@ -245,7 +245,7 @@ fn fake_standalone_facts_compose_through_shared_view() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with(snapshot);
+    let report = collect_report_without_voice_probe(snapshot);
 
     assert_eq!(report.issue_count(), 1);
     assert!(
@@ -284,7 +284,7 @@ fn standalone_wayland_missing_is_issue_but_no_seats_or_errors_are_not() {
             false,
             RuntimeEvidence::Available(ColorLevel::TrueColor),
         );
-        let report = collect_report_with(snapshot);
+        let report = collect_report_without_voice_probe(snapshot);
         let has_issue = report
             .findings
             .iter()
@@ -398,7 +398,7 @@ fn standalone_runtime_and_tmux_are_unavailable_without_false_wezterm_finding() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with(snapshot);
+    let report = collect_report_without_voice_probe(snapshot);
 
     assert!(report.findings.iter().all(|finding| {
         finding.id != DiagnosticId::new("terminal", "wezterm-kitty")
@@ -527,6 +527,7 @@ fn human_mixed_fixture_is_exact() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn fix_preview_contains_exact_change_and_caveats() {
     let temp = tempfile::tempdir().unwrap();
@@ -556,6 +557,7 @@ fn fix_preview_contains_exact_change_and_caveats() {
     assert!(preview.contains("~^Z"));
 }
 
+#[cfg(unix)]
 #[test]
 fn decline_is_success_and_does_not_write() {
     let temp = tempfile::tempdir().unwrap();
@@ -588,6 +590,7 @@ fn decline_is_success_and_does_not_write() {
     assert!(!temp.path().join(".bashrc").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn non_tty_without_yes_fails_safely_before_write() {
     let temp = tempfile::tempdir().unwrap();

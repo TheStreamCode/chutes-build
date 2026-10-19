@@ -1657,7 +1657,10 @@ fn markdown_wrapped_project_media_path_fully_linkified() {
     let viewport = Rect::new(0, 0, 40, 20);
     let result = render_with_scratch(&entries, viewport, 0, None);
 
-    let expected_url = url::Url::from_file_path(path).unwrap();
+    // `Url::from_file_path` rejects Unix-absolute paths on Windows, so pin the URL
+    // literally: `%` re-encodes to `%25`, everything else passes through.
+    let expected_url = "file:///Users/alice/.chutes-build/projects/%252FUsers%252Falice%252Fcode%252Fxai/\
+         019e0000-0000-7000-8000-000000000001/images/1.jpg";
     let path_links: Vec<_> = result
         .link_overlay
         .links()
@@ -1665,7 +1668,7 @@ fn markdown_wrapped_project_media_path_fully_linkified() {
         .filter(|l| {
             resolve_link_target(&l.target)
                 .and_then(|resolved| resolved.osc8_url)
-                .is_some_and(|url| url.as_ref() == expected_url.as_str())
+                .is_some_and(|url| url.as_ref() == expected_url)
         })
         .collect();
     assert!(

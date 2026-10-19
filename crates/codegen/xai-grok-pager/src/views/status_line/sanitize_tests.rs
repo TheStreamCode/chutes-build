@@ -37,7 +37,7 @@ fn scanner_strips_escapes_and_records_link_columns() {
             "a bel-terminated link after plain text",
             "[Chutes Build] \x1b]8;;https://example.com/repo\x07repo\x1b]8;;\x07",
             "[Chutes Build] repo",
-            &[(7, 11, "https://example.com/repo")],
+            &[(15, 19, "https://example.com/repo")],
         ),
         (
             "an st-terminated link whose colour paints no columns",

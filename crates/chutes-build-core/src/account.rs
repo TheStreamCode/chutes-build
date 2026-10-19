@@ -34,9 +34,12 @@ impl ChutesAccountClient {
         Self::from_credentials(ChutesCredentials::from_key(key)?)
     }
 
+    /// Client for explicitly resolved credentials: tool dispatch publishes
+    /// the agent's runtime key on the call context, which plain `from_env`
+    /// cannot see.
     // WHY-ALLOW: same client as `from_env`; see the note there.
     #[allow(clippy::disallowed_methods)]
-    fn from_credentials(credentials: ChutesCredentials) -> Result<Self, AccountError> {
+    pub fn from_credentials(credentials: ChutesCredentials) -> Result<Self, AccountError> {
         let endpoints = ChutesEndpoints::default();
         endpoints.validate()?;
         Ok(Self {
@@ -263,5 +266,12 @@ mod tests {
         assert_eq!(quota_chute_ids(&quotas), vec!["*", "my chute"]);
         assert_eq!(encode_path_segment("*"), "%2A");
         assert_eq!(encode_path_segment("my chute"), "my%20chute");
+    }
+
+    #[test]
+    fn from_credentials_builds_without_env() {
+        let credentials =
+            ChutesCredentials::from_key("cpk-test-key").expect("test key builds credentials");
+        assert!(ChutesAccountClient::from_credentials(credentials).is_ok());
     }
 }

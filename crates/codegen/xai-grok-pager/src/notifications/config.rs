@@ -169,8 +169,8 @@ session_recap_threshold_secs = 30
 # Set the terminal/tab title to reflect agent state.
 enabled = true
 # Items shown in the title. Options: action-required, spinner, activity,
-# session-name, cwd, model, turn-timer, grok
-items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"grok\"]
+# session-name, cwd, model, turn-timer, app-name
+items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"app-name\"]
 
 # [[ui.notifications.hooks]]
 # command = \"terminal-notifier -title 'Chutes Build' -message '$CHUTES_BUILD_MESSAGE'\"

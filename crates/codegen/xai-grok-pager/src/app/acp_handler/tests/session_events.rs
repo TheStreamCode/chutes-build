@@ -1583,7 +1583,7 @@
             update: XaiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ "x.ai/titleIsManual": false })),
+            meta: Some(xai_grok_shell::extensions::notification::title_is_unpinned_meta()),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
         let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));
@@ -1610,7 +1610,7 @@
             update: XaiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ "x.ai/titleIsManual": false })),
+            meta: Some(xai_grok_shell::extensions::notification::title_is_unpinned_meta()),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
         let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));

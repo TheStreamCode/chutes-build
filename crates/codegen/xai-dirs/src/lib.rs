@@ -46,7 +46,7 @@ fn grok_home_in(home: &Path) -> PathBuf {
         .join(".chutes-build")
 }
 
-/// `$CHUTES_BUILD_HOME` verbatim when non-empty, else `<home>/.grok`.
+/// `$CHUTES_BUILD_HOME` verbatim when non-empty, else `<home>/.chutes-build`.
 /// Used as-is (not canonicalized) so literal prefix checks and symlink guards still see original components.
 fn resolve_grok_home_from(
     grok_home_env: Option<&OsStr>,
@@ -71,14 +71,35 @@ pub fn resolve_grok_home_with_source() -> Option<(PathBuf, GrokHomeSource)> {
     )
 }
 
-/// The default `<home>/.grok`, used when `$CHUTES_BUILD_HOME` is unset.
+/// The default `<home>/.chutes-build`, used when `$CHUTES_BUILD_HOME` is unset.
 pub fn default_grok_home() -> PathBuf {
     grok_home_in(&home_dir().unwrap_or_else(|| PathBuf::from(".")))
+}
+
+/// Test-only home override, checked before the process cache. Always compiled:
+/// integration tests in dependent crates need it. Callers must hold the
+/// `CHUTES_BUILD_HOME` serial gate: parallel tests observe the override too.
+static TEST_HOME_OVERRIDE: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Test-only: redirect [`grok_home`] at `home` (`None` restores the cached
+/// home). The [`OnceLock`] cache intentionally ignores later environment
+/// changes, so per-test tempdirs need this instead of only setting the env.
+pub fn set_grok_home_for_tests(home: Option<PathBuf>) {
+    *TEST_HOME_OVERRIDE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = home;
 }
 
 /// The Chutes Build home, created if missing and cached for the process; falls back to
 /// [`default_grok_home`] when neither `$CHUTES_BUILD_HOME` nor a home resolves.
 pub fn grok_home() -> PathBuf {
+    if let Some(home) = TEST_HOME_OVERRIDE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    {
+        return home;
+    }
     static CHUTES_BUILD_HOME: OnceLock<PathBuf> = OnceLock::new();
     CHUTES_BUILD_HOME
         .get_or_init(|| {

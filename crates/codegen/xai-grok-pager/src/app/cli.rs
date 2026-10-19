@@ -158,7 +158,7 @@ pub struct WrapArgs {
     )]
     pub command: Vec<String>,
 }
-/// Targets a running leader process by PID (used by `chutes-build leader` / `grok workspace`).
+/// Targets a running leader process by PID (used by `chutes-build leader` / `chutes-build workspace`).
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct LeaderTargetArgs {
     /// Leader process ID from `chutes-build leader list`.

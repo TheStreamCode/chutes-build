@@ -184,7 +184,9 @@ impl xai_tool_runtime::Tool for ExtractDocumentTool {
             )));
         }
 
-        let client = ChutesMediaClient::from_env()
+        let credentials = super::resolve_credentials(&ctx)
+            .map_err(|error| execution_error("extract_document", error))?;
+        let client = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("extract_document", error))?;
         let detail = client.describe(slug).await.map_err(|error| {
             execution_error(

@@ -902,7 +902,7 @@ pub struct RemoteSettings {
     /// See `Config::resolve_image_edit`.
     #[serde(default)]
     pub imagine_tools_disabled: Option<Vec<String>>,
-    /// Remote settings gate for the `grok workspace` CLI command (Computer Hub workspace exposure).
+    /// Remote settings gate for the `chutes-build workspace` CLI command (Computer Hub workspace exposure).
     /// It comes from `grok_build_settings.workspace_command_enabled`.
     /// `Some(true)` enables it; `None` or `Some(false)` (the default) keep it off.
     #[serde(default)]

@@ -255,9 +255,67 @@ pub fn path_to_file_target(path: &str) -> Option<LinkTarget> {
 }
 
 fn file_path_to_url(path: &Path) -> Option<Arc<str>> {
-    url::Url::from_file_path(path)
-        .ok()
-        .map(|u| Arc::from(u.as_str()))
+    if let Ok(url) = url::Url::from_file_path(path) {
+        return Some(Arc::from(url.as_str()));
+    }
+    unix_style_file_url(path)
+}
+
+/// `file:` URL for `/`-rooted spellings on Windows (model-provided paths,
+/// tests): not absolute by Windows rules, so `Url::from_file_path` refuses
+/// them. Anything containing `\` is a native drive-relative path and stays
+/// unresolvable rather than guessing a drive.
+#[cfg(windows)]
+fn unix_style_file_url(path: &Path) -> Option<Arc<str>> {
+    use std::path::Component;
+
+    let mut components = path.components();
+    if !matches!(components.next(), Some(Component::RootDir)) {
+        return None;
+    }
+    let mut url = String::from("file://");
+    for component in components {
+        match component {
+            Component::CurDir => {
+                url.push_str("/.");
+                continue;
+            }
+            Component::ParentDir => {
+                url.push_str("/..");
+                continue;
+            }
+            Component::Normal(part) => {
+                let bytes = part.as_encoded_bytes();
+                if bytes.contains(&b'\\') {
+                    return None;
+                }
+                url.push('/');
+                for byte in bytes {
+                    url.push_str(&percent_encode_byte(*byte));
+                }
+            }
+            Component::Prefix(_) | Component::RootDir => return None,
+        }
+    }
+    Some(Arc::from(url.as_str()))
+}
+
+#[cfg(not(windows))]
+fn unix_style_file_url(_path: &Path) -> Option<Arc<str>> {
+    None
+}
+
+fn percent_encode_byte(byte: u8) -> String {
+    // RFC 3986 path pchar (unreserved + sub-delims + `:` + `@`), mirroring
+    // `Url::from_file_path` so Unix-style paths encode identically on Windows.
+    // `?`, `#`, `%`, space and non-UTF8 bytes stay percent-encoded.
+    const PCHAR: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~!$&'()*+,;=:@";
+    if PCHAR.contains(&byte) {
+        (byte as char).to_string()
+    } else {
+        format!("%{byte:02X}")
+    }
 }
 
 #[cfg(test)]
@@ -287,7 +345,11 @@ fn file_link_presentation_for_resolved(
         return LinkPresentation::Opaque;
     };
     let painted_path = Path::new(painted);
+    // A leading `/` is a Unix-absolute path even where `Path::is_absolute`
+    // rejects it (Windows); without this the early return below misfires and
+    // scanned absolute paths degrade to `Opaque`.
     let is_absolute = painted_path.is_absolute()
+        || painted.starts_with('/')
         || matches!(
             painted_path.components().next(),
             Some(std::path::Component::Prefix(_))
@@ -1301,13 +1363,14 @@ mod tests {
 
     #[test]
     fn scan_content_x_offset_applied() {
-        let line = make_line("https://chutes.ai");
+        let url = "https://chutes.ai";
+        let line = make_line(url);
         let mut overlay = LinkOverlay::new();
         scan_unjoined(std::iter::once((0, &line)), 10, &[], &mut overlay);
 
         assert_eq!(overlay.links().len(), 1);
         assert_eq!(nth_link(&overlay, 0).col_start, 10);
-        assert_eq!(nth_link(&overlay, 0).col_end, 10 + 12);
+        assert_eq!(nth_link(&overlay, 0).col_end, 10 + url.len() as u16);
     }
 
     // ── File path detection ──

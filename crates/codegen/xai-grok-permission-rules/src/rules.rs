@@ -241,6 +241,28 @@ pub fn parse_permission_rule(
     }
 }
 
+/// Fail-closed fallback for a deny/ask entry [`parse_permission_rule`]
+/// rejected: the tool prefix (text before the first unescaped `(`) still
+/// identifies the scope to restrict when the pattern does not parse, so
+/// keep a tool-wide rule with the same action instead of silently granting
+/// what the entry names. Returns `None` for allow entries (dropping grants
+/// nothing, already the closed side) and for entries without an
+/// identifiable tool (nothing runnable to scope to — still dropped with a
+/// warning by the caller).
+pub(crate) fn fail_closed_rule(entry: &str, action: RuleAction) -> Option<PermissionRule> {
+    if !matches!(action, RuleAction::Deny | RuleAction::Ask) {
+        return None;
+    }
+    let open = find_first_unescaped(entry.trim(), b'(')?;
+    let tool = tool_name_to_filter(entry.get(..open)?.trim())?;
+    Some(PermissionRule {
+        action,
+        tool,
+        pattern: None,
+        pattern_mode: PatternMode::Glob,
+    })
+}
+
 pub(crate) fn tool_name_to_filter(name: &str) -> Option<ToolFilter> {
     match name {
         "Bash" => Some(ToolFilter::Bash),

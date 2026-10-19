@@ -659,8 +659,14 @@
             .get_mut(&AgentId(0))
             .unwrap()
             .open_post_turn_plan_review();
+        // The asserted keep needs a URI this platform can address back to a
+        // path (`file:///tmp/...` has no drive on Windows); build it from a
+        // real temp path so the round trip holds everywhere.
+        let plans = tempfile::tempdir().unwrap();
+        let second = plans.path().join("second.plan.md");
+        let second_uri = url::Url::from_file_path(&second).unwrap().to_string();
         let _ = handle(
-            plan_kept_msg("sess-plan", "file:///tmp/second.plan.md", "# Second body\n"),
+            plan_kept_msg("sess-plan", &second_uri, "# Second body\n"),
             &mut app,
         );
         let agent = test_agent(&app, AgentId(0));
@@ -671,10 +677,7 @@
                 .and_then(|pav| pav.plan_content.as_deref()),
             Some("# Second body\n"),
         );
-        assert_eq!(
-            agent.kept_plan.path(),
-            Some(std::path::Path::new("/tmp/second.plan.md")),
-        );
+        assert_eq!(agent.kept_plan.path(), Some(second.as_path()),);
     }
 
     #[test]

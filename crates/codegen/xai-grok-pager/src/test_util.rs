@@ -153,9 +153,20 @@ pub struct GrokHomeFixture {
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
     cleanup: Vec<std::path::PathBuf>,
+    original_env: Option<std::ffi::OsString>,
 }
 impl Drop for GrokHomeFixture {
     fn drop(&mut self) {
+        // Release the home override first so later `grok_home()` calls fall
+        // back to the cache; then restore the env instead of leaking a path
+        // at a tempdir this drop deletes.
+        xai_grok_shell::util::grok_home::set_grok_home_for_tests(None);
+        unsafe {
+            match &self.original_env {
+                Some(value) => std::env::set_var("CHUTES_BUILD_HOME", value),
+                None => std::env::remove_var("CHUTES_BUILD_HOME"),
+            }
+        }
         for dir in &self.cleanup {
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -169,12 +180,18 @@ impl Default for GrokHomeFixture {
 impl GrokHomeFixture {
     pub fn new() -> Self {
         let home = tempfile::tempdir().expect("home tempdir");
+        let original_env = std::env::var_os("CHUTES_BUILD_HOME");
         unsafe { std::env::set_var("CHUTES_BUILD_HOME", home.path()) };
+        // `grok_home()` is process-cached and would otherwise keep whatever
+        // an earlier test locked in (often the real user home); the override
+        // makes this fixture hermetic. Serial-gated callers only.
+        xai_grok_shell::util::grok_home::set_grok_home_for_tests(Some(home.path().to_path_buf()));
         let cwd = tempfile::tempdir().expect("cwd tempdir");
         Self {
             _home: home,
             cwd,
             cleanup: Vec::new(),
+            original_env,
         }
     }
     /// Canonicalized so the summary cwd encoding matches what production path resolution sees (macOS tempdirs are symlinked).
@@ -274,13 +291,23 @@ impl TempGitRepo {
 }
 /// Match [`crate::git_info`] tilde-collapse of a filesystem path.
 pub fn collapsed_path_display(path: &Path) -> String {
-    let home = std::env::var("HOME")
-        .ok()
-        .map(|h| std::path::PathBuf::from(h.trim_end_matches(['/', '\\'])));
+    // Mirror production `collapse_home_path` exactly, including home
+    // resolution: `$HOME` is unset on Windows (home comes from USERPROFILE
+    // via `xai_dirs`), so reading only `$HOME` diverges from production
+    // whenever the temp dir sits under the real home.
+    let home = xai_dirs::home_dir().map(|h| {
+        std::path::PathBuf::from(h.to_string_lossy().trim_end_matches(['/', '\\']).to_owned())
+    });
     match home {
         Some(h) => path
             .strip_prefix(&h)
-            .map(|rest| format!("~/{}", rest.display()))
+            .map(|rest| {
+                if rest.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~/{}", rest.display())
+                }
+            })
             .unwrap_or_else(|_| path.display().to_string()),
         None => path.display().to_string(),
     }

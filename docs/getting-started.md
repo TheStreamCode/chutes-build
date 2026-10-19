@@ -123,7 +123,6 @@ Headless-only controls such as `--max-turns`, `--tools`,
 | Problem | Check |
 | --- | --- |
 | Command not found | Confirm the npm global bin directory is on `PATH`, or try `npx chutes-build`. |
-| `invalid_client` during OAuth | The client ID is not a valid app on the issuer. Re-check the registration in your Chutes account area, or just use an API key. |
 | Empty or stale model list | Confirm the credential and network access, then rerun `chutes-build models`. |
 | Browser unavailable | Install Chrome/Edge or set `CHUTES_BROWSER_EXECUTABLE`. |
 | Video inspection unavailable | Install FFmpeg or set `CHUTES_FFMPEG_EXECUTABLE`, then restart the process. |

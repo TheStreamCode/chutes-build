@@ -76,8 +76,10 @@ fn collect_report_joins_registry_and_flags_untracked() {
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
     let home = base.join("grok-home");
-    let tracked = home.join("worktrees/xai/wt-tracked");
-    let untracked = home.join("worktrees/xai/wt-untracked");
+    // Join component-wise: a single `"worktrees/xai/..."` literal keeps `/`
+    // separators that never match the collected native-separator paths.
+    let tracked = home.join("worktrees").join("xai").join("wt-tracked");
+    let untracked = home.join("worktrees").join("xai").join("wt-untracked");
     let external = base.join("external-repo");
     std::fs::create_dir_all(&tracked).unwrap();
     std::fs::create_dir_all(&untracked).unwrap();

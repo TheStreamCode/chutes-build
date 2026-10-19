@@ -35,9 +35,10 @@ of the earlier notes becomes a topic, and sections whose name already matches a
 topic are appended to it under a "From earlier sessions" heading. The earlier
 files are left in place unchanged.
 
-Memory product telemetry contains only fixed enums, booleans, counts, and
-durations. It never includes prompts, statements, topic names, keywords,
-paths, model output, or free-form errors.
+Memory emits no product telemetry in this build: telemetry is withheld
+distribution-wide (see [Configuration](05-configuration.md#telemetry)), so
+no memory content, topic name, or usage count leaves the machine through
+that path.
 
 ---
 

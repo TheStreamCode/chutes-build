@@ -409,6 +409,10 @@ fn resume_foreign_session_consumes_hint_and_uses_each_tools_prompt() {
         (ForeignSessionTool::Cursor, "/resume-cursor native-id"),
     ] {
         let mut app = test_app();
+        // The seed canonicalizes `app.cwd`: point it at a directory that
+        // exists on every platform (`/tmp` does not canonicalize on Windows).
+        let foreign_cwd = tempfile::tempdir().unwrap();
+        app.cwd = foreign_cwd.path().to_path_buf();
         seed_foreign_resume_hint(&mut app, tool);
         let effects = dispatch(Action::ResumeForeignSession, &mut app);
         assert!(app.foreign_resume_hint().is_none());
@@ -443,6 +447,10 @@ fn resume_foreign_session_stashes_prompt_behind_trust_and_auth() {
         (ForeignSessionTool::Cursor, "/resume-cursor native-id", true),
     ] {
         let mut app = test_app();
+        // The seed canonicalizes `app.cwd`: point it at a directory that
+        // exists on every platform (`/tmp` does not canonicalize on Windows).
+        let foreign_cwd = tempfile::tempdir().unwrap();
+        app.cwd = foreign_cwd.path().to_path_buf();
         if auth_pending {
             app.auth_state = AuthState::Pending { error: None };
         } else {

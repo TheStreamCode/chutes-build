@@ -248,7 +248,7 @@ Official SDK libraries are available for multiple languages:
 import { spawn, ChildProcess } from "child_process";
 import * as readline from "readline";
 
-class GrokACPChat {
+class ChutesACPChat {
   private proc!: ChildProcess;
   private sessionId!: string;
   private rl!: readline.Interface;
@@ -256,7 +256,7 @@ class GrokACPChat {
   constructor(private cwd = ".") {}
 
   async init() {
-    this.proc = spawn("grok", ["agent", "--always-approve", "stdio"]);
+    this.proc = spawn("chutes-build", ["agent", "--always-approve", "stdio"]);
     this.rl = readline.createInterface({ input: this.proc.stdout! });
 
     await this.request("initialize", {
@@ -313,7 +313,7 @@ class GrokACPChat {
 }
 
 // Usage
-const client = await new GrokACPChat(".").init();
+const client = await new ChutesACPChat(".").init();
 
 for await (const update of client.streamPrompt("List the files in this project")) {
   switch (update.sessionUpdate) {

@@ -280,7 +280,7 @@ The event is sent as JSON on **stdin** (for example, a `PreToolUse` event; the p
 }
 ```
 
-Every event carries the same common fields: `hookEventName`, `sessionId`, `cwd`, `workspaceRoot`, `timestamp`, `permissionMode` (`default`, `auto`, `plan`, or `bypassPermissions`), and `promptId` (the turn the event belongs to; absent for session-scoped events), plus event-specific fields like `toolName` above. The `hook_event_name` (snake_case key) carries Claude's PascalCase value; `hookEventName` (camelCase key) carries grok's snake_case value.
+Every event carries the same common fields: `hookEventName`, `sessionId`, `cwd`, `workspaceRoot`, `timestamp`, `permissionMode` (`default`, `auto`, `plan`, or `bypassPermissions`), and `promptId` (the turn the event belongs to; absent for session-scoped events), plus event-specific fields like `toolName` above. The `hook_event_name` (snake_case key) carries Claude's PascalCase value; `hookEventName` (camelCase key) carries Chutes Build's snake_case value.
 
 ### Output (Blocking Hooks)
 
@@ -307,7 +307,7 @@ The value must be a JSON object; a non-object fails the hook. If the rewritten i
 
 A `deny` discards any `updatedInput`; when several hooks return one, the last wins. Omitting `decision` while returning `updatedInput` allows the call and applies the rewrite.
 
-A `defer` neither blocks the call nor approves it: the call takes the normal permission flow, exactly as if your hook had not answered, and a warning naming the hook goes to the log. It also acts on nothing else you sent — an `updatedInput` or `additionalContext` next to a `defer` is ignored and named in the log. Across hooks `defer` ranks below `ask`, so where one of your hooks defers and another asks, grok prompts.
+A `defer` neither blocks the call nor approves it: the call takes the normal permission flow, exactly as if your hook had not answered, and a warning naming the hook goes to the log. It also acts on nothing else you sent — an `updatedInput` or `additionalContext` next to a `defer` is ignored and named in the log. Across hooks `defer` ranks below `ask`, so where one of your hooks defers and another asks, Chutes Build prompts.
 
 `additionalContext` is a note for the model. It arrives after the call has run — never before — with the results of the batch the call belongs to, wrapped in your harness's reminder tag (`<system-reminder>` by default) and naming the hook that wrote it, so the model can tell your text from the user's. Every hook that sends one is delivered, in the order the hooks ran (unlike `updatedInput`, where the last writer wins). A `deny` drops all of it, since the call never runs, and names the drop in the log. Text over 10,000 characters is clipped, the same ceiling `Stop` feedback carries.
 
@@ -335,11 +335,11 @@ A `defer` neither blocks the call nor approves it: the call takes the normal per
 | `updatedMCPToolOutput` | MCP-only alias for `updatedToolOutput`. Ignored on a built-in tool. |
 
 - **Delivery.** The block reason and `additionalContext` arrive after the tool result, wrapped in your harness's reminder tag and naming the hook that wrote them, so the model can act in the same turn. Every hook's block reason and `additionalContext` are delivered in the order the hooks ran, so one hook's finding cannot drop another's. Only replacements are last-writer-wins: when two hooks return one, the last survives and the drop is named in the log.
-- **Building `updatedToolOutput`.** On a built-in tool it must carry grok's own output shape for the tool that ran, a tagged object such as `{"type": "Bash", …}`. Take the `toolResult` the event handed you, edit it, and send it back — that is exactly the shape it is validated against. A replacement that fails to parse or parses as another tool's output is ignored and the original stands, but the hook's run is recorded `Failed` with the reason, so an exit-0 hook that shows "failed" is reporting a dropped replacement, not that it never ran. A mistyped `decision` (only `"block"` is honored) is reported the same way. Check `toolResultTruncated` first: an oversized payload reaches the hook as a plain string and cannot be echoed back.
+- **Building `updatedToolOutput`.** On a built-in tool it must carry Chutes Build's own output shape for the tool that ran, a tagged object such as `{"type": "Bash", …}`. Take the `toolResult` the event handed you, edit it, and send it back — that is exactly the shape it is validated against. A replacement that fails to parse or parses as another tool's output is ignored and the original stands, but the hook's run is recorded `Failed` with the reason, so an exit-0 hook that shows "failed" is reporting a dropped replacement, not that it never ran. A mistyped `decision` (only `"block"` is honored) is reported the same way. Check `toolResultTruncated` first: an oversized payload reaches the hook as a plain string and cannot be echoed back.
 - **MCP tools.** There is no shape to enforce, so both `updatedToolOutput` and `updatedMCPToolOutput` pass through un-checked — a JSON string becomes the model-facing text verbatim, any other value is serialized — and the last hook to write wins across both keys.
 - **Caps.** The block reason and `additionalContext` are clipped at 10,000 characters, the ceiling `Stop` feedback and `PreToolUse` context share. A replacement gets 64 K characters. Caps are measured on the rendered model-facing text and applied once the replacement has rendered, so a long `updatedToolOutput` is clipped like a string, not dropped for its size. A structured replacement is dropped only when it does not match the tool's own output shape.
 - **Broken hook.** A non-zero exit — exit 2 included — keeps the block reason and drops everything else: `additionalContext` and the replacement are dropped and the drop is named in the log, the same rule `PreToolUse` applies to `updatedInput`. The block is the fail-safe direction.
-- **Record vs. model.** A replacement rewrites only the model's copy. The scrollback, transcript, and telemetry keep the original, so redacting a secret hides it from the model, not from you, and a failure rewritten as success stays real on the record. Images are not delivered under a replacement, so a replaced screenshot or PDF read reaches the model as your text alone. Everything a hook sends (note, block reason, replacement) is escaped so it cannot close the reminder tag and pose as harness or user authored instruction.
+- **Record vs. model.** A replacement rewrites only the model's copy. The scrollback and transcript keep the original (this build emits no telemetry), so redacting a secret hides it from the model, not from you, and a failure rewritten as success stays real on the record. Images are not delivered under a replacement, so a replaced screenshot or PDF read reaches the model as your text alone. Everything a hook sends (note, block reason, replacement) is escaped so it cannot close the reminder tag and pose as harness or user authored instruction.
 - **Output replacement is settings-file only.** Command and HTTP hooks can do all of this. A `PostToolUse` hook registered through the agent SDK can contribute a `block` reason and `additionalContext`, but cannot replace the tool output.
 - **When it fires.** `PostToolUse` fires for every tool that actually ran, including one whose result is a built-in logical error such as a non-zero `run_terminal_command` exit. A tool that failed to dispatch, or an MCP tool that returned an error result, fires `PostToolUseFailure` instead — context-only: it can feed the model `additionalContext` but cannot block or replace the output. The hook inherits the 600-second gate default (it commonly runs a linter or test); set `timeout` explicitly only when the check needs longer or shorter. A timed-out hook is recorded as a failure and contributes nothing.
 
@@ -382,7 +382,7 @@ If your host must never miss an idle transition, listen for the `idle_prompt` `N
 
 A cancelled turn's report is dispatched off the session's command loop, so an interrupt is never delayed by your hook. The report can therefore arrive **after** the next turn's `UserPromptSubmit`, and turn-end reports are not ordered against each other across paths.
 
-A script that tracks busy and idle should key on `promptId`, following the rules below. grok mints one per turn, but a client that supplies its own in `_meta` owns its uniqueness, so treat the id as opaque and scope it to the session.
+A script that tracks busy and idle should key on `promptId`, following the rules below. Chutes Build mints one per turn, but a client that supplies its own in `_meta` owns its uniqueness, so treat the id as opaque and scope it to the session.
 
 Every turn-end report goes through one worker, so a slow hook delays the next report but never the turn it belongs to. Keep observe-hook timeouts short.
 
@@ -439,7 +439,7 @@ What the two scripts have to get right:
 
 - **Track the newest `promptId` and ignore reports for older turns.** A cancelled turn's report is
   dispatched off the command loop, so it can arrive after the next turn's `UserPromptSubmit`.
-- **Settle unconditionally when there is no `promptId`.** That is grok reporting on the session
+- **Settle unconditionally when there is no `promptId`.** That is Chutes Build reporting on the session
   rather than a turn: the `idle_prompt` ping and the session-end `Stop`. It is what makes the
   backstop work for a rewind or a superseded turn, which report nothing.
 - **Treat a `promptId` you never saw start as idle.** An interrupted bash-mode turn reports without
@@ -462,7 +462,7 @@ Both scripts also run inside a subagent's own session. Every event either script
 filters a child out of both halves. This matters most for a background subagent, which outlives
 the parent turn and would otherwise hold the host busy after the parent went idle.
 
-`Stop` input also carries `backgroundTasks` and `sessionCrons`, so a hook can distinguish "session is done" from "session is paused waiting for background work to wake it back up". Both arrays are empty when nothing is in flight or scheduled. Each `backgroundTasks` entry describes one in-flight task: `id`, `type` (`shell`, `monitor`, or `subagent`), `status`, and (depending on the type) `command` (shell tasks only), `description` (a monitor's watched command line, or a subagent's task description), and `agentType` (subagents). Each `sessionCrons` entry describes one scheduled wakeup (`scheduler_create` or `/loop`): `id`, `schedule`, `recurring`, and `prompt`. The `schedule` value is a human-readable interval such as `every 5 minutes`; grok schedules are intervals, not cron expressions. Free-text entry fields are capped at 1000 characters with an in-string `… [+N chars]` marker.
+`Stop` input also carries `backgroundTasks` and `sessionCrons`, so a hook can distinguish "session is done" from "session is paused waiting for background work to wake it back up". Both arrays are empty when nothing is in flight or scheduled. Each `backgroundTasks` entry describes one in-flight task: `id`, `type` (`shell`, `monitor`, or `subagent`), `status`, and (depending on the type) `command` (shell tasks only), `description` (a monitor's watched command line, or a subagent's task description), and `agentType` (subagents). Each `sessionCrons` entry describes one scheduled wakeup (`scheduler_create` or `/loop`): `id`, `schedule`, `recurring`, and `prompt`. The `schedule` value is a human-readable interval such as `every 5 minutes`; Chutes Build schedules are intervals, not cron expressions. Free-text entry fields are capped at 1000 characters with an in-string `… [+N chars]` marker.
 
 Inside a subagent, the gate fires as `SubagentStop` (agent-frontmatter `Stop` hooks are automatically remapped). A `Stop` hook only gates the main agent.
 
@@ -476,15 +476,15 @@ Inside a subagent, the gate fires as `SubagentStop` (agent-frontmatter `Stop` ho
 - **Session-end fire**: an extra observe-only Stop fires at session end; filter on `reason == "end_turn"` (see above).
 - **Interval schedules**: `sessionCrons[].schedule` is a human-readable interval, never a cron expression.
 - **Task types**: `backgroundTasks[].type` is only `shell`, `monitor`, or `subagent`; Claude's other labels (`workflow`, `teammate`, …) are not emitted.
-- **StopFailure classes**: grok emits six (`rate_limit`, `authentication_failed`, `invalid_request`, `server_error`, `max_output_tokens`, `unknown`). Capacity errors (503/529) classify as `rate_limit`. A matcher on an error class grok does not emit never fires.
-- **Default timeout**: grok defaults observe hooks to 5 seconds, which is shorter than most. Set `timeout` explicitly on an imported hook that does real work.
+- **StopFailure classes**: Chutes Build emits six (`rate_limit`, `authentication_failed`, `invalid_request`, `server_error`, `max_output_tokens`, `unknown`). Capacity errors (503/529) classify as `rate_limit`. A matcher on an error class Chutes Build does not emit never fires.
+- **Default timeout**: Chutes Build defaults observe hooks to 5 seconds, which is shorter than most. Set `timeout` explicitly on an imported hook that does real work.
 - **`UserPromptSubmit` blocks, with one gap**: exit 2 and `decision: "block"` reject the prompt like Claude, and a blocked prompt never enters the conversation history — but an allowing hook's stdout / `additionalContext` is discarded rather than added as context.
-- **`StopCancelled` is grok-specific**: a config that uses it is not portable to a runtime with no interrupt hook.
-- **`idle_prompt` fires on any turn end**: grok fires it after an interrupted or errored turn too, not only a completed one, because it reports a state rather than an outcome. Its `message` is display text and can change between releases, so match on `notificationType` instead.
-- **Subagent identity is `subagentType`, not `agent_type`**: grok puts it in the payload of the events that can fire inside a subagent, matching its own `SubagentStart`/`SubagentStop`, rather than in the common fields.
-- **permission_mode values**: grok emits `default`, `auto`, `plan`, or `bypassPermissions`. Claude's `acceptEdits`/`dontAsk` have no grok equivalent (grok's `auto` is the nearest), so a check like `permission_mode === "acceptEdits"` never matches.
+- **`StopCancelled` is Chutes Build-specific**: a config that uses it is not portable to a runtime with no interrupt hook.
+- **`idle_prompt` fires on any turn end**: Chutes Build fires it after an interrupted or errored turn too, not only a completed one, because it reports a state rather than an outcome. Its `message` is display text and can change between releases, so match on `notificationType` instead.
+- **Subagent identity is `subagentType`, not `agent_type`**: Chutes Build puts it in the payload of the events that can fire inside a subagent, matching its own `SubagentStart`/`SubagentStop`, rather than in the common fields.
+- **permission_mode values**: Chutes Build emits `default`, `auto`, `plan`, or `bypassPermissions`. Claude's `acceptEdits`/`dontAsk` have no Chutes Build equivalent (Chutes Build's `auto` is the nearest), so a check like `permission_mode === "acceptEdits"` never matches.
 - **Client (SDK) gate timeouts**: SDK `Stop`/`SubagentStop` gates default to 600 seconds like file hooks; `PreToolUse` client gates default to 30 seconds (the interactive hot path). Either can be overridden per matcher group via `timeoutS`, capped at 600.
-- **`/goal`**: grok's goal loop is a separate feature that runs before the stop gate; it is not a prompt-type Stop hook.
+- **`/goal`**: Chutes Build's goal loop is a separate feature that runs before the stop gate; it is not a prompt-type Stop hook.
 
 A complete keep-working policy in one script:
 
@@ -561,7 +561,7 @@ Both `command` and `url` support `${VAR}` and `$VAR` expansion. On Windows Power
 Instead of a local script, call a remote endpoint:
 
 ```json
-{ "type": "http", "url": "https://hooks.example.com/grok-event", "timeout": 15 }
+{ "type": "http", "url": "https://hooks.example.com/chutes-event", "timeout": 15 }
 ```
 
 The full event envelope is POSTed as JSON.
@@ -688,4 +688,4 @@ echo '{"decision": "allow"}'
 - **Hook not running?** Press `Ctrl+L` on non–VS Code family (or run `/hooks` anywhere) to see if it is loaded and matched.
 - **Project hooks ignored?** The folder may be untrusted. Run `/hooks-trust` (or relaunch with `--trust`).
 - **Script not found?** Check the path is relative to the `.json` file and executable (`chmod +x`).
-- **See errors?** Capture logs by launching with `RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/chutes-build.log grok`, then check `/tmp/chutes-build.log`.
+- **See errors?** Capture logs by launching with `RUST_LOG=debug CHUTES_BUILD_LOG_FILE=/tmp/chutes-build.log chutes-build`, then check `/tmp/chutes-build.log`.

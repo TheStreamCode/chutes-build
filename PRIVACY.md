@@ -11,8 +11,9 @@ environment variable or remote setting.
 
 ## Local data
 
-The CLI may store configuration, an encrypted or OS-protected credential entry
-where supported, sessions, logs, local exports, and user memory under
+The CLI may store configuration, the saved API key (`api_key`) and MCP
+credentials (`mcp_credentials.json`) — both plaintext owner-only files —
+sessions, logs, local exports, and user memory under
 `~/.chutes-build` (or `CHUTES_BUILD_HOME`). Plugins, user roles/personas, and
 managed bundled-agent definitions use that same root; setting
 `CHUTES_BUILD_HOME` does not fall back to those resources in the default home.
@@ -63,17 +64,17 @@ explicit hosted feature:
 | --- | --- | --- |
 | `llm.chutes.ai` | Chutes inference (including native model routing via the `model` field), model catalog, semantic memory, voice transcription, OCR, and vision | model requests and the selected inputs: prompts/context, memory chunks, audio, images, PDF pages, or sampled video frames; Chutes API credential |
 | `api.chutes.ai` | Chutes account and media APIs | account requests, media parameters and user-selected media assets; Chutes API credential |
-| `api.chutes.ai/idp` | OAuth sign-in and refresh | authorization code or refresh token, PKCE verifier, registered client ID, and a client secret only when configured |
 | `chutes.ai/docs`, `chutes.ai/news` | mandatory primary-source verification for Chutes topics | requested official page URLs; no Chutes API credential |
 | `context7.com` | current library documentation | library names and documentation queries; known secrets are rejected and an optional Context7 key is sent only to the official HTTPS service |
 | DuckDuckGo or Brave Search | web search | search query; Brave receives only its dedicated key |
 | User-selected web pages | web fetch/browser automation | normal HTTP/browser traffic required by the requested action |
 | User-configured MCP servers/plugins | external tools | data required by the selected tool and its own configuration |
 
-The ambient Chutes API credential and cached Chutes session token are accepted
-only for allowlisted HTTPS Chutes and router hosts. They are never reused for a
-custom endpoint, web search, Context7, arbitrary websites, MCP servers, or
-browser automation. Custom inference models must declare a dedicated
+The ambient Chutes API credential — the only credential this build holds;
+there is no login session and no session token — is accepted only for
+allowlisted HTTPS Chutes and router hosts. It is never reused for a custom
+endpoint, web search, Context7, arbitrary websites, MCP servers, or browser
+automation. Custom inference models must declare a dedicated
 `api_key`/`env_key`; a custom model-catalog endpoint uses
 `CHUTES_MODELS_API_KEY`.
 

@@ -585,13 +585,13 @@ pub struct RelayConfig {
     pub enabled: Option<bool>,
 }
 /// `[hub]` section from config.toml.
-/// Optional default Computer Hub URL for **workspace provider** exposure (`grok workspace` / leader `with_default_hub_url`).
+/// Optional default Computer Hub URL for **workspace provider** exposure (`chutes-build workspace` / leader `with_default_hub_url`).
 /// Does **not** enable agent-side harness/client connections or alter local session behavior.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HubConfig {
     /// Hub WebSocket URL (`ws://` or `wss://`) used as the leader default for
-    /// `grok workspace start` when the CLI does not pass `--hub-url`.
+    /// `chutes-build workspace start` when the CLI does not pass `--hub-url`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }

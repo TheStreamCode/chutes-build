@@ -59,7 +59,7 @@ fn pager_slot_survived_remove(path: &std::path::Path) -> bool {
 }
 /// Slot present *and* the follow dest still names a file. A dangling slot is
 /// referent deletion (defaults), not a tmp+rename replacement.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn pager_referent_still_present(path: &std::path::Path) -> bool {
     if !pager_slot_survived_remove(path) {
         return false;
@@ -87,9 +87,9 @@ fn pager_event_is_watched_config(
 }
 #[cfg(test)]
 mod tests {
-    use super::{
-        pager_event_is_watched_config, pager_referent_still_present, pager_slot_survived_remove,
-    };
+    #[cfg(unix)]
+    use super::pager_referent_still_present;
+    use super::{pager_event_is_watched_config, pager_slot_survived_remove};
     #[test]
     fn pager_reload_matches_differently_named_dest() {
         let slot = std::path::Path::new("/home/u/.chutes-build/pager.toml");
@@ -143,6 +143,9 @@ mod tests {
             "gone slot is a real delete"
         );
     }
+    // A dangling slot needs a symlink, which Windows tests cannot create without
+    // privileges; a copy cannot dangle, so there is no Windows variant of this scenario.
+    #[cfg(unix)]
     #[test]
     fn dangling_slot_is_referent_deletion_not_replacement() {
         let dir = tempfile::tempdir().unwrap();
@@ -151,24 +154,16 @@ mod tests {
         let dest = dest_dir.join("pager.toml");
         std::fs::write(&dest, "x = 1").unwrap();
         let slot = dir.path().join("pager.toml");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&dest, &slot).unwrap();
-        #[cfg(not(unix))]
-        std::fs::copy(&dest, &slot).unwrap();
         assert!(pager_referent_still_present(&slot));
         std::fs::remove_file(&dest).unwrap();
-        #[cfg(unix)]
-        {
-            assert!(
-                pager_slot_survived_remove(&slot),
-                "dangling symlink slot still exists"
-            );
-            assert!(
-                !pager_referent_still_present(&slot),
-                "deleted referent must not look like a replacement"
-            );
-        }
-        #[cfg(not(unix))]
-        assert!(!pager_slot_survived_remove(&slot));
+        assert!(
+            pager_slot_survived_remove(&slot),
+            "dangling symlink slot still exists"
+        );
+        assert!(
+            !pager_referent_still_present(&slot),
+            "deleted referent must not look like a replacement"
+        );
     }
 }

@@ -62,10 +62,11 @@ impl xai_tool_runtime::Tool for GetChutesUsageTool {
 
     async fn run(
         &self,
-        _: xai_tool_runtime::ToolCallContext,
+        ctx: xai_tool_runtime::ToolCallContext,
         input: GetChutesUsageInput,
     ) -> Result<ToolOutput, xai_tool_runtime::ToolError> {
-        let snapshot = ChutesAccountClient::from_env()
+        let credentials = super::resolve_credentials(&ctx).map_err(execution_error)?;
+        let snapshot = ChutesAccountClient::from_credentials(credentials)
             .map_err(execution_error)?
             .usage_snapshot(input.include_model_stats)
             .await

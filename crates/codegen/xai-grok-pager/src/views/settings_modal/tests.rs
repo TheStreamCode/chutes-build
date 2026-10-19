@@ -5798,16 +5798,17 @@ fn docs_footer_tip_is_centered() {
         "LONG tip leading_ws={tip_start_long} vs trailing_ws={trailing_long}",
     );
 
-    // SHORT path: width that fits SHORT but not LONG.
-    // SHORT is "Tip · Ask Chutes Build to change a setting" (34 cells); LONG is ~73 cells. width=40 lands in the SHORT band.
-    let (row_short, tip_start_short, trailing_short) = render(40);
+    // SHORT path: width that fits SHORT but not MEDIUM.
+    // SHORT is "Tip · Ask Chutes Build to change a setting" (42 cells, not
+    // upstream's 34); MEDIUM is 51 cells. width=45 lands in the SHORT band.
+    let (row_short, tip_start_short, trailing_short) = render(45);
     assert!(
         row_short.contains("change a setting"),
-        "width=40 must render SHORT path (contains `change a setting`): {row_short:?}",
+        "width=45 must render SHORT path (contains `change a setting`): {row_short:?}",
     );
     assert!(
         !row_short.contains("chutesday"),
-        "width=40 must NOT render LONG path (no `chutesday`): {row_short:?}",
+        "width=45 must NOT render MEDIUM path (no `chutesday`): {row_short:?}",
     );
     assert!(
         tip_start_short.abs_diff(trailing_short) <= 1,

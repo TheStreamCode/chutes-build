@@ -276,7 +276,7 @@ allow = [
 
 ### 3. Claude Code Compatibility (`.claude/settings.json`)
 
-Chutes Build reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, plus the project-level `<project>/.claude/settings.json` and `settings.local.json` (walking up to the repo root). The native `.grok` source for permission rules is `config.toml`, described in the section above.
+Chutes Build reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, plus the project-level `<project>/.claude/settings.json` and `settings.local.json` (walking up to the repo root). The native source for permission rules is `config.toml` under `~/.chutes-build`, described in the section above.
 
 Example:
 

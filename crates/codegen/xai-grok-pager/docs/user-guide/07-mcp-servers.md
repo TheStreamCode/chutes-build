@@ -192,7 +192,7 @@ MCP tools are namespaced with the server name to avoid collisions. The catalog k
 
 ### What Chutes Build admits
 
-Chutes Build admits a listed tool into the session catalog when all of these hold (`xai-grok-mcp` `qualify_mcp_tool_name`):
+Chutes Build admits a listed tool into the session catalog when all of these hold (`qualify_mcp_tool_name`):
 
 | Part | Rule |
 | --- | --- |

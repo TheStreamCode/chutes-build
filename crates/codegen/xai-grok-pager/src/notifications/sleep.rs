@@ -96,7 +96,7 @@ impl SleepInhibitor {
         let mut cmd = std::process::Command::new("systemd-inhibit");
         cmd.args([
             "--what=idle",
-            "--who=grok",
+            "--who=chutes-build",
             "--why=agent turn in progress",
             "sleep",
             "infinity",
@@ -106,7 +106,7 @@ impl SleepInhibitor {
         .stderr(std::process::Stdio::null());
         xai_tty_utils::detach_std_command(&mut cmd);
         // The spawned process is the lock holder: `systemd-inhibit` keeps the idle-inhibit fd itself and runs `sleep
-        // infinity` as its child. Bind that pid to us so a crashed or killed grok (SIGKILL, `panic=abort` SIGABRT, no Drop
+        // infinity` as its child. Bind that pid to us so a crashed or killed chutes-build (SIGKILL, `panic=abort` SIGABRT, no Drop
         // runs) cannot leave it running forever.
         xai_tty_utils::kill_on_parent_death_std(&mut cmd);
         #[allow(clippy::disallowed_methods)] // bound by kill-on-parent-death; released each turn

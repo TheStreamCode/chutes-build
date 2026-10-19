@@ -2458,7 +2458,8 @@ fn managed_proxy_config(model: &str) -> config::Config {
         "#
     ))
 }
-/// `/models` rows shaped like that customer's. The shared parser ignores their `aliases` and `context_length`.
+/// `/models` rows shaped like that customer's. The shared parser ignores
+/// their `aliases` but honors `context_length` as the window (512k here).
 fn managed_proxy_rows() -> IndexMap<String, ModelEntry> {
     let row = |id: &str, aliases: &[&str]| {
         serde_json::json!({

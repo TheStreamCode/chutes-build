@@ -39,4 +39,10 @@ regexes = [
   '''eyJhbGciOiJFUzI1NiJ9\.(test|tok)\b''',
   # `xai-grok-shell` built-binary e2e: a hard-coded UUID used as an auth id.
   '''3C41A7D9-6B58-4E2F-A0D3-5F8C1B7E0A02''',
+  # `xai-grok-login` manager tests: a key-slot label (`key: "short-lived-0"`),
+  # not a credential. Exact literal; no real key looks like this.
+  '''short-lived-0''',
+  # `xai-grok-memory` SQL fixtures: a meta-table key name inside
+  # `WHERE key = '...'` strings, in maintenance and consolidation tests.
+  '''v2_dream_trigger_pending''',
 ]

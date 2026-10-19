@@ -1566,15 +1566,22 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
         return None;
     }
 
-    // Expand ~ to home directory.
+    // Expand ~ to home directory. Both separators work after the tilde: `~\`
+    // is the native Windows spelling and must not fall through to a rooted
+    // join that discards the home.
     let expanded = if let Some(rest) = partial.strip_prefix('~') {
         let home = xai_dirs::home_dir()?;
-        if rest.is_empty() || rest == "/" {
-            home.to_string_lossy().to_string() + "/"
+        if rest.is_empty() || rest == "/" || rest == "\\" {
+            let sep = if rest == "\\" { '\\' } else { '/' };
+            format!("{}{sep}", home.to_string_lossy())
         } else {
-            home.join(rest.strip_prefix('/').unwrap_or(rest))
-                .to_string_lossy()
-                .to_string()
+            home.join(
+                rest.strip_prefix('/')
+                    .or_else(|| rest.strip_prefix('\\'))
+                    .unwrap_or(rest),
+            )
+            .to_string_lossy()
+            .to_string()
         }
     } else {
         partial.to_string()
@@ -1582,8 +1589,10 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
 
     let path = Path::new(&expanded);
 
-    // If path is an existing directory (ends with /), list its contents.
-    if path.is_dir() && expanded.ends_with('/') {
+    // If path is an existing directory (ends with a separator), list its
+    // contents, keeping the input's own separator style.
+    if path.is_dir() && (expanded.ends_with('/') || expanded.ends_with('\\')) {
+        let sep = if expanded.ends_with('\\') { '\\' } else { '/' };
         let mut entries: Vec<String> = std::fs::read_dir(path)
             .ok()?
             .filter_map(|e| e.ok())
@@ -1592,7 +1601,7 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
                 let name = e.file_name().to_string_lossy().to_string();
                 let full = path.join(&name);
                 if full.is_dir() {
-                    format!("{expanded}{name}/")
+                    format!("{expanded}{name}{sep}")
                 } else {
                     format!("{expanded}{name}")
                 }
@@ -1616,6 +1625,18 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
         return None;
     }
 
+    // Keep the input's own separator style: split after the last `/` or `\`.
+    // Splitting on `/` alone drops the parent for native Windows input.
+    let (parent_str, dir_sep) = match expanded.rfind(['/', '\\']) {
+        // `idx` is a byte index at a 1-byte char, so both `get`s always
+        // succeed; the fallbacks only satisfy the no-panic-indexing lint.
+        Some(idx) => (
+            expanded.get(..idx + 1).unwrap_or(""),
+            expanded.as_bytes().get(idx).copied().unwrap_or(b'/') as char,
+        ),
+        None => ("", '/'),
+    };
+
     let mut matches: Vec<String> = std::fs::read_dir(parent)
         .ok()?
         .filter_map(|e| e.ok())
@@ -1626,16 +1647,8 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
         .map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             let full = parent.join(&name);
-            let parent_str = if expanded.contains('/') {
-                expanded
-                    .rsplit_once('/')
-                    .map(|(p, _)| format!("{p}/"))
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
             if full.is_dir() {
-                format!("{parent_str}{name}/")
+                format!("{parent_str}{name}{dir_sep}")
             } else {
                 format!("{parent_str}{name}")
             }
@@ -6081,6 +6094,39 @@ mod tests {
         let field = input.field(0).unwrap();
         assert_eq!(field.text(), completed.to_string_lossy().as_ref());
         assert_eq!(field.cursor_byte(), field.text().len());
+    }
+
+    #[test]
+    fn tab_complete_path_lists_separator_terminated_directory() {
+        // The input's own terminator (`/` or `\`) selects the listing branch;
+        // entries keep the input's separator style.
+        let directory = tempfile::tempdir().unwrap();
+        let child = directory.path().join("plug-source");
+        std::fs::write(&child, "").unwrap();
+        let sep = std::path::MAIN_SEPARATOR;
+        let partial = format!("{}{sep}", directory.path().display());
+        assert_eq!(
+            tab_complete_path(&partial).as_deref(),
+            Some(child.to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn tab_complete_path_expands_tilde_with_either_separator() {
+        let fake_home = tempfile::tempdir().unwrap();
+        let target = fake_home.path().join("plug-source");
+        std::fs::write(&target, "").unwrap();
+        #[cfg(windows)]
+        let _home = crate::test_util::EnvVarGuard::set("USERPROFILE", fake_home.path());
+        #[cfg(not(windows))]
+        let _home = crate::test_util::EnvVarGuard::set("HOME", fake_home.path());
+        for partial in ["~/plug", "~\\plug"] {
+            assert_eq!(
+                tab_complete_path(partial).as_deref(),
+                Some(target.to_string_lossy().as_ref()),
+                "tilde must expand before completion for {partial:?}"
+            );
+        }
     }
 
     #[test]

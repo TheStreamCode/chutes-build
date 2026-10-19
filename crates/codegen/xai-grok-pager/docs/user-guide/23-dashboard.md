@@ -27,7 +27,7 @@ Hidden in minimal mode. Set `CHUTES_BUILD_AGENT_DASHBOARD=0` or
 ## What you see
 
 ```
-  main ~/xai [Choose Ctrl+l]                    ◆ 2 awaiting │ ⋮ 1 working │ ◇ 1 idle
+  main ~/work [Choose Ctrl+l]                   ◆ 2 awaiting │ ⋮ 1 working │ ◇ 1 idle
 
   + New Agent                                Open Previous /resume │ Worktree Ctrl+w
 
@@ -139,7 +139,7 @@ until you quit.
 
 Opening a row shows the agent's conversation in the **details view**. The
 session's own header row does the work — no extra title band: the agent's
-name leads it (`name │ main ~/xai`; omitted for an unnamed session), and on
+name leads it (`name │ main ~/work`; omitted for an unnamed session), and on
 the right, after the usual chips, sit `‹ 2/5 ›` (your position among the
 dashboard's agents; hidden when there is only one) and `[Dashboard]`. Keys
 go to the attached agent; `Esc` / `Ctrl+\` (or `[Dashboard]`) return to the

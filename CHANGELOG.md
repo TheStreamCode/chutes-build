@@ -4,6 +4,97 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-10-19
+
+### Fixed
+
+- **Chutes tools work right after welcome-screen login.** The agent held
+  the mid-session key only in its runtime slot while media, vision,
+  account, document, embedding, and speech tools read plain env, so they
+  failed until restart. Tool dispatch now publishes the resolved
+  credentials on the call context and the tools resolve them from there,
+  with env as fallback.
+- **`login` no longer echoes the key on a terminal.** Terminal echo is
+  disabled while the TTY prompt reads, and restored afterwards; piped
+  input is unchanged.
+- **Re-saving the API key tightens loose permissions.** Overwriting a
+  pre-existing world-readable `api_key` file now resets it to owner-only
+  (`0600` on Unix) instead of inheriting the old mode.
+- **Docs no longer describe flows that cannot run.** Removed the OAuth/IdP
+  rows (the auth code flow is unreachable without account login), marked
+  the OAuth2/OIDC settings dormant, fixed the key-precedence and
+  credential-storage claims, dropped the dead ZDR docs link, and reduced
+  the external-OTEL chapter to an honest deadened notice (telemetry is
+  withheld, the OTEL `init` is a no-op).
+- **User-visible strings name this product.** CLI errors, retry commands,
+  settings descriptions, sample configs, and the Linux inhibit identity
+  no longer say `grok`; guide samples spawn `chutes-build`, and the
+  README names the real binary and canonical key-management link.
+- Windows binaries link with an 8 MiB main-thread stack reserve
+  again (a per-target `rustflags` reserve, so it covers every profile),
+  fixing the dev-profile `STATUS_STACK_OVERFLOW` on startup
+  (`--version` included).
+- **Per-model context windows from the live catalog.** The model parser
+  now reads the Chutes-native `context_length` field, so models that
+  declare it size from their real window (40k–1M); the hardcoded 256k
+  default remains as the fallback for models that do not.
+- **Model fallback keeps tool support.** Unless the failed model is
+  positively known to lack tools (cataloged with a non-empty feature
+  list without `tools`), the sampler fallback only considers
+  replacements declaring `tools`, instead of potentially stranding an
+  agentic turn on a text-only model. An absent or feature-less failed
+  model keeps the requirement on, and feature-less candidates never
+  satisfy it, so such a fallback now honestly reports no candidate.
+- **Malformed deny/ask rules fail closed.** A rule entry that does not
+  parse no longer silently drops to no-rule for an identifiable tool;
+  it keeps a tool-wide rule with the same action (plus a warning), so
+  a typo cannot quietly permit what it meant to restrict.
+- **Blank JSON prompts are refused.** `--prompt-json`/`--prompt-file`
+  with only whitespace text blocks now errors like an empty `-p`
+  prompt; image-only prompts still work.
+- **Compaction threshold is a `u8`.** The percent field was the only
+  `u32` in an otherwise all-`u8` chain, forcing a lossy `as u8` cast
+  at the check; the cast (and its silent truncation) is gone.
+- **Session notifications match both wire namespaces.** The pager now
+  matches `x.ai/session_notification` / `x.ai/session/update` next to
+  the `chutes.ai/*` arms (retained wire compat per spec §1.5), so
+  session updates from shell emitters that still send `x.ai/*` are no
+  longer silently dropped; session-list metadata prefers
+  `chutes.ai/*` with `x.ai/*` fallback.
+- **`account` and `apikey` are reserved skill-collision keys.** Adding
+  them to `PAGER_COMMAND_KEYS` keeps user skills from shadowing the
+  account slash commands.
+- **Windows paste/render path fixes.** Dropped `file://` URIs without
+  a drive letter now paste instead of vanishing (percent-decoded path
+  fallback for local hosts), OSC-8 links render Unix-style file URLs,
+  tool paths use display separators, and managed-text identity on
+  Windows keys on creation time instead of mtime.
+
+### Security
+
+- Patched the TLS stack: `rustls` 0.23.37 → 0.23.46
+  (RUSTSEC-2026-0285, -0346, -0348, -0349) and `git2` 0.20.2 →
+  0.20.4 (RUSTSEC-2026-0008). The `zip` SUID/symlink trio and the
+  `unsafe-libyaml`/`zbus` unmaintained notices are allowlisted in
+  `deny.toml` with reachability-checked reasons (affected APIs
+  unused or migrations out of scope).
+
+### Tests
+
+- New pins: runtime-key dispatch follow-through, `0600` tighten on
+  key overwrite, catalog `context_length` parsing (plain + meta,
+  configured-wins) and tool-aware fallback, fail-closed malformed
+  rules, blank-JSON prompt refusal, `u8` compaction threshold, and
+  the Gitleaks allowlist for the four pre-existing history findings.
+- Suites green: render crate (1181), pager `--lib` (10191), pager
+  `settings_e2e` (279), chutes tools filter (54), binary (35), core
+  (93).
+- Known pre-existing (verified by stash comparison, unrelated to this
+  release): `xai-grok-tools`/`xai-grok-workspace` carry Windows-only
+  failures, `xai-grok-login` machinery tests fail for the
+  intentionally absent login store, and the Unix-only cross-checks
+  run on CI Linux.
+
 ## [1.7.1] - 2026-10-17
 
 ### Fixed

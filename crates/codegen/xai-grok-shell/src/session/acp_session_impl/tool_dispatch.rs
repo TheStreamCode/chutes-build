@@ -55,6 +55,13 @@ pub(super) async fn dispatch_observed(
     );
     ctx.insert(origin);
     ctx.insert(slot);
+    // The agent holds a mid-session key (ACP `setApiKey`, welcome-screen
+    // paste) in the login runtime slot, not in env, so publish it on the
+    // call context: Chutes tools resolve it from there instead of reading
+    // globals. Absent when no key resolves — the tools fall back to env.
+    if let Some(credentials) = resolve_dispatch_credentials() {
+        ctx.insert(credentials);
+    }
     workspace_ops
         .call_tool_with_context(
             &prepared.tool_name,
@@ -63,6 +70,14 @@ pub(super) async fn dispatch_observed(
             ctx,
         )
         .await
+}
+
+/// Credentials for one tool call: the runtime key first (sees `setApiKey`),
+/// then `CHUTES_API_KEY` and the legacy fallback — the same order the
+/// sampler resolves. `None` when no key is set anywhere.
+fn resolve_dispatch_credentials() -> Option<chutes_build_core::ChutesCredentials> {
+    let key = xai_grok_login::auth_method::read_chutes_api_key_env().ok()?;
+    chutes_build_core::ChutesCredentials::from_key(&key).ok()
 }
 
 /// First string-valued argument among `keys`, in priority order.
@@ -440,5 +455,47 @@ mod tests {
             backend_tool_call_status(None),
             acp::ToolCallStatus::Completed
         );
+    }
+
+    /// The dispatch-published credentials see the ACP runtime key even when
+    /// env is empty (welcome-screen paste), and disappear on logout — that is
+    /// what keeps Chutes tools working mid-session without a restart.
+    /// Same `RUNTIME_API_KEY` serial group as the `setApiKey` tests: the
+    /// runtime slot is process-global.
+    #[serial_test::serial(RUNTIME_API_KEY)]
+    #[test]
+    fn dispatch_credentials_follow_the_runtime_key() {
+        let prior_key = std::env::var_os("CHUTES_API_KEY");
+        let prior_legacy = std::env::var_os("CHUTES_BUILD_API_KEY");
+        // SAFETY: serialized via `serial_test`; restored below.
+        unsafe {
+            std::env::remove_var("CHUTES_API_KEY");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
+        }
+        xai_grok_login::auth_method::clear_runtime_xai_api_key();
+        assert!(super::resolve_dispatch_credentials().is_none());
+
+        xai_grok_login::auth_method::set_runtime_xai_api_key("cpk-runtime-key");
+        let resolved = super::resolve_dispatch_credentials().expect("runtime key must resolve");
+        assert_eq!(
+            resolved,
+            chutes_build_core::ChutesCredentials::from_key("cpk-runtime-key")
+                .expect("test key builds")
+        );
+
+        xai_grok_login::auth_method::clear_runtime_xai_api_key();
+        assert!(super::resolve_dispatch_credentials().is_none());
+
+        // SAFETY: serialized via `serial_test`; restore the env for other tests.
+        unsafe {
+            match prior_key {
+                Some(value) => std::env::set_var("CHUTES_API_KEY", value),
+                None => std::env::remove_var("CHUTES_API_KEY"),
+            }
+            match prior_legacy {
+                Some(value) => std::env::set_var("CHUTES_BUILD_API_KEY", value),
+                None => std::env::remove_var("CHUTES_BUILD_API_KEY"),
+            }
+        }
     }
 }

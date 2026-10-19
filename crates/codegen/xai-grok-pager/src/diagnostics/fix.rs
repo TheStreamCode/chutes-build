@@ -1607,12 +1607,26 @@ pub fn configured_report(mut report: DiagnosticReport, configured: bool) -> Diag
 
 #[cfg(test)]
 pub(crate) fn test_fix_plan(home: &Path) -> FixPlan {
-    plan_fix(
-        tests::request(home, "/bin/bash"),
-        &tests::report(),
-        &TerminalContext::default(),
-    )
-    .unwrap()
+    // Dispatch tests only need *a* plan; ssh-wrap planning is refused on
+    // Windows by design, so build the fixture from tmux planning there.
+    #[cfg(unix)]
+    {
+        plan_fix(
+            tests::request(home, "/bin/bash"),
+            &tests::report(),
+            &TerminalContext::default(),
+        )
+        .unwrap()
+    }
+    #[cfg(windows)]
+    {
+        plan_fix(
+            tests::tmux_request(home, TMUX_CLIPBOARD_ID),
+            &tests::tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard),
+            &tests::tmux_terminal(false),
+        )
+        .unwrap()
+    }
 }
 
 #[cfg(test)]

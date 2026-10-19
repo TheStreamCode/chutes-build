@@ -322,6 +322,9 @@ mod tests {
     /// Slot owners reserve [`height`] rows, so the last one it promises must be the legal line, not a body row pushed off the end.
     #[test]
     fn height_reserves_every_row_the_banner_paints() {
+        // The 25-cell fork title cannot fit whole below width 25; the
+        // never-clipped invariant only applies where it can.
+        let title_cells = PRIVACY_BANNER_TITLE.chars().count() as u16;
         for width in [200, 117, 110, 100, 80, 72, 60, 45, 40, 36, 30, 24, 18] {
             let rows = rows(width);
             assert_eq!(rows.len(), height(width) as usize);
@@ -330,10 +333,12 @@ mod tests {
             }) else {
                 panic!("width {width}: expected title, body, and legal rows, got {rows:?}");
             };
-            assert!(
-                title.starts_with(PRIVACY_BANNER_TITLE),
-                "width {width}: title must never be clipped, got {title:?}"
-            );
+            if width >= title_cells {
+                assert!(
+                    title.starts_with(PRIVACY_BANNER_TITLE),
+                    "width {width}: title must never be clipped, got {title:?}"
+                );
+            }
             assert!(
                 PRIVACY_BANNER_LEGAL_VARIANTS
                     .iter()

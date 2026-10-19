@@ -397,7 +397,7 @@ async fn kill_leaders() -> Result<()> {
         };
         if !xai_grok_shell::util::is_grok_process(pid) {
             if let Some(ref lock) = d.lock_path {
-                eprintln!("  PID {pid} is not a grok process, removing stale lock");
+                eprintln!("  PID {pid} is not a chutes-build process, removing stale lock");
                 let _ = std::fs::remove_file(lock);
                 cleaned += 1;
             }
@@ -494,12 +494,12 @@ fn ensure_control_caps(reg: &LeaderRegistration) -> Result<&LeaderCapabilities> 
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Leader does not advertise capabilities (legacy version)"))
 }
-/// Env override for the `grok workspace` gate: any truthy value enables the command locally, a falsy one disables it.
+/// Env override for the `chutes-build workspace` gate: any truthy value enables the command locally, a falsy one disables it.
 /// Either way it bypasses the remote settings flag.
 const WORKSPACE_COMMAND_ENV: &str = "CHUTES_BUILD_WORKSPACE_COMMAND";
 /// One leader door's CLI identity, shared by `connect_leader_control` and `spawn_and_connect_leader`.
 struct LeaderDoorCli {
-    /// The command name as the user types it (`grok workspace`); `<name> start` is its start command.
+    /// The command name as the user types it (`chutes-build workspace`); `<name> start` is its start command.
     name: &'static str,
     /// IPC client type the leader records for connections from this command.
     client_type: &'static str,
@@ -507,11 +507,11 @@ struct LeaderDoorCli {
     leader_mode_reason: &'static str,
 }
 const WORKSPACE_DOOR: LeaderDoorCli = LeaderDoorCli {
-    name: "grok workspace",
+    name: "chutes-build workspace",
     client_type: "grok-workspace-cli",
     leader_mode_reason: "the workspace is shared via the leader",
 };
-/// Resolution of the `grok workspace` gate.
+/// Resolution of the `chutes-build workspace` gate.
 /// `Unknown` is kept separate from `Disabled` so we don't tell the user the flag is off when the settings were never read.
 /// Both fail closed, but `Unknown` earns an honest message.
 #[derive(Debug, PartialEq, Eq)]
@@ -589,7 +589,7 @@ async fn run_workspace_mgmt(args: WorkspaceMgmtArgs) -> Result<()> {
     ) && let Some(profile) = xai_grok_sandbox::requested_confinement_profile()
     {
         anyhow::bail!(
-            "`grok workspace` start/restart/resume is unavailable under sandbox profile '{profile}': \
+            "`chutes-build workspace` start/restart/resume is unavailable under sandbox profile '{profile}': \
              those commands (re)activate shared-leader workspace exposure that this session cannot \
              prove is confined by that profile. Disable the profile at the source that selected it \
              (CLI, env, config, or a managed requirement)."
@@ -606,13 +606,13 @@ async fn run_workspace_mgmt(args: WorkspaceMgmtArgs) -> Result<()> {
         WorkspaceGate::Enabled => {}
         WorkspaceGate::Disabled => {
             anyhow::bail!(
-                "`grok workspace` is not enabled for this account \
+                "`chutes-build workspace` is not enabled for this account \
              (gated by a server-side feature flag that is currently off)."
             )
         }
         WorkspaceGate::Unknown => {
             anyhow::bail!(
-                "Could not load your settings for `grok workspace`. Check your \
+                "Could not load your settings for `chutes-build workspace`. Check your \
              network connection (run `chutes-build login` if you are signed out), then \
              try again."
             )
@@ -681,7 +681,7 @@ async fn connect_leader_control(
     .map_err(|e| {
         anyhow::anyhow!(
             "no running leader for this environment ({e}). \
-             Start a grok session, or run `{} start`.",
+             Start a Chutes Build session, or run `{} start`.",
             door.name
         )
     })
@@ -2008,21 +2008,130 @@ fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::
     writer.write_all(version_text(channel_label).as_bytes())
 }
 
+/// Suppresses terminal echo while the login prompt reads the key and
+/// restores the previous mode on drop. `acquire` returns `None` when stdin
+/// is not a console (piped input never echoes, so there is nothing to
+/// suppress) or when the mode switch fails — the caller then reads plainly.
+struct HiddenInputGuard {
+    #[cfg(unix)]
+    original: libc::termios,
+    #[cfg(windows)]
+    original_mode: u32,
+}
+
+#[cfg(unix)]
+impl HiddenInputGuard {
+    fn acquire() -> Option<Self> {
+        // SAFETY: fd 0 is stdin; `original` is a valid out-buffer, and the
+        // guard restores it on drop before any other terminal use.
+        unsafe {
+            let mut original = std::mem::zeroed::<libc::termios>();
+            if libc::tcgetattr(0, &mut original) != 0 {
+                return None;
+            }
+            let mut without_echo = original;
+            without_echo.c_lflag &= !libc::ECHO;
+            if libc::tcsetattr(0, libc::TCSANOW, &without_echo) != 0 {
+                return None;
+            }
+            Some(Self { original })
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for HiddenInputGuard {
+    fn drop(&mut self) {
+        // SAFETY: same fd and a termios read back from it; best-effort.
+        unsafe {
+            libc::tcsetattr(0, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+#[cfg(windows)]
+const STD_INPUT_HANDLE: u32 = 0xFFFF_FFF6; // (DWORD)-10
+#[cfg(windows)]
+const ENABLE_ECHO_INPUT: u32 = 0x0004;
+#[cfg(windows)]
+unsafe extern "system" {
+    fn GetStdHandle(nStdHandle: u32) -> *mut core::ffi::c_void;
+    fn GetConsoleMode(hConsoleHandle: *mut core::ffi::c_void, lpMode: *mut u32) -> i32;
+    fn SetConsoleMode(hConsoleHandle: *mut core::ffi::c_void, dwMode: u32) -> i32;
+}
+
+#[cfg(windows)]
+impl HiddenInputGuard {
+    fn acquire() -> Option<Self> {
+        // SAFETY: console handles are process-global; each call is
+        // null/invalid-handle checked, and the guard restores the saved
+        // mode on drop.
+        unsafe {
+            let handle = GetStdHandle(STD_INPUT_HANDLE);
+            if handle.is_null() || handle == -1_isize as *mut _ {
+                return None;
+            }
+            let mut original_mode: u32 = 0;
+            if GetConsoleMode(handle, &mut original_mode) == 0 {
+                return None;
+            }
+            if SetConsoleMode(handle, original_mode & !ENABLE_ECHO_INPUT) == 0 {
+                return None;
+            }
+            Some(Self { original_mode })
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for HiddenInputGuard {
+    fn drop(&mut self) {
+        // SAFETY: same checked-handle pattern as `acquire`; best-effort.
+        unsafe {
+            let handle = GetStdHandle(STD_INPUT_HANDLE);
+            if !handle.is_null() && handle != -1_isize as *mut _ {
+                SetConsoleMode(handle, self.original_mode);
+            }
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+impl HiddenInputGuard {
+    fn acquire() -> Option<Self> {
+        None
+    }
+}
+
 /// CHUTES-only `login`: interactive API-key setup (no account sign-in exists).
 /// Reads one line from stdin — prompted on a TTY, piped otherwise — validates
 /// it against Chutes, and saves it to the local key store. Closed/empty
 /// non-TTY stdin keeps the historical guidance (scripts calling `login` with
-/// no input still exit 1 fast instead of hanging). The key is never echoed.
+/// no input still exit 1 fast instead of hanging). The key is never echoed:
+/// terminal echo is disabled while a TTY reads it, and piped input has no
+/// echo to suppress.
 async fn run_chutes_login_setup() -> anyhow::Result<()> {
     use std::io::{BufRead as _, IsTerminal as _, Write as _};
     let home = xai_grok_shell::util::grok_home::grok_home();
     let interactive = std::io::stdin().is_terminal();
+    let hidden = if interactive {
+        HiddenInputGuard::acquire()
+    } else {
+        None
+    };
     if interactive {
         eprint!("Enter your Chutes API key: ");
         let _ = std::io::stderr().flush();
     }
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;
+    let echo_was_off = hidden.is_some();
+    drop(hidden);
+    if echo_was_off {
+        // The Enter keystroke was not echoed while hidden; keep the next
+        // line of output off the prompt line.
+        eprintln!();
+    }
     let key = line.trim();
     if key.is_empty() {
         if interactive {
@@ -2626,11 +2735,11 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
     match result {
         Ok(true) => {
             let adopted = bg_update_wait.lock().await.take();
-            let grok = "grok";
+            let bin = "chutes-build";
             if finish_update_on_exit(adopted, &update_config).await {
-                eprintln!("Update installed. Run `{grok}` to start.");
+                eprintln!("Update installed. Run `{bin}` to start.");
             } else {
-                eprintln!("Update did not complete. Run `{grok} update` to retry.");
+                eprintln!("Update did not complete. Run `{bin} update` to retry.");
             }
             Ok(())
         }
@@ -2739,7 +2848,7 @@ fn stdio_auto_update_enabled(
 ) -> bool {
     is_stdio && !use_leader && updates_enabled && managed_install
 }
-/// True when `exe` is the binary `<grok_home>/bin/grok` resolves to, the install that adopts a staged update on
+/// True when `exe` is the binary `<grok_home>/bin/chutes-build` resolves to, the install that adopts a staged update on
 /// respawn. Both sides are canonicalized; any failure reports unmanaged and skips the update. The npm shim
 /// hardcodes `~/.chutes-build`, so a custom `CHUTES_BUILD_HOME` skips here too.
 fn is_managed_install(exe: Option<std::path::PathBuf>, grok_home: &std::path::Path) -> bool {
@@ -2949,6 +3058,13 @@ mod tests {
         let nz = |n| NonZeroUsize::new(n).unwrap();
         assert_eq!(default_worker_threads(nz(360)), DEFAULT_MAX_WORKER_THREADS);
         assert_eq!(default_worker_threads(nz(4)), nz(4));
+    }
+    #[test]
+    fn hidden_input_falls_back_without_a_console() {
+        // Under `cargo test` stdin is redirected, so the guard must decline
+        // gracefully instead of failing the login read path.
+        assert!(!std::io::IsTerminal::is_terminal(&std::io::stdin()));
+        assert!(HiddenInputGuard::acquire().is_none());
     }
     #[test]
     fn worker_threads_from_selects_default_or_override() {
@@ -3202,30 +3318,32 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
-    fn is_managed_install_matches_only_the_bin_grok_target() {
-        let home =
-            std::env::temp_dir().join(format!("grok-pager-managed-install-{}", std::process::id()));
+    fn is_managed_install_matches_only_the_bin_chutes_build_target() {
+        let home = std::env::temp_dir().join(format!(
+            "chutes-build-managed-install-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join("bin")).unwrap();
         std::fs::create_dir_all(home.join("downloads")).unwrap();
         assert!(!is_managed_install(
-            Some(home.join("bin").join("grok")),
+            Some(home.join("bin").join("chutes-build")),
             &home
         ));
         assert!(!is_managed_install(None, &home));
         assert!(!is_managed_install(
-            Some(home.join("bin").join("grok")),
+            Some(home.join("bin").join("chutes-build")),
             std::path::Path::new("")
         ));
-        let target = home.join("downloads").join("grok-1.2.3");
+        let target = home.join("downloads").join("chutes-build-1.2.3");
         std::fs::write(&target, b"binary").unwrap();
-        std::os::unix::fs::symlink(&target, home.join("bin").join("grok")).unwrap();
+        std::os::unix::fs::symlink(&target, home.join("bin").join("chutes-build")).unwrap();
         assert!(is_managed_install(
-            Some(home.join("bin").join("grok")),
+            Some(home.join("bin").join("chutes-build")),
             &home
         ));
         assert!(is_managed_install(Some(target.clone()), &home));
-        let pinned = home.join("bin").join("grok-9.9.9");
+        let pinned = home.join("bin").join("chutes-build-9.9.9");
         std::fs::write(&pinned, b"binary").unwrap();
         assert!(!is_managed_install(Some(pinned), &home));
         let _ = std::fs::remove_dir_all(&home);

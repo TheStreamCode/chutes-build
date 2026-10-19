@@ -2337,6 +2337,10 @@ fn welcome_ctrl_q_requires_confirmation() {
 #[test]
 fn welcome_ctrl_u_update_keeps_priority_over_foreign_resume() {
     let mut app = test_app();
+    // The flow canonicalizes `app.cwd`: point it at a directory that exists
+    // on every platform (`/tmp` does not canonicalize on Windows).
+    let foreign_cwd = tempfile::tempdir().unwrap();
+    app.cwd = foreign_cwd.path().to_path_buf();
     app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
         cursor: true,
         ..Default::default()

@@ -137,7 +137,9 @@ impl xai_tool_runtime::Tool for TranscribeAudioTool {
             )));
         }
 
-        let client = ChutesMediaClient::from_env()
+        let credentials = super::resolve_credentials(&ctx)
+            .map_err(|error| execution_error("transcribe_audio", error))?;
+        let client = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("transcribe_audio", error))?;
         let detail = client.describe(slug).await.map_err(|error| {
             execution_error(

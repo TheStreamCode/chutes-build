@@ -346,6 +346,16 @@ mod tests {
             .collect()
     }
 
+    /// `TERM=xterm-256color` parses to Ansi256 on Unix, but native Windows takes
+    /// the documented ConHost truecolor fallback (`terminal_supports_truecolor_brand`).
+    fn expected_256color() -> StandaloneColorEvidence {
+        if cfg!(target_os = "windows") {
+            StandaloneColorEvidence::Available(ColorLevel::TrueColor)
+        } else {
+            StandaloneColorEvidence::Available(ColorLevel::Ansi256)
+        }
+    }
+
     #[test]
     fn standalone_color_uses_stderr_terminal_not_stdout() {
         assert_eq!(
@@ -364,7 +374,7 @@ mod tests {
                 false,
                 TerminalName::Unknown,
             ),
-            StandaloneColorEvidence::Available(ColorLevel::Ansi256)
+            expected_256color()
         );
         assert_eq!(
             standalone_from_env(
@@ -395,7 +405,7 @@ mod tests {
                 true,
                 TerminalName::Unknown,
             ),
-            StandaloneColorEvidence::Available(ColorLevel::Ansi256)
+            expected_256color()
         );
     }
 

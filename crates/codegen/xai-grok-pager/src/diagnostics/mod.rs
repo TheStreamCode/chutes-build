@@ -49,7 +49,23 @@ pub fn apply_voice_probe(report: &mut DiagnosticReport, emit_missing_issue: bool
     if !xai_grok_voice::AUDIO_SUPPORTED {
         return;
     }
-    match xai_grok_voice::input_device_info() {
+    push_voice_probe_result(
+        report,
+        xai_grok_voice::input_device_info(),
+        emit_missing_issue,
+    );
+}
+
+/// Pure wiring behind [`apply_voice_probe`]: records an injected probe
+/// outcome. Separated so tests can pin the mapping without touching real
+/// audio hardware, which is environment-dependent and has crashed the
+/// Windows test harness through the native audio stack.
+pub(crate) fn push_voice_probe_result(
+    report: &mut DiagnosticReport,
+    result: Result<xai_grok_voice::probe::InputDeviceInfo, xai_grok_voice::VoiceError>,
+    emit_missing_issue: bool,
+) {
+    match result {
         Ok(device) => {
             report.facts.voice = Some(VoiceFacts::Device {
                 name: device.name,
@@ -2966,5 +2982,80 @@ mod tests {
         )
         .expect("fixture");
         assert!(summarize_warnings(&[w], true).is_none());
+    }
+
+    fn voice_test_report() -> DiagnosticReport {
+        let ctx = plain_tmux_ctx();
+        let query = FakeTmuxQuery::healthy_modern();
+        let snapshot = test_snapshot(&ctx, &query, false, true, false, None);
+        let doctor_snapshot = DiagnosticSnapshot::from_parts(
+            test_snapshot(&ctx, &query, false, true, false, None),
+            probes::ClipboardProbeFacts {
+                route: crate::clipboard::resolve_clipboard_route(&ctx),
+                native_tool: "pbcopy",
+                osc52_sink_active: false,
+            },
+            crate::host::HostOs::Macos,
+            crate::host::DisplayServer::Unknown,
+            false,
+            ColorLevel::TrueColor,
+            snapshot.runtime.into(),
+        );
+        view::view(doctor_snapshot)
+    }
+
+    #[test]
+    fn voice_probe_result_device_records_facts_without_finding() {
+        let mut report = voice_test_report();
+        let findings_before = report.findings.len();
+        push_voice_probe_result(
+            &mut report,
+            Ok(xai_grok_voice::probe::InputDeviceInfo {
+                name: "mic".to_owned(),
+                detail: "48000 Hz".to_owned(),
+            }),
+            true,
+        );
+        assert!(matches!(
+            report.facts.voice,
+            Some(VoiceFacts::Device { .. })
+        ));
+        assert_eq!(report.findings.len(), findings_before);
+    }
+
+    #[test]
+    fn voice_probe_result_missing_records_finding_when_emitted() {
+        let mut report = voice_test_report();
+        push_voice_probe_result(
+            &mut report,
+            Err(xai_grok_voice::VoiceError::Config("no mic".to_owned())),
+            true,
+        );
+        assert!(matches!(
+            report.facts.voice,
+            Some(VoiceFacts::Missing { .. })
+        ));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.id == VOICE_NO_INPUT_DEVICE_ID)
+        );
+    }
+
+    #[test]
+    fn voice_probe_result_missing_skips_finding_when_silent() {
+        let mut report = voice_test_report();
+        let findings_before = report.findings.len();
+        push_voice_probe_result(
+            &mut report,
+            Err(xai_grok_voice::VoiceError::Config("no mic".to_owned())),
+            false,
+        );
+        assert!(matches!(
+            report.facts.voice,
+            Some(VoiceFacts::Missing { .. })
+        ));
+        assert_eq!(report.findings.len(), findings_before);
     }
 }

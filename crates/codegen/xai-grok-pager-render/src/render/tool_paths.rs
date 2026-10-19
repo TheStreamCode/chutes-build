@@ -68,7 +68,22 @@ fn non_empty_rel(rel: &Path) -> Option<String> {
     if value.is_empty() {
         None
     } else {
-        Some(value.into_owned())
+        Some(display_separators(&value))
+    }
+}
+
+/// Display strings use `/` on every platform (UI consistency, OSC8 URLs,
+/// selection text). Native `\` rendering on Windows would also break
+/// `/`-splitting shorteners downstream. Unix output is untouched: `\` is a
+/// legal filename character there, while on Windows it is always a separator.
+fn display_separators(text: &str) -> String {
+    #[cfg(windows)]
+    {
+        text.replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        text.to_owned()
     }
 }
 
@@ -107,21 +122,23 @@ fn resolve_tool_path(path: &str, cwd: Option<&Path>) -> ResolvedToolPath {
 }
 
 fn path_for_fullscreen_header(path: &str, cwd: Option<&Path>) -> String {
-    resolve_tool_path(path, cwd)
-        .display_path
-        .to_string_lossy()
-        .into_owned()
+    let display = resolve_tool_path(path, cwd).display_path;
+    display_separators(&display.to_string_lossy())
 }
 
 fn path_for_expanded_header(path: &str, cwd: Option<&Path>) -> String {
     let resolved = resolve_tool_path(path, cwd);
     resolved
         .relative_to_cwd
-        .unwrap_or_else(|| resolved.display_path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| display_separators(&resolved.display_path.to_string_lossy()))
 }
 
 /// Shorten a file path to fit within `budget` display columns using fish-style component shortening.
 pub fn shorten_path(path: &str, budget: usize) -> String {
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    #[cfg(windows)]
+    let path = path.as_str();
     if budget == 0 {
         return String::new();
     }
@@ -358,6 +375,7 @@ mod tests {
         assert_eq!(unresolved.relative_to_cwd, None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn expanded_outside_cwd_stays_normalized_target() {
         let cwd = Path::new("/Users/me/project");

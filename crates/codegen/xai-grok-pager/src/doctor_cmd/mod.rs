@@ -90,6 +90,16 @@ fn collect_report_with(
     report
 }
 
+/// Test-only report assembly without the microphone probe: real audio
+/// enumeration is environment-dependent (extra finding on mic-less machines)
+/// and has crashed the Windows test harness through the native audio stack.
+#[cfg(test)]
+pub(crate) fn collect_report_without_voice_probe(
+    snapshot: crate::diagnostics::probes::StandaloneDiagnosticSnapshot<'_>,
+) -> DiagnosticReport {
+    crate::diagnostics::view(snapshot.into())
+}
+
 fn write_report(
     report: &DiagnosticReport,
     json_output: bool,

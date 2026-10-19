@@ -96,7 +96,20 @@ fn ghostty(is_ssh: bool) -> TerminalContext {
     }
 }
 
+/// Hold the theme test lock and pin the `terminal` rollout gate on: `view()`
+/// reads the gate twice (available + total themes), so a concurrent gating
+/// test flipping it mid-view would print a mixed `5/6`. Must not be called
+/// with the theme test lock already held.
+fn pin_theme_gate_for_doctor() -> std::sync::MutexGuard<'static, ()> {
+    let guard = crate::theme::cache::test_lock()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    crate::theme::cache::set_terminal_theme_enabled(true);
+    guard
+}
+
 fn build_doctor(snapshot: DoctorProbeSnapshot<'_>) -> String {
+    let _guard = pin_theme_gate_for_doctor();
     let report = view(DiagnosticSnapshot::from(snapshot));
     format_doctor(&report)
 }
@@ -105,6 +118,7 @@ fn build_doctor_with_runtime(
     snapshot: DoctorProbeSnapshot<'_>,
     request: crate::diagnostics::TuiRuntimeRequest<'_>,
 ) -> String {
+    let _guard = pin_theme_gate_for_doctor();
     let findings = crate::diagnostics::collect_tui_runtime_findings(
         &snapshot.common,
         request.notification_method,

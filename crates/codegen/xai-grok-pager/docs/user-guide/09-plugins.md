@@ -243,12 +243,12 @@ To install it for everyone automatically instead of person by person, see [Distr
 
 ## Distribute across an organization
 
-Admins control plugins, marketplaces, and MCP servers through grok's TOML layers plus an optional Claude policy file:
+Admins control plugins, marketplaces, and MCP servers through Chutes Build's TOML layers plus an optional Claude policy file:
 
-- **`managed_config.toml` / `requirements.toml`** (and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when grok should enforce them on every server and marketplace, including ones defined in the user's own config or by plugins. `requirements.toml` / MDM is the tamper-resistant tier; user-writable `~/.chutes-build` copies are self-imposed only.
-- **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.chutes-build/config.toml`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind grok-native subjects (user/system `config.toml`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
+- **`managed_config.toml` / `requirements.toml`** (and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when Chutes Build should enforce them on every server and marketplace, including ones defined in the user's own config or by plugins. `requirements.toml` / MDM is the tamper-resistant tier; user-writable `~/.chutes-build` copies are self-imposed only.
+- **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.chutes-build/config.toml`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind native subjects (user/system `config.toml`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
 
-Layers combine **strictest-wins**: any deny wins, every restricted source must allow, and boolean pins only tighten (`false` sticks; a later `true` cannot unpin). CamelCase Claude keys and snake_case grok keys are both accepted in TOML.
+Layers combine **strictest-wins**: any deny wins, every restricted source must allow, and boolean pins only tighten (`false` sticks; a later `true` cannot unpin). CamelCase Claude keys and snake_case Chutes Build keys are both accepted in TOML.
 
 `chutes-build inspect` (and `chutes-build inspect --json`) shows the loaded MCP/marketplace lists, whether `allowManagedMcpServersOnly` is `off` / `advisory` / `enforced`, extra marketplace pins, and tighten-only pins under **Enforced by policy**.
 
@@ -290,9 +290,9 @@ source = "github"
 repo = "ACME/more-plugins"
 ```
 
-The same lists work in Claude `managed-settings.json` (advisory for already-configured grok-native sources). URL comparison folds case on the **scheme and host only**, and strips exactly one trailing `.git` (`repo.git.git` is a different repo). Use `chutes-build inspect` to see the loaded allowlist.
+The same lists work in Claude `managed-settings.json` (advisory for already-configured native sources). URL comparison folds case on the **scheme and host only**, and strips exactly one trailing `.git` (`repo.git.git` is a different repo). Use `chutes-build inspect` to see the loaded allowlist.
 
-Provision extra sources from policy with `extraKnownMarketplaces` / `extra_known_marketplaces`. First pinning layer wins a name; a configured source already holding that name with a different URL is not overwritten (logged). `autoUpdate = false` on an extra pin turns **global** session-start plugin auto-update off (there is no per-marketplace grok equivalent).
+Provision extra sources from policy with `extraKnownMarketplaces` / `extra_known_marketplaces`. First pinning layer wins a name; a configured source already holding that name with a different URL is not overwritten (logged). `autoUpdate = false` on an extra pin turns **global** session-start plugin auto-update off (there is no per-marketplace Chutes Build equivalent).
 
 ```toml
 [extra_known_marketplaces.acme]
@@ -316,7 +316,7 @@ Each allow or deny entry is one of:
 
 **Misconfiguration locks down rather than failing open.** A policy key with the wrong type (a table or string where a list belongs), a key written in both spellings with different values, an allow list whose every entry is unsupported, or a deny entry that cannot be enforced (unknown fields, a partial `serverCommand`, a `serverUrl` that can never match) locks that file's MCP policy down: every server it binds is blocked with the reason `locked down by policy (<file>)` until the file is fixed. Startup logs name the file and the offending key. An unusable **allow** entry only grants nothing.
 
-`allowManagedMcpServersOnly = true` (or `allow_managed_mcp_servers_only`) is a lockdown: a positive allow-entry match is required even when the allow list is empty. Native TOML shows as `enforced` in inspect; Claude-only shows as `advisory` (grok-native servers exempt).
+`allowManagedMcpServersOnly = true` (or `allow_managed_mcp_servers_only`) is a lockdown: a positive allow-entry match is required even when the allow list is empty. Native TOML shows as `enforced` in inspect; Claude-only shows as `advisory` (native servers exempt).
 
 `enableAllProjectMcpServers = false` drops project-scoped MCP unless the server also matches an allow entry.
 

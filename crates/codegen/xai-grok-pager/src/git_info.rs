@@ -679,8 +679,11 @@ mod tests {
         let expected_canon = dunce::canonicalize(&main.path)
             .map(|p| crate::test_util::collapsed_path_display(&p))
             .unwrap_or_else(|_| expected.clone());
+        // Linked-worktree metadata comes from git with `/` separators while the
+        // helper collapses the fs path with native ones; compare separator-blind.
+        let norm = |s: &str| s.replace('\\', "/");
         assert!(
-            main_repo == expected || main_repo == expected_canon,
+            norm(&main_repo) == norm(&expected) || norm(&main_repo) == norm(&expected_canon),
             "main_repo={main_repo}, expected {expected} or {expected_canon}"
         );
     }

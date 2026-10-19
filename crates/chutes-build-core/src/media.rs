@@ -29,6 +29,15 @@ impl ChutesMediaClient {
     // WHY-ALLOW: product-policy client: the SSRF-safe resolver is the security boundary here; extra-CA support for these clients is tracked separately
     #[allow(clippy::disallowed_methods)]
     pub fn from_env() -> Result<Self, MediaError> {
+        Self::from_credentials(ChutesCredentials::from_env()?)
+    }
+
+    /// Client for explicitly resolved credentials: tool dispatch publishes
+    /// the agent's runtime key on the call context, which plain `from_env`
+    /// cannot see.
+    // WHY-ALLOW: same client as `from_env`; see the note there.
+    #[allow(clippy::disallowed_methods)]
+    pub fn from_credentials(credentials: ChutesCredentials) -> Result<Self, MediaError> {
         let endpoints = ChutesEndpoints::default();
         endpoints.validate()?;
         Ok(Self {
@@ -40,7 +49,7 @@ impl ChutesMediaClient {
                 ))
                 .build()?,
             endpoints,
-            credentials: ChutesCredentials::from_env()?,
+            credentials,
         })
     }
 
@@ -377,5 +386,12 @@ mod tests {
         assert!(validate_download_url("https://localhost/asset.png").is_err());
         assert!(validate_download_url("https://127.0.0.1/asset.png").is_err());
         assert!(validate_download_url("https://user:pass@example.com/asset.png").is_err());
+    }
+
+    #[test]
+    fn from_credentials_builds_without_env() {
+        let credentials =
+            ChutesCredentials::from_key("cpk-test-key").expect("test key builds credentials");
+        assert!(ChutesMediaClient::from_credentials(credentials).is_ok());
     }
 }

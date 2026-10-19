@@ -258,12 +258,12 @@ const SCREEN_MODE_CHOICES: &[EnumChoice] = &[
     EnumChoice {
         canonical: "fullscreen",
         display: "Fullscreen",
-        description: "Open plain grok in the standard fullscreen TUI. Default when unset.",
+        description: "Open Chutes Build in the standard fullscreen TUI. Default when unset.",
     },
     EnumChoice {
         canonical: "minimal",
         display: "Minimal",
-        description: "Open plain grok in scrollback-native (minimal) mode.",
+        description: "Open Chutes Build in scrollback-native (minimal) mode.",
     },
 ];
 
@@ -493,7 +493,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shell,
             label: "Default screen mode",
-            description: "How plain grok opens next time: Fullscreen (default when unset) or \
+            description: "How Chutes Build opens next time: Fullscreen (default when unset) or \
                           Minimal. Writes [ui] screen_mode in config.toml. Restart required. \
                           Switch this session only with /minimal or /fullscreen.",
             keywords: &[

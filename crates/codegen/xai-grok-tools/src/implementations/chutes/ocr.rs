@@ -145,8 +145,10 @@ impl xai_tool_runtime::Tool for OcrPageTool {
                 .map_err(|error| execution_error("ocr_page", error))?;
 
         let model = input.model.as_deref().unwrap_or(DEFAULT_OCR_MODEL);
-        let client =
-            ChutesVisionClient::from_env().map_err(|error| execution_error("ocr_page", error))?;
+        let credentials =
+            super::resolve_credentials(&ctx).map_err(|error| execution_error("ocr_page", error))?;
+        let client = ChutesVisionClient::from_credentials(credentials)
+            .map_err(|error| execution_error("ocr_page", error))?;
         let result = client
             .transcribe(
                 model,

@@ -80,13 +80,16 @@ pub fn ensure_env_from_store(home: &Path) -> bool {
 
 #[cfg(unix)]
 fn write_private(path: &Path, content: &str) -> io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true).mode(0o600);
     let mut file = options.open(path)?;
     use std::io::Write as _;
     file.write_all(content.as_bytes())?;
-    file.sync_all()
+    file.sync_all()?;
+    // `mode` applies at creation only: an overwrite of a pre-existing
+    // world-readable file would keep its loose permissions without this.
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
 #[cfg(not(unix))]
@@ -144,5 +147,25 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600, "mode must be 0600, got {mode:o}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overwrite_tightens_loose_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let home = tempfile::tempdir().expect("tempdir");
+        let path = key_path(home.path());
+        std::fs::create_dir_all(home.path()).expect("home");
+        std::fs::write(&path, "cpk-old-key").expect("pre-existing file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("loosen permissions");
+        save(home.path(), "cpk-new-key").expect("save");
+        let mode = std::fs::metadata(&path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "overwrite must tighten to 0600, got {mode:o}");
+        assert_eq!(load(home.path()).as_deref(), Some("cpk-new-key"));
     }
 }

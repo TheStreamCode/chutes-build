@@ -795,52 +795,44 @@ enum RuleVerdict {
     NoRule,
 }
 
-struct KnownBug {
-    observed: RuleVerdict,
-    bug: &'static str,
-}
-
 #[test]
 fn malformed_rule_entry_leaves_its_siblings_in_force_and_fails_closed() {
     use crate::policy::CompiledPolicy;
     use crate::types::{AccessKind, Decision};
 
-    let rows = [
+    let rows: [(&str, &str, RuleVerdict); 7] = [
         (
             r#"deny = ["Bash(rm:*", "Bash(touch:*)"]"#,
             "touch made.txt",
             RuleVerdict::Deny,
-            None,
         ),
         (
             r#"deny = ["Bash(rm:*", "Bash(touch:*)"]"#,
             "rm notes.toml",
             RuleVerdict::Deny,
-            Some(KnownBug {
-                observed: RuleVerdict::NoRule,
-                bug: "fail-open: a malformed deny entry is dropped with only a warning, so the command it names prompts instead of being denied",
-            }),
         ),
         (
             r#"allow = ["Bash(rm:*", "Bash(python3 *)"]"#,
             "python3 -c \"print(1)\"",
             RuleVerdict::Allow,
-            None,
         ),
         (
             r#"allow = ["Bash(rm:*", "Bash(python3 *)"]"#,
             "rm notes.toml",
             RuleVerdict::NoRule,
-            None,
         ),
         (
             r#"deny = ["Bash(cat:*"]"#,
             "cat notes.toml",
             RuleVerdict::Deny,
-            Some(KnownBug {
-                observed: RuleVerdict::NoRule,
-                bug: "fail-open: a malformed deny entry is dropped with only a warning, so the read-only command it names runs unprompted",
-            }),
+        ),
+        // Ask entries fail closed the same way: a tool-wide ask.
+        (r#"ask = ["Bash(rm:*"]"#, "rm notes.toml", RuleVerdict::Ask),
+        // No identifiable tool, nothing runnable to scope to: still dropped.
+        (
+            r#"deny = ["Frobnicate(x)"]"#,
+            "rm notes.toml",
+            RuleVerdict::NoRule,
         ),
     ];
     let verdict_of = |section: &str, command: &str| {
@@ -859,33 +851,13 @@ fn malformed_rule_entry_leaves_its_siblings_in_force_and_fails_closed() {
     };
     let expected: Vec<(&str, &str, RuleVerdict)> = rows
         .iter()
-        .map(|(section, command, intended, known_bug)| {
-            (
-                *section,
-                *command,
-                known_bug.as_ref().map_or(*intended, |bug| bug.observed),
-            )
-        })
+        .map(|(section, command, intended)| (*section, *command, *intended))
         .collect();
     let actual: Vec<(&str, &str, RuleVerdict)> = rows
         .iter()
-        .map(|(section, command, _, _)| (*section, *command, verdict_of(section, command)))
+        .map(|(section, command, _)| (*section, *command, verdict_of(section, command)))
         .collect();
-    let known_bugs: Vec<String> = rows
-        .iter()
-        .filter_map(|(_, command, intended, known_bug)| {
-            known_bug.as_ref().map(|bug| {
-                format!(
-                    "`{command}` intends {intended:?}, shows {:?}: {}",
-                    bug.observed, bug.bug
-                )
-            })
-        })
-        .collect();
-    assert_eq!(
-        expected, actual,
-        "a row that flipped from its known bug now shows the intended verdict; known bugs: {known_bugs:?}"
-    );
+    assert_eq!(expected, actual);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

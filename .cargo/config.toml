@@ -59,10 +59,13 @@ rustflags = [
 ]
 
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "force-unwind-tables=yes", "-C", "target-feature=+crt-static"]
+# /STACK: the dev-profile binary overflows the 1 MiB main-thread stack before
+# main runs (STATUS_STACK_OVERFLOW on `--version`); reserve 8 MiB instead.
+rustflags = ["-C", "force-unwind-tables=yes", "-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8388608"]
 
 [target.aarch64-pc-windows-msvc]
-rustflags = ["-C", "force-unwind-tables=yes", "-C", "target-feature=+crt-static"]
+# Same dev-profile main-thread overflow as x86_64 above.
+rustflags = ["-C", "force-unwind-tables=yes", "-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8388608"]
 
 
 # jemalloc page size for Apple Silicon (macOS aarch64 uses 16KB pages = 2^14).

@@ -4,7 +4,7 @@ use super::*;
 fn shorten_location_path_kerem_grok_home() {
     assert_eq!(
         shorten_location_path("~/.chutes-build/worktrees/code-xai/dashboard-design").as_ref(),
-        "~/.g/w/code-xai/dashboard-design"
+        "~/.c/w/code-xai/dashboard-design"
     );
     assert_eq!(
         shorten_location_path("$CHUTES_BUILD_HOME/worktrees/code-xai/dashboard-design").as_ref(),
@@ -88,7 +88,7 @@ fn shorten_location_path_multi_dot_dirs_are_not_traversal() {
     assert_eq!(shorten_location_component("."), ".");
     assert_eq!(shorten_location_component(".."), "..");
     assert_eq!(shorten_location_component("..."), "...");
-    assert_eq!(shorten_location_component(".chutes-build"), ".g");
+    assert_eq!(shorten_location_component(".chutes-build"), ".c");
     assert_eq!(shorten_location_component("..cache"), "..c");
     assert_eq!(shorten_location_component("...foo"), "...f");
     assert_eq!(shorten_location_component("Documents"), "D");

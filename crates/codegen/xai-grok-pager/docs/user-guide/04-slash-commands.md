@@ -456,7 +456,7 @@ Open Settings on **Coding data, retention, and training**, where you choose
 /privacy
 ```
 
-This setting doesn't touch `[features] telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it, and admins can also enable or disable Zero Data Retention for the team. When the choice isn't yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing; it does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+`[features] telemetry`, `trace_upload`, and the external OTEL stream are off and inert in this build — see [Monitoring Usage](24-monitoring-usage.md) — so this row is the only sharing knob that does anything here. Team-managed states (`ZDR`, `· Admin Managed` in place of the value) exist for account-auth builds only; this API-key-only build has no account auth, so the row always stays editable.
 
 ---
 

@@ -30,8 +30,9 @@ struct CatalogResponse {
 
 /// The subset of a catalog entry's fields this crate actually consumes.
 /// Every field is optional/defaulted on purpose: a model missing `id`,
-/// `root`, or `input_modalities` must still be treated as "no match" /
-/// "no declared modalities", not fail this entry's parse.
+/// `root`, `input_modalities`, or `supported_features` must still be
+/// treated as "no match" / "no declared modalities or features", not fail
+/// this entry's parse.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 struct CatalogModel {
     id: Option<String>,
@@ -40,6 +41,8 @@ struct CatalogModel {
     input_modalities: Vec<String>,
     #[serde(default)]
     output_modalities: Vec<String>,
+    #[serde(default)]
+    supported_features: Vec<String>,
 }
 
 /// Cached catalog body, read on the fast path without ever holding a lock
@@ -143,11 +146,13 @@ pub async fn live_chat_model_ids() -> Result<Vec<String>, CatalogError> {
     Ok(chat_model_ids(&body))
 }
 
-/// A chat-capable catalog entry with the modalities fallback selection needs.
+/// A chat-capable catalog entry with the modalities and features fallback
+/// selection needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ChatModelEntry {
     id: String,
     input_modalities: Vec<String>,
+    supported_features: Vec<String>,
 }
 
 /// Chat-capable entries in live catalog order: concrete text-in/text-out ids
@@ -180,6 +185,7 @@ fn chat_models(body: &CatalogResponse) -> Vec<ChatModelEntry> {
                 Some(ChatModelEntry {
                     id,
                     input_modalities: input,
+                    supported_features: entry.supported_features,
                 })
             } else {
                 None
@@ -188,10 +194,37 @@ fn chat_models(body: &CatalogResponse) -> Vec<ChatModelEntry> {
         .collect()
 }
 
+/// Whether the excluded model positively lacks tool support: found in the
+/// catalog with a non-empty features list that has no `tools`. Anything
+/// else (declares `tools`, has no features list, or is absent entirely)
+/// keeps the tool requirement on — a tool-capable replacement is a safe
+/// superset for any turn, while the reverse breaks agentic turns. Mirrors
+/// the image fail-closed default at the sampler call site.
+fn exclude_lacks_tools(body: &CatalogResponse, exclude: &str) -> bool {
+    body.data
+        .iter()
+        .find_map(|raw_entry| {
+            let entry: CatalogModel = serde_json::from_value(raw_entry.clone()).ok()?;
+            if entry.id.as_deref() == Some(exclude) || entry.root.as_deref() == Some(exclude) {
+                Some(
+                    !entry.supported_features.is_empty()
+                        && !entry.supported_features.iter().any(|f| f == "tools"),
+                )
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
 /// First live chat model other than `exclude`, in catalog order. When
-/// `require_image`, only models declaring image input qualify. Pure over a
-/// fetched body so fallback selection stays hermetic and testable.
+/// `require_image`, only models declaring image input qualify. Tool support
+/// follows the excluded model: unless it positively lacks `tools`, only
+/// replacements declaring `tools` qualify (a missing features list counts
+/// as no tools). Pure over a fetched body so fallback selection stays
+/// hermetic and testable.
 fn equivalent_model(body: &CatalogResponse, exclude: &str, require_image: bool) -> Option<String> {
+    let require_tools = !exclude_lacks_tools(body, exclude);
     chat_models(body).into_iter().find_map(|model| {
         if model.id == exclude {
             return None;
@@ -199,12 +232,16 @@ fn equivalent_model(body: &CatalogResponse, exclude: &str, require_image: bool) 
         if require_image && !model.input_modalities.iter().any(|m| m == "image") {
             return None;
         }
+        if require_tools && !model.supported_features.iter().any(|f| f == "tools") {
+            return None;
+        }
         Some(model.id)
     })
 }
 
 /// Live equivalent of [`equivalent_model`] over the cached/live catalog, for
-/// sampler pre-stream fallback when a model is gone or cannot serve.
+/// sampler pre-stream fallback when a model is gone or cannot serve. Tool
+/// support follows the failed model (see [`equivalent_model`]).
 pub async fn find_equivalent_chat_model(
     exclude: &str,
     require_image: bool,
@@ -465,12 +502,12 @@ mod tests {
     fn equivalent_model_skips_excluded_aliases_and_pools() {
         let body = CatalogResponse {
             data: vec![
-                serde_json::json!({"id": "a/Text", "input_modalities": ["text"], "output_modalities": ["text"]}),
-                serde_json::json!({"id": "b/Multi", "input_modalities": ["text", "image"], "output_modalities": ["text"]}),
+                serde_json::json!({"id": "a/Text", "input_modalities": ["text"], "output_modalities": ["text"], "supported_features": ["tools"]}),
+                serde_json::json!({"id": "b/Multi", "input_modalities": ["text", "image"], "output_modalities": ["text"], "supported_features": ["tools"]}),
                 serde_json::json!({"id": "default"}),
                 serde_json::json!({"id": "model-router"}),
                 serde_json::json!({"id": "x,y"}),
-                serde_json::json!({"id": "c/Text", "input_modalities": ["text"], "output_modalities": ["text"]}),
+                serde_json::json!({"id": "c/Text", "input_modalities": ["text"], "output_modalities": ["text"], "supported_features": ["tools"]}),
             ],
         };
         assert_eq!(
@@ -489,9 +526,42 @@ mod tests {
     }
 
     #[test]
+    fn equivalent_model_follows_excluded_tools_support() {
+        let body = CatalogResponse {
+            data: vec![
+                serde_json::json!({"id": "a/Tools", "input_modalities": ["text"], "output_modalities": ["text"], "supported_features": ["tools"]}),
+                serde_json::json!({"id": "b/Plain", "input_modalities": ["text"], "output_modalities": ["text"], "supported_features": ["json_mode"]}),
+                serde_json::json!({"id": "c/Bare", "input_modalities": ["text"], "output_modalities": ["text"]}),
+            ],
+        };
+        // Excluded model has tools: only tool replacements qualify.
+        assert_eq!(
+            equivalent_model(&body, "a/Tools", false),
+            None,
+            "no tool replacement besides the excluded one"
+        );
+        // Excluded model positively lacks tools: the requirement lifts.
+        assert_eq!(
+            equivalent_model(&body, "b/Plain", false),
+            Some("a/Tools".to_owned())
+        );
+        // Excluded model absent from the catalog: fail closed, require tools.
+        assert_eq!(
+            equivalent_model(&body, "missing", false),
+            Some("a/Tools".to_owned())
+        );
+        // A bare entry (no features list) never qualifies as a tool
+        // replacement, but can still be replaced by one.
+        assert_eq!(
+            equivalent_model(&body, "c/Bare", false),
+            Some("a/Tools".to_owned())
+        );
+    }
+
+    #[test]
     fn equivalent_model_returns_none_when_only_excluded_remains() {
         let solo = CatalogResponse {
-            data: vec![serde_json::json!({"id": "only"})],
+            data: vec![serde_json::json!({"id": "only", "supported_features": ["tools"]})],
         };
         assert_eq!(equivalent_model(&solo, "only", false), None);
         assert_eq!(

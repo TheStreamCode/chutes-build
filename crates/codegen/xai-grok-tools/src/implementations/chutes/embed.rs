@@ -113,8 +113,10 @@ impl xai_tool_runtime::Tool for EmbedTextsTool {
             .filter(|name| !name.is_empty())
             .unwrap_or(DEFAULT_EMBED_MODEL);
 
-        let client =
-            ChutesMediaClient::from_env().map_err(|error| execution_error("embed_texts", error))?;
+        let credentials = super::resolve_credentials(&ctx)
+            .map_err(|error| execution_error("embed_texts", error))?;
+        let client = ChutesMediaClient::from_credentials(credentials)
+            .map_err(|error| execution_error("embed_texts", error))?;
         let detail = client.describe(slug).await.map_err(|error| {
             execution_error(
                 "embed_texts",

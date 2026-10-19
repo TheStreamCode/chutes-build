@@ -24,6 +24,18 @@ pub use speech::{TranscribeAudioInput, TranscribeAudioTool};
 /// `/imagine-video` gate on the tool that actually exists here.
 pub const GENERATE_MEDIA_TOOL_NAME: &str = "generate_media";
 
+/// Credentials for a Chutes tool call: the dispatch-published context value
+/// first — it sees the agent's runtime key, which plain env reads miss —
+/// then `CHUTES_API_KEY` for harnesses that build their own context.
+pub(crate) fn resolve_credentials(
+    ctx: &xai_tool_runtime::ToolCallContext,
+) -> Result<chutes_build_core::ChutesCredentials, chutes_build_core::endpoints::CredentialError> {
+    if let Some(credentials) = ctx.get::<chutes_build_core::ChutesCredentials>() {
+        return Ok((*credentials).clone());
+    }
+    chutes_build_core::ChutesCredentials::from_env()
+}
+
 /// Register the Chutes-native tools exactly once, so curated agent toolsets
 /// listing `ChutesBuild:*` ids resolve at finalize time. Called from the agent
 /// builder ahead of every finalize (mirrors the 1.0.12 up-front registration).
@@ -79,3 +91,113 @@ dynamic_tool_input!(
     ExtractDocumentInput,
     EmbedTextsInput
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_ctx() -> xai_tool_runtime::ToolCallContext {
+        xai_tool_runtime::ToolCallContext::new(xai_tool_protocol::ToolCallId::new_v7())
+    }
+
+    fn ctx_with(key: &str) -> xai_tool_runtime::ToolCallContext {
+        let mut ctx = empty_ctx();
+        ctx.insert(chutes_build_core::ChutesCredentials::from_key(key).expect("test key builds"));
+        ctx
+    }
+
+    /// Save both key vars; restore on drop. The tests below are `#[serial]`
+    /// against each other; no other test in this binary touches these vars.
+    struct EnvRestore {
+        key: Option<std::ffi::OsString>,
+        legacy: Option<std::ffi::OsString>,
+    }
+
+    impl EnvRestore {
+        fn capture() -> Self {
+            Self {
+                key: std::env::var_os("CHUTES_API_KEY"),
+                legacy: std::env::var_os("CHUTES_BUILD_API_KEY"),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            // SAFETY: `#[serial]` within this module; restored unconditionally.
+            unsafe {
+                match self.key.take() {
+                    Some(value) => std::env::set_var("CHUTES_API_KEY", value),
+                    None => std::env::remove_var("CHUTES_API_KEY"),
+                }
+                match self.legacy.take() {
+                    Some(value) => std::env::set_var("CHUTES_BUILD_API_KEY", value),
+                    None => std::env::remove_var("CHUTES_BUILD_API_KEY"),
+                }
+            }
+        }
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn ctx_credentials_win_without_env() {
+        let _restore = EnvRestore::capture();
+        // SAFETY: serialized; restored by `_restore`.
+        unsafe {
+            std::env::remove_var("CHUTES_API_KEY");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
+        }
+        let resolved = resolve_credentials(&ctx_with("cpk-ctx-key")).expect("ctx key resolves");
+        assert_eq!(
+            resolved,
+            chutes_build_core::ChutesCredentials::from_key("cpk-ctx-key").expect("test key builds")
+        );
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn falls_back_to_env_without_ctx_value() {
+        let _restore = EnvRestore::capture();
+        // SAFETY: serialized; restored by `_restore`.
+        unsafe {
+            std::env::set_var("CHUTES_API_KEY", "cpk-env-key");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
+        }
+        let resolved = resolve_credentials(&empty_ctx()).expect("env key resolves");
+        assert_eq!(
+            resolved,
+            chutes_build_core::ChutesCredentials::from_key("cpk-env-key").expect("test key builds")
+        );
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn ctx_credentials_win_over_env() {
+        let _restore = EnvRestore::capture();
+        // SAFETY: serialized; restored by `_restore`.
+        unsafe {
+            std::env::set_var("CHUTES_API_KEY", "cpk-env-key");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
+        }
+        let resolved = resolve_credentials(&ctx_with("cpk-ctx-key")).expect("ctx key resolves");
+        assert_eq!(
+            resolved,
+            chutes_build_core::ChutesCredentials::from_key("cpk-ctx-key").expect("test key builds")
+        );
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn missing_without_ctx_value_or_env() {
+        let _restore = EnvRestore::capture();
+        // SAFETY: serialized; restored by `_restore`.
+        unsafe {
+            std::env::remove_var("CHUTES_API_KEY");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
+        }
+        assert!(matches!(
+            resolve_credentials(&empty_ctx()),
+            Err(chutes_build_core::endpoints::CredentialError::Missing)
+        ));
+    }
+}

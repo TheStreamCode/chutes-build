@@ -3738,16 +3738,18 @@ mod tests {
     #[test]
     fn stacked_logo_keeps_its_tier_until_the_column_overflows() {
         let area = Rect::new(0, 0, 80, 22);
+        // A 5-item menu (the import row): with the 3-row compact wordmark a
+        // 4-item menu would still fit beside the capped draft and never step down.
         let input = |prompt_height| WelcomeLayoutInput {
             content_area: area,
-            menu_height: 4,
+            menu_height: 5,
             prompt_height,
             ..Default::default()
         };
         let one_line = WelcomeLayout::compute(input(None));
         assert_eq!(one_line.logo_tier, LogoTier::Compact);
-        // Compact logo 5 + gap 1 + menu 4 + flex 1 + prompt + version 2 = 13 + prompt: fits up to a 9-row draft
-        // The one-line layout has a 5-row flex gap, so the first 4 extra rows move nothing; the next two shift the column up
+        // Compact logo 3 + gap 1 + menu 5 + flex 1 + prompt + version 2 = 12 + prompt: fits up to a 10-row draft
+        // The one-line layout centers on a 3-row top pad with 4 rows of slack below it, so the first 4 extra rows move nothing; the next two shift the column up
         for extra in 1..=6u16 {
             let layout = WelcomeLayout::compute(input(Some(PROMPT_HEIGHT + extra)));
             assert_eq!(layout.logo_tier, LogoTier::Compact, "{extra} extra rows");
@@ -4026,16 +4028,27 @@ mod tests {
     }
 
     /// Rows of the painted buffer that hold braille logo art.
-    fn painted_logo_rows(buf: &Buffer) -> u16 {
+    /// Rows carrying the wordmark's glyphs (box-drawing/block art with a `▸`
+    /// tagline — the fork's art, not upstream's braille). Rows inside the
+    /// prompt rect are skipped: the prompt paints a rounded border from the
+    /// same glyph family, and the layout never overlaps the two.
+    fn painted_logo_rows(buf: &Buffer, prompt_rect: Option<Rect>) -> u16 {
         let area = buf.area;
         (area.top()..area.bottom())
             .filter(|&y| {
+                if prompt_rect.is_some_and(|r| y >= r.y && y < r.bottom()) {
+                    return false;
+                }
                 (area.left()..area.right()).any(|x| {
                     buf.cell((x, y))
                         .map(|c| c.symbol())
                         .unwrap_or("")
                         .chars()
-                        .any(|c| ('\u{2800}'..='\u{28FF}').contains(&c))
+                        .any(|c| {
+                            ('\u{2500}'..='\u{257F}').contains(&c)
+                                || ('\u{2580}'..='\u{259F}').contains(&c)
+                                || c == '▸'
+                        })
                 })
             })
             .count() as u16
@@ -4054,14 +4067,20 @@ mod tests {
         let mut prompt = PromptWidget::new();
 
         let mut buf = Buffer::empty(area);
-        let _ = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
-        assert_eq!(painted_logo_rows(&buf), logo::full_logo_line_count());
+        let empty = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
+        assert_eq!(
+            painted_logo_rows(&buf, empty.prompt_rect),
+            logo::full_logo_line_count()
+        );
 
         prompt.set_text(&["line"; 30].join("\n"));
         let mut buf = Buffer::empty(area);
         let tall = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
         assert_eq!(tall.prompt_rect.map(|r| r.height), Some(13));
-        assert_eq!(painted_logo_rows(&buf), logo::compact_logo_line_count());
+        assert_eq!(
+            painted_logo_rows(&buf, tall.prompt_rect),
+            logo::compact_logo_line_count()
+        );
     }
 
     #[test]
@@ -4658,8 +4677,9 @@ the usual channels. "
         };
         let one_line = WelcomeLayout::compute(input(None));
         assert!(one_line.has_hero_box());
-        // title + one message line + the CTA's spacer and button rows
-        assert_eq!(one_line.hero_info.height, 4);
+        // Title + two wrapped message lines (the 50-col wordmark leaves a
+        // 35-col info slot) + the CTA's spacer and button rows.
+        assert_eq!(one_line.hero_info.height, 5);
 
         let max = prompt_max_height(&input(None));
         let mut saw_stacked = false;

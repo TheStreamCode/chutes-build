@@ -1154,11 +1154,12 @@ mod slash_menu_enter_tests {
 
     #[test]
     fn enter_sends_highlighted_command_not_typed_prefix() {
-        let mut agent = agent_with_slash("/log");
-        select_display(&mut agent, "/login");
+        // (No /login builtin in this fork; /log serves the same typed-vs-highlighted split.)
+        let mut agent = agent_with_slash("/lo");
+        select_display(&mut agent, "/log");
         let outcome = agent.handle_prompt_key_for_test(&enter());
         assert!(
-            matches!(outcome, InputOutcome::Action(Action::SendPrompt(ref text)) if text == "/login"),
+            matches!(outcome, InputOutcome::Action(Action::SendPrompt(ref text)) if text == "/log"),
             "got {outcome:?}; prompt={:?}",
             agent.prompt.text()
         );

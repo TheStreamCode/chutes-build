@@ -1,7 +1,10 @@
 #[derive(Debug, Clone)]
 pub struct CompactionPolicy {
     /// Auto-compaction triggers when this percentage of the context window is used.
-    pub auto_compact_threshold_percent: u32,
+    /// A `u8`: every producer (config layers, resolver, parser) and consumer
+    /// (`exceeds_threshold`) already speaks percent-as-`u8`, so a wider type
+    /// here only invites lossy `as` casts at the boundary.
+    pub auto_compact_threshold_percent: u8,
 
     /// Model to use for generating the compaction summary.
     /// None means use the session's current model.

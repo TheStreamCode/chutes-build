@@ -630,6 +630,10 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_u64(obj, "context_window"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
+        // Chutes `/v1/models` native name; last so an explicitly configured
+        // window (possibly capped below the model card) always wins.
+        .or_else(|| get_u64(obj, "context_length"))
+        .or_else(|| meta.and_then(|m| get_u64(m, "context_length")))
     {
         Some(window) => Some(std::num::NonZeroU64::new(window)?),
         None => None,

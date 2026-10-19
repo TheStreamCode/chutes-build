@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use tracing::{debug, warn};
 
-use crate::rules::parse_permission_rule;
+use crate::rules::{fail_closed_rule, parse_permission_rule};
 use crate::types::{PermissionConfig, RuleAction};
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -60,7 +60,16 @@ impl ParsedPermissions {
             for rule_str in entries {
                 match parse_permission_rule(&rule_str, action) {
                     Ok(rule) => rules.push(rule),
-                    Err(e) => warnings.push(format!("permissions.{label}: {rule_str} -- {e}")),
+                    Err(e) => {
+                        if let Some(rule) = fail_closed_rule(&rule_str, action) {
+                            warnings.push(format!(
+                                "permissions.{label}: {rule_str} -- {e}; keeping a tool-wide {label} rule instead"
+                            ));
+                            rules.push(rule);
+                        } else {
+                            warnings.push(format!("permissions.{label}: {rule_str} -- {e}"));
+                        }
+                    }
                 }
             }
         }

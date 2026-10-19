@@ -23,12 +23,24 @@ pub(crate) fn key(id: &str) -> MemberKey {
     }
 }
 
+/// Scratch cwd for workspace fixtures, absolute on every platform: a `/tmp`
+/// literal is not absolute on Windows, where adoptability and store
+/// validation would reject the fixture. Map every literal through this so
+/// fixtures that share a cwd stay equal on Windows too.
+pub(crate) fn fixture_cwd(unix_path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", unix_path.replace('/', "\\"))
+    } else {
+        unix_path.to_owned()
+    }
+}
+
 pub(crate) fn new_member(id: &str, title: &str) -> NewMember {
     NewMember {
         key: key(id),
         origin: MemberOrigin::Local,
         metadata: MemberMetadata {
-            cwd: Some("/tmp".into()),
+            cwd: Some(fixture_cwd("/tmp")),
             title: Some(title.into()),
             model: None,
             last_turn_summary: None,
