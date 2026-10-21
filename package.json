@@ -3,12 +3,9 @@
   "version": "1.7.2",
   "description": "Privacy-first, open-source coding agent for the Chutes ecosystem",
   "license": "Apache-2.0",
-  "author": "Michael Gasperini (Mikesoft)",
+  "author": { "name": "Michael Gasperini", "email": "michael@mikesoft.it", "url": "https://mikesoft.it" },
   "homepage": "https://github.com/TheStreamCode/chutes-build#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/TheStreamCode/chutes-build.git"
-  },
+  "repository": "github:TheStreamCode/chutes-build",
   "bugs": {
     "url": "https://github.com/TheStreamCode/chutes-build/issues"
   },
