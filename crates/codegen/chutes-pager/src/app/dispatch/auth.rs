@@ -388,7 +388,13 @@ pub(super) fn handle_api_key_accepted(app: &mut AppView, request_seq: u64) -> Ve
         .unwrap_or_else(chutes_shell::util::chutes_home::chutes_home);
     if let Err(error) = chutes_build_core::api_key_store::save(&home, &key) {
         app.api_key_entry_validating = false;
-        app.api_key_entry_error = Some(format!("Could not save the API key: {error}"));
+        // Never interpolate the `io::Error`: its Display is OS-localized and the product
+        // copy is English ("Accesso negato." on an Italian Windows).
+        let path = chutes_build_core::api_key_store::key_path(&home);
+        app.api_key_entry_error = Some(format!(
+            "Could not save the API key: {}",
+            chutes_build_core::api_key_store::describe_write_failure(&path, &error)
+        ));
         return vec![];
     }
     // SAFETY: same pattern as startup injection — the key is only ever read

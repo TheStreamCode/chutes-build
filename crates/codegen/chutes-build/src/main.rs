@@ -2150,8 +2150,13 @@ async fn run_chutes_login_setup() -> anyhow::Result<()> {
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     match client.validate().await {
         Ok(()) => {
-            chutes_build_core::api_key_store::save(&home, key)
-                .map_err(|error| anyhow::anyhow!("Could not save the API key: {error}"))?;
+            chutes_build_core::api_key_store::save(&home, key).map_err(|error| {
+                let path = chutes_build_core::api_key_store::key_path(&home);
+                anyhow::anyhow!(
+                    "Could not save the API key: {}",
+                    chutes_build_core::api_key_store::describe_write_failure(&path, &error)
+                )
+            })?;
             println!(
                 "API key saved to {}.",
                 chutes_build_core::api_key_store::key_path(&home).display()

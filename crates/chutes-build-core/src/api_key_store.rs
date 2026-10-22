@@ -56,6 +56,40 @@ pub fn remove(home: &Path) -> io::Result<bool> {
     }
 }
 
+/// English, OS-locale-independent description of a failed key write.
+///
+/// `std::io::Error`'s `Display` embeds the operating system's localized message, so on an
+/// Italian Windows the user-facing copy would read "Accesso negato. (os error 5)" in an
+/// otherwise English product. User-facing callers format failures through this instead, and
+/// get the path and the numeric code needed to act on the problem.
+pub fn describe_write_failure(path: &Path, error: &io::Error) -> String {
+    let phrase = match error.raw_os_error() {
+        Some(5) | Some(32) | Some(33) => "permission denied",
+        Some(2) | Some(3) => "path not found",
+        Some(112) | Some(28) => "no space left on the device",
+        Some(13) => "permission denied",
+        _ => match error.kind() {
+            io::ErrorKind::PermissionDenied => "permission denied",
+            io::ErrorKind::NotFound => "path not found",
+            io::ErrorKind::InvalidInput => "invalid path",
+            _ => "I/O error",
+        },
+    };
+    match error.raw_os_error() {
+        Some(code) => format!(
+            "{}: {} (os error {}); check that the directory is writable",
+            path.display(),
+            phrase,
+            code
+        ),
+        None => format!(
+            "{}: {}; check that the directory is writable",
+            path.display(),
+            phrase
+        ),
+    }
+}
+
 /// Make the saved key live for this process when no env key is set.
 /// Returns `true` when a key was injected. Reads env first so an explicit
 /// `CHUTES_API_KEY` always wins over the file.
@@ -133,6 +167,19 @@ mod tests {
         save(home.path(), "cpk-test-key").expect("save");
         assert!(remove(home.path()).expect("remove"));
         assert_eq!(load(home.path()), None);
+    }
+
+    #[test]
+    fn write_failure_description_is_english_and_names_the_path() {
+        let error = io::Error::from_raw_os_error(5);
+        let text = describe_write_failure(Path::new("C:\\probe\\api_key"), &error);
+        assert!(text.contains("permission denied"), "{text}");
+        assert!(text.contains("os error 5"), "{text}");
+        assert!(text.contains("api_key"), "{text}");
+        assert!(
+            !text.contains("Accesso negato") && !text.contains("Access is denied"),
+            "the OS-localized Display must never reach user copy: {text}"
+        );
     }
 
     #[cfg(unix)]
