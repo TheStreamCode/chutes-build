@@ -2,7 +2,7 @@
 """Compare a crate's failing tests against a committed per-platform baseline.
 
 Two crates fail a lot of tests on Windows and always have: 69 in
-`xai-grok-tools`, 53 in `xai-grok-workspace`, all of them pre-dating the 1.0.0
+`chutes-tools`, 53 in `chutes-workspace`, all of them pre-dating the 1.0.0
 re-base. CI worked around that by running narrow filters
 (`implementations::chutes::`), which means those 122 tests are neither passing
 nor watched — a *new* failure among them would look exactly like the other 122.
@@ -13,8 +13,8 @@ it that starts passing also fails the build, because a baseline nobody prunes
 stops describing anything.
 
 Usage:
-    python scripts/known_failures.py --crate xai-grok-tools           # check
-    python scripts/known_failures.py --crate xai-grok-tools --record  # write
+    python scripts/known_failures.py --crate chutes-tools           # check
+    python scripts/known_failures.py --crate chutes-tools --record  # write
 
 Baselines live in `.github/known-failures/<platform>.txt`, one
 `crate<TAB>test::path` per line. A platform with no baseline file is reported

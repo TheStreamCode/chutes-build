@@ -2,7 +2,7 @@
 //!
 //! Detection is a union of these memory-specific substring markers (kept for
 //! their original recall on plain-English mentions like "my password is...")
-//! and [`xai_grok_secrets::detect_probable_secret`], the same canonical
+//! and [`chutes_secrets::detect_probable_secret`], the same canonical
 //! pattern set used for outbound Context7 queries (via this function) and
 //! log/trace sanitization — so a secret shape caught in one place (e.g. an
 //! AWS key or GitHub token) is caught everywhere, not just here.
@@ -25,7 +25,7 @@ const SECRET_MARKERS: &[&str] = &[
 pub fn contains_probable_secret(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     SECRET_MARKERS.iter().any(|marker| lower.contains(marker))
-        || xai_grok_secrets::detect_probable_secret(text)
+        || chutes_secrets::detect_probable_secret(text)
 }
 
 pub fn filter_memory_markdown(text: &str) -> String {
@@ -54,7 +54,7 @@ mod tests {
         );
     }
 
-    /// Regression: before the union with `xai_grok_secrets`, none of these
+    /// Regression: before the union with `chutes_secrets`, none of these
     /// shapes matched any of the 12 substring markers, so an AWS key or
     /// GitHub token pasted into memory (or a Context7 query, which reuses
     /// this same function) would not have been caught.

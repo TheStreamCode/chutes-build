@@ -1,0 +1,27 @@
+[package]
+license = "Apache-2.0"
+name = "chutes-shell-session-support"
+version = "0.1.0"
+edition.workspace = true
+description = "Session-support modules for the Chutes Build shell crate family: managed MCP gateway catalog/call caching and file-access tracking."
+
+[dependencies]
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
+tracing = { workspace = true }
+chutes-file-utils = { path = "../chutes-file-utils", optional = true }
+chutes-http = { workspace = true }
+chutes-version = { workspace = true }
+
+[features]
+default-bazel = []
+
+[dev-dependencies]
+axum = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
+
+[lints]
+workspace = true

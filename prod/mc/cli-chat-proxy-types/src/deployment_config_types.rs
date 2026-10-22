@@ -12,11 +12,16 @@ pub const SIGNED_PAYLOAD_VERSION: u32 = 2;
 
 /// Domain-separation tags inside the signed bytes: both message types share one
 /// signing key, so each verifier requires its own tag (no cross-substitution).
-pub const MANAGED_POLICY_TYP: &str = "grok.managed_policy.v1";
-pub const MANAGED_IDENTITY_TYP: &str = "grok.managed_identity.v1";
+pub const MANAGED_POLICY_TYP: &str = "chutes.managed_policy.v1";
+pub const MANAGED_IDENTITY_TYP: &str = "chutes.managed_identity.v1";
+/// Pre-rebrand tags; verifiers accept them so policies signed by older proxies still verify.
+pub const LEGACY_MANAGED_POLICY_TYP: &str = "grok.managed_policy.v1";
+pub const LEGACY_MANAGED_IDENTITY_TYP: &str = "grok.managed_identity.v1";
 
 /// Client echoes its persisted envelope `nonce` on this header for the server probe.
-pub const MANAGED_CONFIG_NONCE_ECHO_HEADER: &str = "x-grok-managed-config-nonce";
+pub const MANAGED_CONFIG_NONCE_ECHO_HEADER: &str = "x-chutes-build-managed-config-nonce";
+/// Pre-rebrand echo header; clients send both so older proxies still see the probe.
+pub const LEGACY_MANAGED_CONFIG_NONCE_ECHO_HEADER: &str = "x-grok-managed-config-nonce";
 
 /// Shape of a server-minted nonce (16 random bytes as hex): what `fresh_nonce`
 /// produces and the only shape the client echoes (hex is HTTP-header-safe).

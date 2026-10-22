@@ -9,10 +9,10 @@ const rootManifest = JSON.parse(
   await readFile(path.join(repositoryRoot, 'package.json'), 'utf8')
 );
 const releaseCargoManifests = [
-  'crates/codegen/xai-grok-pager-bin/Cargo.toml',
-  'crates/codegen/xai-grok-pager/Cargo.toml',
-  'crates/codegen/xai-grok-shell/Cargo.toml',
-  'crates/codegen/xai-grok-version/Cargo.toml'
+  'crates/codegen/chutes-build/Cargo.toml',
+  'crates/codegen/chutes-pager/Cargo.toml',
+  'crates/codegen/chutes-shell/Cargo.toml',
+  'crates/codegen/chutes-version/Cargo.toml'
 ];
 
 for (const relativeManifestPath of releaseCargoManifests) {

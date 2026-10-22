@@ -1,0 +1,180 @@
+//! Home-directory resolution generally: USERPROFILE-first `home_dir`, plus
+//! chutes-home (`$CHUTES_BUILD_HOME` or `<home>/.chutes-build`). Shared by `chutes-config`
+//! and `chutes-fast-worktree`.
+//!
+//! Which function to call:
+//! - [`chutes_home`]: the usual choice, a cached, created path to build on.
+//! - [`user_chutes_home`]: `None` instead of a cwd fallback when no home resolves.
+//! - [`default_chutes_home`]: the `<home>/.chutes-build` default, ignoring `$CHUTES_BUILD_HOME`, so callers can detect an override.
+//! - [`resolve_chutes_home`]: a fresh, uncached resolve.
+//! - [`resolve_chutes_home_with_source`]: [`resolve_chutes_home`] plus where the path came from.
+//! - [`home_dir`]: the home directory itself, for sibling dot dirs (`~/.claude`, `~/.agents`, ...).
+//!
+//! TODO: collapse these getters by threading the path through config as an
+//! explicit value.
+
+#![deny(clippy::indexing_slicing)]
+
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// Where a resolved Chutes Build home came from, so "why did chutes-build pick this
+/// directory?" is answerable in diagnostics without re-reading the
+/// environment at the asking site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChutesHomeSource {
+    /// A non-empty `$CHUTES_BUILD_HOME` override.
+    EnvOverride,
+    /// `<home>/.chutes-build` derived from the home directory.
+    HomeDefault,
+}
+
+/// The user's home directory via [`std::env::home_dir`]: `HOME` on Unix, `USERPROFILE` on Windows.
+/// Not `dirs::home_dir()`: on Windows `dirs` ignores a redirected `USERPROFILE`.
+/// Every home-anchored path must come from this one function.
+#[allow(deprecated, clippy::disallowed_methods)] // the one sanctioned std::env::home_dir call
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::home_dir()
+}
+
+/// `<home>/.chutes-build`, canonicalized via `dunce` (not `std::fs::canonicalize`,
+/// which yields Windows `\\?\` verbatim paths).
+fn chutes_home_in(home: &Path) -> PathBuf {
+    dunce::canonicalize(home)
+        .unwrap_or_else(|_| home.to_path_buf())
+        .join(".chutes-build")
+}
+
+/// `$CHUTES_BUILD_HOME` verbatim when non-empty, else `<home>/.chutes-build`.
+/// Used as-is (not canonicalized) so literal prefix checks and symlink guards still see original components.
+fn resolve_chutes_home_from(
+    chutes_home_env: Option<&OsStr>,
+    os_home: Option<&Path>,
+) -> Option<(PathBuf, ChutesHomeSource)> {
+    if let Some(env) = chutes_home_env.filter(|env| !env.is_empty()) {
+        return Some((PathBuf::from(env), ChutesHomeSource::EnvOverride));
+    }
+    os_home.map(|home| (chutes_home_in(home), ChutesHomeSource::HomeDefault))
+}
+
+/// Resolve the Chutes Build home from the environment (fresh, no cache); `None` if neither resolves.
+pub fn resolve_chutes_home() -> Option<PathBuf> {
+    resolve_chutes_home_with_source().map(|(home, _)| home)
+}
+
+/// [`resolve_chutes_home`] plus the [`ChutesHomeSource`] the path came from.
+pub fn resolve_chutes_home_with_source() -> Option<(PathBuf, ChutesHomeSource)> {
+    resolve_chutes_home_from(
+        std::env::var_os("CHUTES_BUILD_HOME").as_deref(),
+        home_dir().as_deref(),
+    )
+}
+
+/// The default `<home>/.chutes-build`, used when `$CHUTES_BUILD_HOME` is unset.
+pub fn default_chutes_home() -> PathBuf {
+    chutes_home_in(&home_dir().unwrap_or_else(|| PathBuf::from(".")))
+}
+
+/// Test-only home override, checked before the process cache. Always compiled:
+/// integration tests in dependent crates need it. Callers must hold the
+/// `CHUTES_BUILD_HOME` serial gate: parallel tests observe the override too.
+static TEST_HOME_OVERRIDE: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
+
+/// Test-only: redirect [`chutes_home`] at `home` (`None` restores the cached
+/// home). The [`OnceLock`] cache intentionally ignores later environment
+/// changes, so per-test tempdirs need this instead of only setting the env.
+pub fn set_chutes_home_for_tests(home: Option<PathBuf>) {
+    *TEST_HOME_OVERRIDE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = home;
+}
+
+/// The Chutes Build home, created if missing and cached for the process; falls back to
+/// [`default_chutes_home`] when neither `$CHUTES_BUILD_HOME` nor a home resolves.
+pub fn chutes_home() -> PathBuf {
+    if let Some(home) = TEST_HOME_OVERRIDE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    {
+        return home;
+    }
+    static CHUTES_BUILD_HOME: OnceLock<PathBuf> = OnceLock::new();
+    CHUTES_BUILD_HOME
+        .get_or_init(|| {
+            let home = resolve_chutes_home().unwrap_or_else(default_chutes_home);
+            if let Err(err) = std::fs::create_dir_all(&home) {
+                tracing::warn!(path = %home.display(), %err, "failed to create Chutes Build home");
+            }
+            home
+        })
+        .clone()
+}
+
+/// Like [`chutes_home`], but `None` when no home resolves (no cwd fallback).
+pub fn user_chutes_home() -> Option<PathBuf> {
+    resolve_chutes_home().is_some().then(chutes_home)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::ffi::OsString;
+
+    #[test]
+    fn env_wins_over_os_home() {
+        let resolved =
+            resolve_chutes_home_from(Some(OsStr::new("/custom/home")), Some(Path::new("/home/u")));
+        assert_eq!(
+            resolved,
+            Some((PathBuf::from("/custom/home"), ChutesHomeSource::EnvOverride))
+        );
+    }
+
+    #[test]
+    fn env_used_verbatim_even_when_it_exists() {
+        // A real, existing dir whose canonical form differs (macOS symlinks
+        // `/var` -> `/private/var`): the env value must come back unchanged.
+        let tmp = tempfile::tempdir().unwrap();
+        let resolved = resolve_chutes_home_from(Some(tmp.path().as_os_str()), None);
+        assert_eq!(
+            resolved,
+            Some((tmp.path().to_path_buf(), ChutesHomeSource::EnvOverride))
+        );
+    }
+
+    #[test]
+    fn empty_env_falls_through_to_os_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let resolved = resolve_chutes_home_from(Some(&OsString::new()), Some(tmp.path()));
+        assert_eq!(
+            resolved,
+            Some((
+                dunce::canonicalize(tmp.path())
+                    .unwrap()
+                    .join(".chutes-build"),
+                ChutesHomeSource::HomeDefault
+            ))
+        );
+    }
+
+    #[test]
+    fn default_chutes_home_has_no_verbatim_prefix() {
+        // The reason we canonicalize via dunce: std::fs::canonicalize yields
+        // `\\?\` verbatim paths on Windows that break git and byte-exact
+        // comparisons. No-op assertion on Unix.
+        let home = default_chutes_home();
+        assert!(!home.to_string_lossy().starts_with(r"\\?\"));
+        assert!(home.ends_with(".chutes-build"));
+    }
+
+    #[test]
+    fn none_when_nothing_resolves() {
+        assert_eq!(
+            resolve_chutes_home_from(/* chutes_home_env */ None, /* os_home */ None),
+            None
+        );
+    }
+}

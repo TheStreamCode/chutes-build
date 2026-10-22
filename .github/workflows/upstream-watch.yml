@@ -1,8 +1,9 @@
 name: Upstream watch
 
+# Frozen at 2.0.0: upstream sync is closed (docs/upstream-sync.md). Manual
+# dispatch only — the schedule was removed on purpose; do not re-add it without
+# reopening the sync model in the spec.
 on:
-  schedule:
-    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "$(jq -r '.frozen // false' .github/upstream.json)" = "true" ]; then
+            echo "Upstream sync is frozen at 2.0.0 ($(jq -r '.frozenReason' .github/upstream.json)); nothing to compare."
+            exit 0
+          fi
           repository="$(jq -r '.repository' .github/upstream.json)"
           branch="$(jq -r '.branch' .github/upstream.json)"
           version_manifest="$(jq -r '.versionManifest' .github/upstream.json)"

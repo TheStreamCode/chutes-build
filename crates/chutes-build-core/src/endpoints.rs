@@ -140,7 +140,10 @@ fn sensitive_header_value(value: &str) -> reqwest::header::HeaderValue {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
-    #[error("CHUTES_API_KEY is not set; configure it in the environment before using Chutes")]
+    #[error(
+        "no Chutes API key found: run `chutes-build login`, paste it at the welcome screen, \
+         or set CHUTES_API_KEY"
+    )]
     Missing,
     #[error("the API key is empty")]
     Empty,

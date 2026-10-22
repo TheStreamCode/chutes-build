@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Regenerate crates/codegen/xai-grok-agent/src/prompt/prompt_encrypted.rs.
+"""Regenerate crates/codegen/chutes-agent/src/prompt/prompt_encrypted.rs.
 
 The agent ships its three prompt templates XOR-obfuscated so a grep of an
 installed binary does not read like a prompt dump; this script re-derives the
 encrypted byte blobs from the current template sources after any edit to:
 
-    crates/codegen/xai-grok-agent/templates/prompt.md            -> BASE_PROMPT_ENC
-    crates/codegen/xai-grok-agent/templates/apply_patch_prompt.md -> CODEX_PROMPT_ENC
-    crates/codegen/xai-grok-agent/templates/subagent_prompt.md    -> SUBAGENT_PROMPT_ENC
+    crates/codegen/chutes-agent/templates/prompt.md            -> BASE_PROMPT_ENC
+    crates/codegen/chutes-agent/templates/apply_patch_prompt.md -> CODEX_PROMPT_ENC
+    crates/codegen/chutes-agent/templates/subagent_prompt.md    -> SUBAGENT_PROMPT_ENC
 
 Encryption matches template.rs's test helper exactly:
     enc[i] = plain[i] ^ seed.wrapping_add(i as u8)
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pathlib
 
-CRATE = pathlib.Path(__file__).resolve().parent.parent / "crates" / "codegen" / "xai-grok-agent"
+CRATE = pathlib.Path(__file__).resolve().parent.parent / "crates" / "codegen" / "chutes-agent"
 TEMPLATES = CRATE / "templates"
 OUT = CRATE / "src" / "prompt" / "prompt_encrypted.rs"
 

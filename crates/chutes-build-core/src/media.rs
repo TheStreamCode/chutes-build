@@ -4,7 +4,7 @@
 //! deliberately return raw [`serde_json::Value`] rather than typed structs:
 //! each "chute" publishes its own arbitrary JSON schema for its invocation
 //! parameters and metadata (see the schema-manipulation helpers in
-//! `xai-grok-tools`' `implementations::chutes::media`, which walk this data
+//! `chutes-tools`' `implementations::chutes::media`, which walk this data
 //! generically to encode workspace assets and enforce `additionalProperties`
 //! regardless of which cord it came from). A fixed struct here would fight
 //! that pass-through design instead of serving it. [`MediaResponse`] — the

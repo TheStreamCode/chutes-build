@@ -18,7 +18,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "net", "time"] }
 url = { workspace = true }
 urlencoding = { workspace = true }
-xai-grok-secrets = { workspace = true }
+chutes-secrets = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

@@ -1,7 +1,7 @@
 //! Feedback API request and response types.
 //!
 //! These types support the feedback collection system for Chutes Build sessions.
-//! The agent (xai-grok-shell) uses heuristics to determine when to request feedback,
+//! The agent (chutes-shell) uses heuristics to determine when to request feedback,
 //! and clients submit feedback through these types to the feedback backend.
 
 use chrono::{DateTime, Utc};
@@ -489,7 +489,7 @@ pub struct FeedbackSubmission {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_version: Option<String>,
 
-    /// Shell (xai-grok-shell) version
+    /// Shell (chutes-shell) version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_version: Option<String>,
 
@@ -1639,7 +1639,8 @@ fn default_feedback_mode_stars_text() -> String {
     "stars_text".to_string()
 }
 fn default_tier1_prompt() -> String {
-    "You've been using Grok Code productively! Would you mind sharing quick feedback?".to_string()
+    "You've been using Chutes Build productively! Would you mind sharing quick feedback?"
+        .to_string()
 }
 fn default_tier2_prompt() -> String {
     "You've worked through a complex session. Your feedback would help us improve.".to_string()

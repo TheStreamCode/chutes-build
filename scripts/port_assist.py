@@ -28,7 +28,7 @@ believing any of it.
 
 Usage:
     python scripts/port_assist.py --base afbc0fb7
-    python scripts/port_assist.py --base afbc0fb7 --path crates/codegen/xai-grok-tools
+    python scripts/port_assist.py --base afbc0fb7 --path crates/codegen/chutes-tools
     python scripts/port_assist.py --base afbc0fb7 --apply
 """
 

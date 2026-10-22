@@ -1,7 +1,9 @@
 {
+  "frozen": true,
+  "frozenReason": "Total rebrand at 2.0.0 renamed crates and the local wire; see docs/upstream-sync.md. Do not advance this file without reopening the sync model.",
   "repository": "xai-org/grok-build",
   "branch": "main",
-  "versionManifest": "crates/codegen/xai-grok-pager/Cargo.toml",
+  "versionManifest": "crates/codegen/chutes-pager/Cargo.toml",
   "lastReviewedCommit": "2bdd1d6a",
   "lastReviewedVersion": "1.0.45",
   "lastReviewedRelease": null,

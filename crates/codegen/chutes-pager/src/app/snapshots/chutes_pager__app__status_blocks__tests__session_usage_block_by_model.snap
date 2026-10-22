@@ -1,0 +1,15 @@
+---
+source: crates/codegen/chutes-pager/src/app/status_blocks.rs
+expression: text
+---
+Session usage (since start or last resume):
+  Input tokens:   150 (0 cached)
+  Output tokens:  15 (0 reasoning)
+  Total tokens:   165
+  Model calls:    1 · API time: 1.0s
+  Speed:          15.0 tok/s
+  Cost:           not available (not reported)
+
+  By model:
+    chutes-build: 110 Tokens · 10.0 tok/s
+    model-router: 55 Tokens · 5.0 tok/s

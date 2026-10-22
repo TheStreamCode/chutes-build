@@ -108,27 +108,27 @@ jobs:
       - name: Test CLI parser and pager behavior
         run: |
           cargo test -p chutes-build --locked
-          cargo test -p xai-grok-pager --lib --locked
-          cargo test -p xai-grok-pager --test settings_e2e --locked
+          cargo test -p chutes-pager --lib --locked
+          cargo test -p chutes-pager --test settings_e2e --locked
       - name: Test authentication and session integration
         # The auth-provider fixtures run a real helper rather than a shell
         # one-liner, because a provider command goes through `cmd /C` off Unix
         # and the POSIX forms meant nothing there. `--lib` does not build a
         # crate's binaries, so it is built explicitly first.
         run: |
-          cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
-          cargo test -p xai-grok-shell --lib auth:: --locked
+          cargo build -p chutes-shell --bin auth-provider-fixture --locked
+          cargo test -p chutes-shell --lib auth:: --locked
       - name: Test agent construction and bundled skills
         run: |
-          cargo test -p xai-grok-agent --lib --locked
-          cargo test -p xai-grok-shell --lib builtin:: --locked
+          cargo test -p chutes-agent --lib --locked
+          cargo test -p chutes-shell --lib builtin:: --locked
       - name: Test Chutes-native tools
-        run: "cargo test -p xai-grok-tools --lib implementations::chutes:: --locked"
+        run: "cargo test -p chutes-tools --lib implementations::chutes:: --locked"
       - name: Clippy (Chutes-owned packages)
         run: |
-          cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools \
+          cargo clippy -p chutes-build -p chutes-build-core -p chutes-tools \
             --all-targets --locked --no-deps -- -D warnings
-          cargo clippy -p xai-grok-pager --lib --locked --no-deps -- -D warnings
+          cargo clippy -p chutes-pager --lib --locked --no-deps -- -D warnings
 
   npm-package:
     name: npm package
@@ -156,7 +156,7 @@ jobs:
     runs-on: windows-2025
     # Back to 90 now that the known-failure gate is gone from this job. It was
     # raised to 150 to accommodate that step, twice, before measurement showed
-    # the step was not slow but unbounded: `xai-grok-tools --lib` never
+    # the step was not slow but unbounded: `chutes-tools --lib` never
     # completes on this runner. Raising a budget was the wrong response to a
     # number (107 minutes against six on Linux) that was already saying so.
     timeout-minutes: 90
@@ -180,16 +180,16 @@ jobs:
       - name: Test CLI and pager on Windows
         run: |
           cargo test -p chutes-build --locked
-          cargo test -p xai-grok-pager --lib --locked
+          cargo test -p chutes-pager --lib --locked
       - name: Test authentication and tools on Windows
         # The auth-provider fixtures run a real helper rather than a shell
         # one-liner, because a provider command goes through `cmd /C` off Unix
         # and the POSIX forms meant nothing there. `--lib` does not build a
         # crate's binaries, so it is built explicitly first.
         run: |
-          cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
-          cargo test -p xai-grok-shell --lib auth:: --locked
-          cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
+          cargo build -p chutes-shell --bin auth-provider-fixture --locked
+          cargo test -p chutes-shell --lib auth:: --locked
+          cargo test -p chutes-tools --lib implementations::chutes:: --locked
 
   macos-check:
     name: Rust check (macOS)
@@ -213,4 +213,4 @@ jobs:
       - name: Check Chutes Build
         run: cargo check -p chutes-build --locked
       - name: Test pager on macOS
-        run: cargo test -p xai-grok-pager --lib --locked
+        run: cargo test -p chutes-pager --lib --locked

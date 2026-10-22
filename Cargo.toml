@@ -7,108 +7,108 @@ async-openai = { git = "https://github.com/our-forks/async-openai.git", rev = "9
 resolver = "2"
 members = [
     "crates/chutes-build-core",
-    "crates/build/xai-proto-build",
+    "crates/build/chutes-proto-build",
     "crates/codegen/ptyctl",
     "crates/codegen/ptyctl-cli",
-    "crates/codegen/xai-acp-lib",
-    "crates/codegen/xai-agent-lifecycle",
-    "crates/codegen/xai-chat-state",
-    "crates/codegen/xai-codebase-graph",
-    "crates/codegen/xai-compaction-transcript",
-    "crates/codegen/xai-crash-handler",
-    "crates/codegen/xai-dirs",
-    "crates/codegen/xai-fast-worktree",
-    "crates/codegen/xai-file-utils",
-    "crates/codegen/xai-fsnotify",
-    "crates/codegen/xai-fuzzy-file-search",
-    "crates/codegen/xai-gix-status",
-    "crates/codegen/xai-grok-active-sessions",
-    "crates/codegen/xai-grok-agent",
-    "crates/codegen/xai-grok-announcements",
-    "crates/codegen/xai-grok-auth",
-    "crates/codegen/xai-grok-bundle",
-    "crates/codegen/xai-grok-cloud-config",
-    "crates/codegen/xai-grok-config",
-    "crates/codegen/xai-grok-config-types",
-    "crates/codegen/xai-grok-dashboard-store",
-    "crates/codegen/xai-grok-diag-server",
-    "crates/codegen/xai-grok-egress-proxy",
-    "crates/codegen/xai-grok-env",
-    "crates/codegen/xai-grok-external-agent-migration",
-    "crates/codegen/xai-grok-extra-ca",
-    "crates/codegen/xai-grok-feedback",
-    "crates/codegen/xai-grok-file-lock",
-    "crates/codegen/xai-grok-foreign-sessions",
-    "crates/codegen/xai-grok-gboom",
-    "crates/codegen/xai-grok-hooks",
-    "crates/codegen/xai-grok-http",
-    "crates/codegen/xai-grok-image",
-    "crates/codegen/xai-grok-lifecycle",
-    "crates/codegen/xai-grok-login",
-    "crates/codegen/xai-grok-markdown",
-    "crates/codegen/xai-grok-markdown-core",
-    "crates/codegen/xai-grok-mcp",
-    "crates/codegen/xai-grok-memory",
-    "crates/codegen/xai-grok-mermaid",
-    "crates/codegen/xai-grok-models",
-    "crates/codegen/xai-grok-otel",
-    "crates/codegen/xai-grok-pager",
-    "crates/codegen/xai-grok-pager-bin",
-    "crates/codegen/xai-grok-pager-diff",
-    "crates/codegen/xai-grok-pager-minimal",
-    "crates/codegen/xai-grok-pager-pty-harness",
-    "crates/codegen/xai-grok-pager-render",
-    "crates/codegen/xai-grok-paths",
-    "crates/codegen/xai-grok-permission-rules",
-    "crates/codegen/xai-grok-plugin-marketplace",
-    "crates/codegen/xai-grok-sampler",
-    "crates/codegen/xai-grok-sampling-types",
-    "crates/codegen/xai-grok-sandbox",
-    "crates/codegen/xai-grok-secrets",
-    "crates/codegen/xai-grok-session-events",
-    "crates/codegen/xai-grok-session-search",
-    "crates/codegen/xai-grok-shared",
-    "crates/codegen/xai-grok-shell",
-    "crates/codegen/xai-grok-shell-base",
-    "crates/codegen/xai-grok-shell-session-support",
-    "crates/codegen/xai-grok-shell-terminal",
-    "crates/codegen/xai-grok-status-line",
-    "crates/codegen/xai-grok-subagent-resolution",
-    "crates/codegen/xai-grok-telemetry",
-    "crates/codegen/xai-grok-test-support",
-    "crates/codegen/xai-grok-tools",
-    "crates/codegen/xai-grok-tools-api",
-    "crates/codegen/xai-grok-update",
-    "crates/codegen/xai-grok-version",
-    "crates/codegen/xai-grok-voice",
-    "crates/codegen/xai-grok-workspace",
-    "crates/codegen/xai-grok-workspace-client",
-    "crates/codegen/xai-grok-workspace-daemon",
-    "crates/codegen/xai-grok-workspace-types",
-    "crates/codegen/xai-hooks-plugins-types",
-    "crates/codegen/xai-hunk-tracker",
-    "crates/codegen/xai-mixpanel",
-    "crates/codegen/xai-prompt-queue",
-    "crates/codegen/xai-ratatui-inline",
-    "crates/codegen/xai-ratatui-textarea",
-    "crates/codegen/xai-sqlite-journal",
-    "crates/codegen/xai-system-power",
-    "crates/codegen/xai-token-estimation",
-    "crates/codegen/xai-tracing-macros",
-    "crates/codegen/xai-tty-utils",
-    "crates/codegen/xai-workflow",
-    "crates/common/xai-circuit-breaker",
-    "crates/common/xai-computer-hub-core",
-    "crates/common/xai-computer-hub-mcp-adapter",
-    "crates/common/xai-computer-hub-sdk",
-    "crates/common/xai-grok-compaction",
-    "crates/common/xai-interjection-core",
-    "crates/common/xai-message-delivery-core",
-    "crates/common/xai-test-utils",
-    "crates/common/xai-tool-protocol",
-    "crates/common/xai-tool-runtime",
-    "crates/common/xai-tool-types",
-    "crates/common/xai-tracing",
+    "crates/codegen/chutes-acp-lib",
+    "crates/codegen/chutes-agent-lifecycle",
+    "crates/codegen/chutes-chat-state",
+    "crates/codegen/chutes-codebase-graph",
+    "crates/codegen/chutes-compaction-transcript",
+    "crates/codegen/chutes-crash-handler",
+    "crates/codegen/chutes-dirs",
+    "crates/codegen/chutes-fast-worktree",
+    "crates/codegen/chutes-file-utils",
+    "crates/codegen/chutes-fsnotify",
+    "crates/codegen/chutes-fuzzy-file-search",
+    "crates/codegen/chutes-gix-status",
+    "crates/codegen/chutes-active-sessions",
+    "crates/codegen/chutes-agent",
+    "crates/codegen/chutes-announcements",
+    "crates/codegen/chutes-auth",
+    "crates/codegen/chutes-bundle",
+    "crates/codegen/chutes-cloud-config",
+    "crates/codegen/chutes-config",
+    "crates/codegen/chutes-config-types",
+    "crates/codegen/chutes-dashboard-store",
+    "crates/codegen/chutes-diag-server",
+    "crates/codegen/chutes-egress-proxy",
+    "crates/codegen/chutes-env",
+    "crates/codegen/chutes-external-agent-migration",
+    "crates/codegen/chutes-extra-ca",
+    "crates/codegen/chutes-feedback",
+    "crates/codegen/chutes-file-lock",
+    "crates/codegen/chutes-foreign-sessions",
+    "crates/codegen/chutes-gboom",
+    "crates/codegen/chutes-hooks",
+    "crates/codegen/chutes-http",
+    "crates/codegen/chutes-image",
+    "crates/codegen/chutes-lifecycle",
+    "crates/codegen/chutes-login",
+    "crates/codegen/chutes-markdown",
+    "crates/codegen/chutes-markdown-core",
+    "crates/codegen/chutes-mcp",
+    "crates/codegen/chutes-memory",
+    "crates/codegen/chutes-mermaid",
+    "crates/codegen/chutes-models",
+    "crates/codegen/chutes-otel",
+    "crates/codegen/chutes-pager",
+    "crates/codegen/chutes-build",
+    "crates/codegen/chutes-pager-diff",
+    "crates/codegen/chutes-pager-minimal",
+    "crates/codegen/chutes-pager-pty-harness",
+    "crates/codegen/chutes-pager-render",
+    "crates/codegen/chutes-paths",
+    "crates/codegen/chutes-permission-rules",
+    "crates/codegen/chutes-plugin-marketplace",
+    "crates/codegen/chutes-sampler",
+    "crates/codegen/chutes-sampling-types",
+    "crates/codegen/chutes-sandbox",
+    "crates/codegen/chutes-secrets",
+    "crates/codegen/chutes-session-events",
+    "crates/codegen/chutes-session-search",
+    "crates/codegen/chutes-shared",
+    "crates/codegen/chutes-shell",
+    "crates/codegen/chutes-shell-base",
+    "crates/codegen/chutes-shell-session-support",
+    "crates/codegen/chutes-shell-terminal",
+    "crates/codegen/chutes-status-line",
+    "crates/codegen/chutes-subagent-resolution",
+    "crates/codegen/chutes-telemetry",
+    "crates/codegen/chutes-test-support",
+    "crates/codegen/chutes-tools",
+    "crates/codegen/chutes-tools-api",
+    "crates/codegen/chutes-update",
+    "crates/codegen/chutes-version",
+    "crates/codegen/chutes-voice",
+    "crates/codegen/chutes-workspace",
+    "crates/codegen/chutes-workspace-client",
+    "crates/codegen/chutes-workspace-daemon",
+    "crates/codegen/chutes-workspace-types",
+    "crates/codegen/chutes-hooks-plugins-types",
+    "crates/codegen/chutes-hunk-tracker",
+    "crates/codegen/chutes-mixpanel",
+    "crates/codegen/chutes-prompt-queue",
+    "crates/codegen/chutes-ratatui-inline",
+    "crates/codegen/chutes-ratatui-textarea",
+    "crates/codegen/chutes-sqlite-journal",
+    "crates/codegen/chutes-system-power",
+    "crates/codegen/chutes-token-estimation",
+    "crates/codegen/chutes-tracing-macros",
+    "crates/codegen/chutes-tty-utils",
+    "crates/codegen/chutes-workflow",
+    "crates/common/chutes-circuit-breaker",
+    "crates/common/chutes-computer-hub-core",
+    "crates/common/chutes-computer-hub-mcp-adapter",
+    "crates/common/chutes-computer-hub-sdk",
+    "crates/common/chutes-compaction",
+    "crates/common/chutes-interjection-core",
+    "crates/common/chutes-message-delivery-core",
+    "crates/common/chutes-test-utils",
+    "crates/common/chutes-tool-protocol",
+    "crates/common/chutes-tool-runtime",
+    "crates/common/chutes-tool-types",
+    "crates/common/chutes-tracing",
     "prod/mc/cli-chat-proxy-types",
     "third_party/dagre_rust",
     "third_party/graphlib_rust",
@@ -326,76 +326,76 @@ wildmatch = "2"
 windows = { version = "0.61", features = ["Win32_Security", "Win32_Security_Authorization", "Win32_Foundation", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Console", "Win32_System_Pipes"] }
 wiremock = "0.6"
 wl-clipboard-rs = "0.9"
-xai-acp-lib = { path = "crates/codegen/xai-acp-lib" }
-xai-agent-lifecycle = { path = "crates/codegen/xai-agent-lifecycle" }
-xai-circuit-breaker = { path = "crates/common/xai-circuit-breaker" }
-xai-compaction-transcript = { path = "crates/codegen/xai-compaction-transcript" }
-xai-computer-hub-core = { path = "crates/common/xai-computer-hub-core" }
-xai-computer-hub-sdk = { path = "crates/common/xai-computer-hub-sdk" }
-xai-dirs = { path = "crates/codegen/xai-dirs" }
-xai-fuzzy-file-search = { path = "crates/codegen/xai-fuzzy-file-search" }
-xai-gix-status = { path = "crates/codegen/xai-gix-status" }
-xai-grok-active-sessions = { path = "crates/codegen/xai-grok-active-sessions" }
-xai-grok-agent = { path = "crates/codegen/xai-grok-agent" }
-xai-grok-announcements = { path = "crates/codegen/xai-grok-announcements" }
-xai-grok-auth = { path = "crates/codegen/xai-grok-auth" }
-xai-grok-bundle = { path = "crates/codegen/xai-grok-bundle" }
-xai-grok-cloud-config = { path = "crates/codegen/xai-grok-cloud-config" }
-xai-grok-config = { path = "crates/codegen/xai-grok-config" }
-xai-grok-config-types = { path = "crates/codegen/xai-grok-config-types" }
-xai-grok-dashboard-store = { path = "crates/codegen/xai-grok-dashboard-store" }
-xai-grok-diag-server = { path = "crates/codegen/xai-grok-diag-server" }
-xai-grok-env = { path = "crates/codegen/xai-grok-env" }
-xai-grok-external-agent-migration = { path = "crates/codegen/xai-grok-external-agent-migration" }
-xai-grok-extra-ca = { path = "crates/codegen/xai-grok-extra-ca" }
-xai-grok-feedback = { path = "crates/codegen/xai-grok-feedback" }
-xai-grok-file-lock = { path = "crates/codegen/xai-grok-file-lock" }
-xai-grok-foreign-sessions = { path = "crates/codegen/xai-grok-foreign-sessions" }
-xai-grok-http = { path = "crates/codegen/xai-grok-http" }
-xai-grok-image = { path = "crates/codegen/xai-grok-image" }
-xai-grok-lifecycle = { path = "crates/codegen/xai-grok-lifecycle" }
-xai-grok-login = { path = "crates/codegen/xai-grok-login" }
-xai-grok-markdown = { path = "crates/codegen/xai-grok-markdown" }
-xai-grok-markdown-core = { path = "crates/codegen/xai-grok-markdown-core" }
-xai-grok-mcp = { path = "crates/codegen/xai-grok-mcp" }
-xai-grok-memory = { path = "crates/codegen/xai-grok-memory" }
-xai-grok-mermaid = { path = "crates/codegen/xai-grok-mermaid" }
-xai-grok-models = { path = "crates/codegen/xai-grok-models" }
-xai-grok-otel = { path = "crates/codegen/xai-grok-otel" }
-xai-grok-permission-rules = { path = "crates/codegen/xai-grok-permission-rules" }
-xai-grok-sampler = { path = "crates/codegen/xai-grok-sampler" }
-xai-grok-secrets = { path = "crates/codegen/xai-grok-secrets" }
-xai-grok-session-events = { path = "crates/codegen/xai-grok-session-events" }
-xai-grok-session-search = { path = "crates/codegen/xai-grok-session-search" }
-xai-grok-shared = { path = "crates/codegen/xai-grok-shared" }
-xai-grok-shell-base = { path = "crates/codegen/xai-grok-shell-base" }
-xai-grok-shell-session-support = { path = "crates/codegen/xai-grok-shell-session-support" }
-xai-grok-shell-terminal = { path = "crates/codegen/xai-grok-shell-terminal" }
-xai-grok-status-line = { path = "crates/codegen/xai-grok-status-line" }
-xai-grok-telemetry = { path = "crates/codegen/xai-grok-telemetry", default-features = false }
-xai-grok-test-support = { path = "crates/codegen/xai-grok-test-support" }
-xai-grok-tools = { path = "crates/codegen/xai-grok-tools" }
-xai-grok-tools-api = { path = "crates/codegen/xai-grok-tools-api" }
-xai-grok-version = { path = "crates/codegen/xai-grok-version" }
-xai-grok-workspace = { path = "crates/codegen/xai-grok-workspace", default-features = false }
-xai-grok-workspace-types = { path = "crates/codegen/xai-grok-workspace-types" }
-xai-hooks-plugins-types = { path = "crates/codegen/xai-hooks-plugins-types" }
-xai-interjection-core = { path = "crates/common/xai-interjection-core" }
-xai-message-delivery-core = { path = "crates/common/xai-message-delivery-core" }
-xai-mixpanel = { path = "crates/codegen/xai-mixpanel" }
-xai-prompt-queue = { path = "crates/codegen/xai-prompt-queue" }
-xai-proto-build = { path = "crates/build/xai-proto-build" }
-xai-ratatui-inline = { path = "crates/codegen/xai-ratatui-inline" }
-xai-ratatui-textarea = { path = "crates/codegen/xai-ratatui-textarea" }
-xai-sqlite-journal = { path = "crates/codegen/xai-sqlite-journal" }
-xai-system-power = { path = "crates/codegen/xai-system-power" }
-xai-test-utils = { path = "crates/common/xai-test-utils" }
-xai-token-estimation = { path = "crates/codegen/xai-token-estimation" }
-xai-tool-protocol = { path = "crates/common/xai-tool-protocol" }
-xai-tool-runtime = { path = "crates/common/xai-tool-runtime" }
-xai-tool-types = { path = "crates/common/xai-tool-types" }
-xai-tracing = { path = "crates/common/xai-tracing" }
-xai-tty-utils = { path = "crates/codegen/xai-tty-utils" }
+chutes-acp-lib = { path = "crates/codegen/chutes-acp-lib" }
+chutes-agent-lifecycle = { path = "crates/codegen/chutes-agent-lifecycle" }
+chutes-circuit-breaker = { path = "crates/common/chutes-circuit-breaker" }
+chutes-compaction-transcript = { path = "crates/codegen/chutes-compaction-transcript" }
+chutes-computer-hub-core = { path = "crates/common/chutes-computer-hub-core" }
+chutes-computer-hub-sdk = { path = "crates/common/chutes-computer-hub-sdk" }
+chutes-dirs = { path = "crates/codegen/chutes-dirs" }
+chutes-fuzzy-file-search = { path = "crates/codegen/chutes-fuzzy-file-search" }
+chutes-gix-status = { path = "crates/codegen/chutes-gix-status" }
+chutes-active-sessions = { path = "crates/codegen/chutes-active-sessions" }
+chutes-agent = { path = "crates/codegen/chutes-agent" }
+chutes-announcements = { path = "crates/codegen/chutes-announcements" }
+chutes-auth = { path = "crates/codegen/chutes-auth" }
+chutes-bundle = { path = "crates/codegen/chutes-bundle" }
+chutes-cloud-config = { path = "crates/codegen/chutes-cloud-config" }
+chutes-config = { path = "crates/codegen/chutes-config" }
+chutes-config-types = { path = "crates/codegen/chutes-config-types" }
+chutes-dashboard-store = { path = "crates/codegen/chutes-dashboard-store" }
+chutes-diag-server = { path = "crates/codegen/chutes-diag-server" }
+chutes-env = { path = "crates/codegen/chutes-env" }
+chutes-external-agent-migration = { path = "crates/codegen/chutes-external-agent-migration" }
+chutes-extra-ca = { path = "crates/codegen/chutes-extra-ca" }
+chutes-feedback = { path = "crates/codegen/chutes-feedback" }
+chutes-file-lock = { path = "crates/codegen/chutes-file-lock" }
+chutes-foreign-sessions = { path = "crates/codegen/chutes-foreign-sessions" }
+chutes-http = { path = "crates/codegen/chutes-http" }
+chutes-image = { path = "crates/codegen/chutes-image" }
+chutes-lifecycle = { path = "crates/codegen/chutes-lifecycle" }
+chutes-login = { path = "crates/codegen/chutes-login" }
+chutes-markdown = { path = "crates/codegen/chutes-markdown" }
+chutes-markdown-core = { path = "crates/codegen/chutes-markdown-core" }
+chutes-mcp = { path = "crates/codegen/chutes-mcp" }
+chutes-memory = { path = "crates/codegen/chutes-memory" }
+chutes-mermaid = { path = "crates/codegen/chutes-mermaid" }
+chutes-models = { path = "crates/codegen/chutes-models" }
+chutes-otel = { path = "crates/codegen/chutes-otel" }
+chutes-permission-rules = { path = "crates/codegen/chutes-permission-rules" }
+chutes-sampler = { path = "crates/codegen/chutes-sampler" }
+chutes-secrets = { path = "crates/codegen/chutes-secrets" }
+chutes-session-events = { path = "crates/codegen/chutes-session-events" }
+chutes-session-search = { path = "crates/codegen/chutes-session-search" }
+chutes-shared = { path = "crates/codegen/chutes-shared" }
+chutes-shell-base = { path = "crates/codegen/chutes-shell-base" }
+chutes-shell-session-support = { path = "crates/codegen/chutes-shell-session-support" }
+chutes-shell-terminal = { path = "crates/codegen/chutes-shell-terminal" }
+chutes-status-line = { path = "crates/codegen/chutes-status-line" }
+chutes-telemetry = { path = "crates/codegen/chutes-telemetry", default-features = false }
+chutes-test-support = { path = "crates/codegen/chutes-test-support" }
+chutes-tools = { path = "crates/codegen/chutes-tools" }
+chutes-tools-api = { path = "crates/codegen/chutes-tools-api" }
+chutes-version = { path = "crates/codegen/chutes-version" }
+chutes-workspace = { path = "crates/codegen/chutes-workspace", default-features = false }
+chutes-workspace-types = { path = "crates/codegen/chutes-workspace-types" }
+chutes-hooks-plugins-types = { path = "crates/codegen/chutes-hooks-plugins-types" }
+chutes-interjection-core = { path = "crates/common/chutes-interjection-core" }
+chutes-message-delivery-core = { path = "crates/common/chutes-message-delivery-core" }
+chutes-mixpanel = { path = "crates/codegen/chutes-mixpanel" }
+chutes-prompt-queue = { path = "crates/codegen/chutes-prompt-queue" }
+chutes-proto-build = { path = "crates/build/chutes-proto-build" }
+chutes-ratatui-inline = { path = "crates/codegen/chutes-ratatui-inline" }
+chutes-ratatui-textarea = { path = "crates/codegen/chutes-ratatui-textarea" }
+chutes-sqlite-journal = { path = "crates/codegen/chutes-sqlite-journal" }
+chutes-system-power = { path = "crates/codegen/chutes-system-power" }
+chutes-test-utils = { path = "crates/common/chutes-test-utils" }
+chutes-token-estimation = { path = "crates/codegen/chutes-token-estimation" }
+chutes-tool-protocol = { path = "crates/common/chutes-tool-protocol" }
+chutes-tool-runtime = { path = "crates/common/chutes-tool-runtime" }
+chutes-tool-types = { path = "crates/common/chutes-tool-types" }
+chutes-tracing = { path = "crates/common/chutes-tracing" }
+chutes-tty-utils = { path = "crates/codegen/chutes-tty-utils" }
 zbus = { version = "5" }
 zip = "3"
 zstd = "0.13"

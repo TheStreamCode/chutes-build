@@ -1,0 +1,156 @@
+[package]
+license = "Apache-2.0"
+name = "chutes-workspace"
+version = "0.1.220-alpha.4"
+edition.workspace = true
+description = "Core host-local workspace library (FS, VCS, execution, discovery) for chutes-shell and remote sampler"
+
+[dependencies]
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+dunce = { workspace = true }
+chutes-version = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+fs2 = { workspace = true }
+parking_lot = { workspace = true }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+ignore = { workspace = true }
+regex = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+strum = { workspace = true }
+tokio = { workspace = true, features = [
+    "fs",
+    "io-std",
+    "macros",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "v5", "v7"] }
+chutes-agent = { path = "../chutes-agent" }
+chutes-tools = { path = "../chutes-tools" }
+chutes-tools-api = { path = "../chutes-tools-api" }
+# `DiagHandle`, held by the hub config and threaded through `connect_hub`.
+chutes-diag-server = { workspace = true }
+# Pre-stop lifecycle broker served on the diagnostics socket by `bin/workspace_server.rs`.
+chutes-lifecycle = { workspace = true }
+chutes-workspace-client = { path = "../chutes-workspace-client" }
+# Daemon/process-lifecycle machinery for `bin/workspace_server.rs` only; the
+# library never references it.
+chutes-workspace-daemon = { path = "../chutes-workspace-daemon" }
+chutes-workspace-types = { path = "../chutes-workspace-types" }
+chutes-config = { workspace = true }
+chutes-dirs = { workspace = true }
+# Leaf config value types (RemoteSettings, BoolFlag) for the folder-trust decision.
+chutes-config-types = { workspace = true }
+toml = { workspace = true, features = ["preserve_order"] }
+toml_edit = { workspace = true }
+dashmap = { workspace = true }
+agent-client-protocol = { workspace = true }
+chutes-acp-lib = { workspace = true }
+chutes-codebase-graph = { path = "../chutes-codebase-graph" }
+chutes-paths = { path = "../chutes-paths" }
+chutes-permission-rules = { workspace = true }
+base64 = { workspace = true }
+infer = { workspace = true }
+sha2 = { workspace = true, features = ["force-soft"] }
+bstr = "1.12.1"
+hashbrown = "0.16.1"
+nohash-hasher = "0.2.0"
+rustc-hash = "2.1.1"
+# Backs `file_system`'s fuzzy path picker (matcher + background daemon).
+chutes-fuzzy-file-search = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+smallvec = { workspace = true }
+chrono = { workspace = true }
+tree-sitter = { workspace = true }
+url = { workspace = true }
+chutes-env = { workspace = true }
+humantime-serde = { workspace = true }
+prometheus = { workspace = true }
+chutes-egress-proxy = { path = "../chutes-egress-proxy" }
+chutes-sandbox = { path = "../chutes-sandbox", default-features = false }
+chutes-hooks = { path = "../chutes-hooks" }
+chutes-hunk-tracker = { path = "../chutes-hunk-tracker" }
+# `metrics` enables the SDK's metric-donation client (periodic Prometheus
+# registry gather → OTLP → hub donation pump); see metric_donation_reporter.
+chutes-computer-hub-sdk = { workspace = true, features = ["metrics"] }
+chutes-computer-hub-mcp-adapter = { path = "../../common/chutes-computer-hub-mcp-adapter" }
+chutes-mcp = { path = "../chutes-mcp" }
+chutes-file-utils = { path = "../chutes-file-utils" }
+chutes-session-events = { workspace = true }
+chutes-auth = { path = "../chutes-auth" }
+chutes-telemetry = { workspace = true }
+chutes-tty-utils = { workspace = true }
+reqwest = { workspace = true }
+chutes-tool-protocol = { workspace = true }
+chutes-tool-runtime = { workspace = true }
+chutes-tool-types = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+urlencoding = "2"
+chutes-fast-worktree = { path = "../chutes-fast-worktree", features = ["metadata"] }
+# tonic: Status/Code mapping for deploy errors in workspace_ops.
+tonic = { workspace = true }
+sha1 = { workspace = true, optional = true }
+zip = { workspace = true, optional = true }
+
+chutes-fsnotify = { path = "../chutes-fsnotify" }
+clap = { workspace = true }
+tracing-subscriber = { workspace = true }
+# "enable" required for the SDK's spans to record at all.
+fastrace = { workspace = true, features = ["enable"] }
+chutes-tracing = { workspace = true }
+chutes-extra-ca = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+tempfile = { workspace = true }
+zstd = { workspace = true }
+wait-timeout = { workspace = true }
+
+# Raw fd/dirent/poll calls in foreign-session capability probes, the fuzzy
+# walker's rlimit guard, and the envrc reader.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["signal", "process"] }
+
+[[bin]]
+name = "chutes-workspace-server"
+path = "src/bin/workspace_server.rs"
+
+[[bin]]
+name = "workspace-server-probe"
+path = "src/bin/workspace_server_probe.rs"
+
+[features]
+default = ["sandbox-enforce"]
+compression = []
+test-support = []
+test-util = []
+sandbox-enforce = ["chutes-sandbox/enforce"]
+default-bazel = [
+    "sandbox-enforce",
+    ]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+chutes-test-utils = { path = "../../common/chutes-test-utils" }
+# Decode tar.gz archives produced by workspace upload helpers in tests.
+flate2 = { workspace = true }
+tar = { workspace = true }
+
+[package.metadata.cargo-shear]
+ignored = ["tokio-tungstenite"]
+
+[lints]
+workspace = true

@@ -7,7 +7,7 @@
 
 /// Uploading or publicly sharing local sessions is not part of Chutes Build.
 ///
-/// Enforced by `require_xai_auth_for_share` (xAI auth cannot exist here) plus
+/// Enforced by `require_chutes_auth_for_share` (the gate admits Chutes auth only) plus
 /// the `sharing_enabled` remote flag defaulting to false; the CLI surface is
 /// additionally hidden.
 pub const REMOTE_SESSION_SHARING: bool = false;

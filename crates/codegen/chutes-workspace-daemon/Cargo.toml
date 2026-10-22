@@ -1,0 +1,27 @@
+[package]
+license = "Apache-2.0"
+name = "chutes-workspace-daemon"
+version = "0.1.0"
+edition.workspace = true
+description = "Process lifecycle for the workspace-server daemon: self-daemonization and single-instance pidfile locking"
+
+[dependencies]
+fs2 = { workspace = true }
+prometheus = { workspace = true }
+
+# fork/setsid/dup2/chdir on the self-daemonize path.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+# SetStdHandle on the Windows self-daemonize path, plus the predecessor
+# open/terminate calls behind the pidfile takeover.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[dev-dependencies]
+# Fixture child processes in the pidfile-takeover tests.
+chutes-tty-utils = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
