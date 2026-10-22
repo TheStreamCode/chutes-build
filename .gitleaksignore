@@ -11,20 +11,27 @@
 # Every entry is a synthetic detector fixture — an AWS prefix followed by the
 # alphabet, a GitHub PAT prefix followed by digits, the canonical jwt.io example
 # token, and a bare `CHUTES_API_KEY=` with no value. None can authenticate anything.
+#
+# **These paths are historical, not current.** A fingerprint is
+# `<commit>:<path at that commit>:<rule>:<line>`, so the path must be spelled as it
+# was in that commit even though the file has since been renamed (the 2.0.0 rebrand
+# renamed every `xai-grok-*` crate). Rewriting them to the current names — as the
+# rebrand pass did once — silently un-suppresses all of these findings and turns
+# the history scan red; the gitleaks job is the check that catches it.
 
 # Redactor fixtures, before the inline annotations were added.
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/chutes-secrets/src/sanitizer.rs:generic-api-key:389
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/chutes-secrets/src/sanitizer.rs:jwt:457
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-secrets/src/sanitizer.rs:generic-api-key:389
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-secrets/src/sanitizer.rs:jwt:457
 25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:aws-access-token:64
 25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:github-pat:66
-25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/codegen/chutes-tools/src/implementations/chutes/context7.rs:aws-access-token:209
+25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/codegen/xai-grok-tools/src/implementations/chutes/context7.rs:aws-access-token:209
 
 # The bare environment-variable name in a command-splitting test — no value at all.
-07b6400464f2a030cc2fc27e7b30538d36d5967d:crates/codegen/chutes-workspace/src/permission/bash_command_splitting.rs:generic-api-key:1401
+07b6400464f2a030cc2fc27e7b30538d36d5967d:crates/codegen/xai-grok-workspace/src/permission/bash_command_splitting.rs:generic-api-key:1401
 
 # The rebase commit's copy of the same command-splitting fixture, before the
-# file moved to `chutes-permission-rules` and the line gained an inline
+# file moved to `xai-grok-permission-rules` and the line gained an inline
 # `// gitleaks:allow`. Gitleaks reports only the `CHUTES_API_KEY=` prefix as
 # the secret, so this one cannot go in `.gitleaks.toml`: a value entry would
 # silence a real leak of that variable too. The fixture value is fake.
-7b2600d00f72de93056e4ed3387a55d58de84f21:crates/codegen/chutes-permission-rules/src/bash_command_splitting.rs:generic-api-key:1371
+7b2600d00f72de93056e4ed3387a55d58de84f21:crates/codegen/xai-grok-permission-rules/src/bash_command_splitting.rs:generic-api-key:1371

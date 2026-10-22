@@ -128,7 +128,7 @@ mod tests {
     fn test_config_deserialize_from_set_options_payload() {
         let json = r#"{
             "status": "enabled",
-            "api_key": "chutes-abc123",
+            "api_key": "secret-key-12345",
             "base_url": "https://api.chutes.ai/v1",
             "model": "test-web-search-model"
         }"#;

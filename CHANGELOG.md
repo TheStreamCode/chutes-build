@@ -92,6 +92,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   boundary; `docs/upstream-sync.md` records the freeze and the rebrand audit.
 - The upstream watcher is manual-dispatch only and `.github/upstream.json` is
   marked frozen.
+- Gitleaks history fingerprints keep the path each finding had in its own commit;
+  the rebrand pass had renamed them and un-suppressed six reviewed synthetic
+  fixtures. The web-search fixture whose fake prefix the rebrand rewrote is now
+  allowlisted by exact literal in `.gitleaks.toml`.
 
 ## [1.7.2] - 2026-10-19
 

@@ -33,6 +33,11 @@ regexes = [
   '''sk-CANARYabcdefghij1234567890''',
   # `chutes-tools` web-search config default in a unit test.
   '''secret-key-12345''',
+  # The same web-search deserialization fixture as it appears in published history:
+  # the 2.0.0 rebrand rewrote its upstream-looking prefix to `chutes-abc123`, which
+  # the generic-api-key rule now matches in commit 02e0d7bf. Exact literal, a
+  # synthetic value in a test payload — no Chutes credential has this shape.
+  '''chutes-abc123''',
   # `chutes-workspace::hub_auth` token fixtures: a real ES256 JWT header followed
   # by the words "test" and "tok". Anchored to those two suffixes so an actual JWT
   # with this header is still reported.
