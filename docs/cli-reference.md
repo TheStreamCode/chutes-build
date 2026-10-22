@@ -113,7 +113,7 @@ their version-specific value syntax.
 | `memory` | Manage local cross-session memory | `clear [--workspace|--global|--all] [--yes]` |
 | `models` | List the resolved model catalog | `--json` prints `{authenticated, auth, defaultModel, models}` |
 | `plugin` | Manage plugins and marketplaces | `list`, `install`, `uninstall`, `update`, `enable`, `disable`, `details`, `validate`, `tag`, `marketplace` |
-| `sessions` | Manage the local session registry | `list`, `search`, `delete` |
+| `sessions` | Manage the local session registry | `list`, `search`, `delete`; local store only (no remote registry) |
 | `setup` | Fetch and install your team's managed configuration | `--json` prints the report instead of writing; without a deployment key (or a configured operator endpoint) it exits with guidance |
 | `trace <SESSION_ID>` | Create a local trace archive | `--output`, `--json`, `--local`; uploads stay disabled unless trace upload is explicitly enabled in configuration |
 | `update` | Check the Chutes release channel, or install a version on request | `--check`, `--json`. Automatic self-update is compiled out; the command contacts the release channel only when run and installs only a version you request |

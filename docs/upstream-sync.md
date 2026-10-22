@@ -182,8 +182,10 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
 - `LEGACY_AUTH_SCOPE` / `LEGACY_SCOPE` are `disabled::legacy-auth`: the pre-OIDC
   relay login is disabled by pointing its scope at a key no server can mint,
   rather than by deleting the code path.
-- The changelog fetch and the update check point at a closed loopback port. The
-  callers stay so merges stay clean; the requests fail locally and instantly.
+- The changelog fetch points at a closed loopback port: the caller stays so
+  merges stay clean, and the request fails locally and instantly. The `update`
+  command is the deliberate exception — it reads the Chutes release channel only
+  when the user runs it, while automatic update checks stay compiled out.
 - `CodingDataSharingLock::ProductPolicy` and the privacy banner's floor: the
   coding-data row is locked with a reason instead of removed, and the banner
   never renders. The extension behind them already refuses the call — this is so
@@ -1668,9 +1670,10 @@ the fork Chutes-only by default:
   discard any port/path override. Probe-verified: chat completions answer
   on the inference host (429 unauthenticated), `/v1/models` 404s on the
   gateway, so each default points at the host that actually serves it.
-- Automatic self-update is off by default (`AUTOMATIC_SELF_UPDATE=false`
-  gates the check); external OpenTelemetry export is deadened (`init`
-  no-op, `is_active` false) while local collectors keep working.
+- Automatic self-update is compiled out (`AUTOMATIC_SELF_UPDATE` is hard-off), so
+  only an explicit `chutes-build update` reaches the release channel; external
+  OpenTelemetry export is deadened (`init` no-op, `is_active` false) while local
+  collectors keep working.
 - Wire headers are `x-chutes-build-*`; xAI headers are sent only to
   genuine xAI hosts (BYOK compatibility).
 - Removed the product-skills network client and its cache, the vestigial

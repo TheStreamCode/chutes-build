@@ -96,7 +96,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `cli.auto_update` | `boolean` | `pin` | `user` | Check for CLI updates on launch. Also CHUTES_BUILD_DISABLE_AUTOUPDATER to suppress. |
+| `cli.auto_update` | `boolean` | `pin` | `user` | Accepted for compatibility; automatic update checks are compiled out, so no launch-time check runs. `CHUTES_BUILD_DISABLE_AUTOUPDATER` is inert for the same reason. |
 | `cli.channel` | `stable / alpha` | `pin` | `user` | Release channel preference. |
 | `cli.grove` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `all` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Convenience that turns session / `-w` Grove on when the specific knobs are unset (the upstream clone surface is not in this build). Also `CHUTES_BUILD_GROVE`. `false` / `copy` / `off` means enable-all is off (fall through). `[cli] grove_worktree` and `CHUTES_BUILD_WORKTREE_TYPE` still win for worktrees. Remote `grove_worktree = false` still kills worktrees only. |
 | `cli.grove_worktree` | `boolean` or `grove` / `grove-fuse` / `grove-nfs` / `nfs` / `copy` / `true` / `false` / `1` / `0` / `on` / `off` | `yes` | `user` | Session / `-w` Grove vs copy. Default copy. Distinct from creation-mode `cli.worktree_type`. Also `CHUTES_BUILD_WORKTREE_TYPE`. Layer order: request → env → local → enable-all (`CHUTES_BUILD_GROVE` / `[cli] grove`) → remote-true; then kill last: remote `grove_worktree = false` → copy (`remote_kill`). Missing remote settings are not a kill: local/env/request/enable-all still apply. |

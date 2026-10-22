@@ -24,10 +24,12 @@ files are created owner-only (mode 0600 where the platform has POSIX
 permissions), including the bootstrap templates written on first run.
 
 `chutes-build trace` always creates a local archive. Remote session sharing and
-search, remote workspace exposure, upstream managed configuration commands, and
-automatic update checks are disabled — compiled out through
-`chutes-build-core::product`, with their endpoints pointed at a closed loopback
-port rather than left resolvable.
+search, remote workspace exposure, and upstream managed configuration commands
+are disabled — compiled out through `chutes-build-core::product`, with their
+endpoints pointed at a closed loopback port rather than left resolvable.
+Automatic update checks are compiled out as well; the `chutes-build update`
+command contacts the Chutes release channel only when you run it, and installs
+only a version you explicitly request.
 
 There is no coding-data retention opt-in. Upstream offers one, both as a settings
 row and as a startup banner; here the setting is locked with the reason shown

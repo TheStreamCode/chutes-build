@@ -43,7 +43,7 @@ Location: `~/.chutes-build/config.toml`. If the file is missing, Chutes Build us
 
 ```toml
 [cli]
-auto_update = true                     # check for updates on launch
+auto_update = true                     # compatibility: automatic checks are compiled out
 
 [agent]
 # name = "chutes-build"                  # default agent on interactive `chutes-build` (no --plan / --agent-profile)

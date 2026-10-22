@@ -269,7 +269,7 @@ chutes-build sessions list --limit 50
 chutes-build sessions search "rate limit"
 ```
 
-`chutes-build sessions list` shows sessions for the current working directory, grouped by worktree label. Each row lists the session ID, the creation and update dates, the source status, and the summary. `chutes-build sessions search` combines a local SQLite index with remote results.
+`chutes-build sessions list` shows sessions for the current working directory, grouped by worktree label. Each row lists the session ID, the creation and update dates, the source status, and the summary. `chutes-build sessions search` queries the local SQLite index only: this build has no remote session registry, so it never makes a network request.
 
 ---
 

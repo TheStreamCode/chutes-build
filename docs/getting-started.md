@@ -39,7 +39,8 @@ of these paths:
 
 - run `chutes-build login` once: it validates the key and saves it for
   future runs (pipe it via stdin for automation); or
-- paste it on the welcome screen when starting without a key; or
+- press `k` on the setup screen to enter it when starting without a key
+  (it validates, saves, and resumes); or
 - set `CHUTES_API_KEY` for the current process (an explicit env key
   always wins over the saved one).
 
@@ -50,6 +51,11 @@ chutes-build
 
 Avoid command-line arguments for secrets because process listings and shell
 history may expose them. `chutes-build logout` deletes the saved key.
+
+On Windows, if saving the key fails with `permission denied`, Controlled folder
+access is blocking the unsigned binary rather than a missing directory
+permission: allow `chutes-build.exe` through it, or use `CHUTES_API_KEY` (which
+needs no write). See the README troubleshooting section.
 
 ### No browser login
 

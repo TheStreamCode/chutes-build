@@ -41,7 +41,7 @@ Chutes Build processes the prompt, runs any necessary tools, and prints the resu
 | `--prompt-json <JSON>`  | Prompt as JSON content blocks                         |
 | `--prompt-file <PATH>`  | Prompt from a file                                    |
 | `--verbatim`            | Send prompt exactly as given                          |
-| `--no-auto-update`      | Disable update checks for this session                |
+| `--no-auto-update`      | Compatibility flag; automatic update checks are compiled out |
 | `--sandbox <PROFILE>`   | Sandbox profile for filesystem/network access         |
 
 > **Note:** `--tools`, `--disallowed-tools`, `--max-turns`, and `--agents` are headless-only flags. If used in the interactive TUI, a warning is printed and the flag is ignored. `--reasoning-effort`/`--effort`, `--permission-mode`, `--allow`, and `--deny` work in both modes. For more flags (agents and worktrees), see [Additional Headless Flags](#additional-headless-flags).
@@ -604,8 +604,9 @@ Chutes Build stores data in `~/.chutes-build` (override with `CHUTES_BUILD_HOME`
 | Path                     | Contents                              |
 | ------------------------ | ------------------------------------- |
 | `config.toml`            | User configuration                    |
-| `auth.json`              | Cached OAuth2/API credentials         |
-| `version.json`           | Version cache for update checks       |
+| `auth.json`              | Not used in this build: the API key is the only credential |
+| `api_key`                | Saved Chutes API key (from `login` or the setup screen) |
+| `version.json`           | Version cache written by an explicit `update` run |
 | `sessions/`              | Session transcripts (SQLite)          |
 | `memory/`                | Cross-session memory store            |
 | `logs/`                  | Internal log files (for example `unified.jsonl`) |
@@ -620,9 +621,9 @@ Chutes Build stores data in `~/.chutes-build` (override with `CHUTES_BUILD_HOME`
 
 For containers or CI, mount `~/.chutes-build` read-only:
 
-- Pre-populate `auth.json` or use `CHUTES_API_KEY`
+- Use `CHUTES_API_KEY` (this build has no `auth.json` login store)
 - Session persistence fails silently (ephemeral)
-- Update checks log a warning and skip
+- An explicit `update` run cannot write the version cache and says so
 
 ```bash
 export CHUTES_API_KEY="cpk_..."
@@ -633,6 +634,11 @@ chutes-build -p "..." --no-auto-update
 ---
 
 ## Update Check Suppression
+
+Automatic update checks are compiled out in this build, so the controls below
+are compatibility surface: they are accepted and documented, but no launch-time
+check runs. The explicit `chutes-build update` command is the only path that
+contacts the release channel.
 
 | Method                          | Scope     |
 | ------------------------------- | --------- |

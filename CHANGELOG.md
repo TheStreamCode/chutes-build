@@ -73,6 +73,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message ("Accesso negato." on an Italian Windows): the error names the path,
   the English cause and the OS code, and on Windows points at Controlled folder
   access, which blocks unsigned builds from writing under the user profile.
+- **Session list/search/delete are local-only again.** The CLI no longer sends a
+  credentialed request to a remote session registry that answers 404 on Chutes,
+  so a search no longer waits on it or prints a warning for every query.
+- **Documentation matches the shipped update and session behavior.** README,
+  privacy, cli-reference, getting-started, the embedded user guide and the
+  upstream-sync record now distinguish the compiled-out automatic update checks
+  from the explicit `update` command, describe the `k`-then-paste key flow, and
+  note the Windows Controlled folder access workaround.
 
 ### Internal
 

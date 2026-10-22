@@ -25,7 +25,7 @@ or secret manager, and never commit real credentials.
 
 | Variable | Purpose |
 | --- | --- |
-| `CHUTES_API_KEY` | Ambient Chutes API credential for allowlisted official HTTPS endpoints. |
+| `CHUTES_API_KEY` | Ambient Chutes API credential for allowlisted official HTTPS endpoints. An explicit env value wins over the saved `~/.chutes-build/api_key`. |
 | `CHUTES_MODELS_API_KEY` | Dedicated credential for a custom model-catalog endpoint. |
 | `CHUTES_AUTH_SCHEME=raw` | Send the management API key without the `Bearer` prefix. Default is `Bearer`. |
 | `CHUTES_BUILD_OAUTH2_CLIENT_ID` | Dormant: parsed but never honored — this build has no account login (API key only). |

@@ -50,8 +50,9 @@ chutes-build
 ```
 
 On first launch, Chutes Build asks for a Chutes API key. Create one at
-[chutes.ai/app/api](https://chutes.ai/app/api), then either paste it at the prompt
-(or with `/apikey` later) or set it in the environment:
+[chutes.ai/app/api](https://chutes.ai/app/api), then either press `k` on the
+setup screen, paste the key and press Enter (it validates and saves; `/apikey`
+shows the same instructions later) or set it in the environment:
 
 ```bash
 export CHUTES_API_KEY="cpk_..."

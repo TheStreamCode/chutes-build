@@ -56,10 +56,16 @@ stdin), validates the key against the API, and stores it at
 the saved key. An explicit `CHUTES_API_KEY` env value always wins over
 the saved one.
 
-Without any key, Chutes Build starts on a setup screen where you can
-paste the key inline (it validates, saves, and resumes) or Quit — never
-a login option. Headless runs (`-p`) fail with the same message instead
-of producing output.
+Without any key, Chutes Build starts on a setup screen. Press `k` to open the
+key field (typing in the composer does nothing there), paste the key and press
+Enter: it is validated, saved to `~/.chutes-build/api_key`, and the session
+resumes. `q` quits instead — never a login option. Headless runs (`-p`) fail
+with the same setup message instead of producing output.
+
+On Windows, a save that reports `permission denied` is usually Controlled
+folder access blocking the unsigned binary, not a missing directory
+permission: allow `chutes-build.exe` through it, or avoid the write entirely by
+setting `CHUTES_API_KEY`.
 
 ## No account login, no sessions
 
@@ -173,4 +179,4 @@ RUST_LOG=debug chutes-build -p "hello" 2> /tmp/chutes-build.log
   check for trailing whitespace or quotes in the value, and confirm no
   per-model `api_key`/`env_key` overrides the global one with a stale key.
 - **Missing key on the start screen** — same cause as "Not signed in":
-  paste the key inline, or quit, export the key, and start again.
+  press `k` and paste the key inline, or quit, export the key, and start again.
