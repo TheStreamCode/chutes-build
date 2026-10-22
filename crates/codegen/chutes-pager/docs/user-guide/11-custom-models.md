@@ -434,9 +434,10 @@ A complete config for an enterprise deployment with custom models:
 
 ```toml
 [cli]
-auto_update = false
+auto_update = false                    # compatibility: automatic checks are compiled out
 
 [auth]
+# Dormant in this build: parsed but never honored (API key only).
 auth_provider_command = "/usr/local/bin/my-company-auth-provider"
 auth_provider_label = "Acme Corp"
 auth_token_ttl = 3600

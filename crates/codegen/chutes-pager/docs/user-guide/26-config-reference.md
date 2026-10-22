@@ -103,7 +103,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `cli.installer` | `string` | `—` | `user` | Which installer last set up this CLI, used to pick the update path. |
 | `cli.maximum_version` | `string` | `pin` | `user` | Highest CLI version that still runs without a hard block. Also CHUTES_BUILD_MAXIMUM_VERSION. |
 | `cli.minimum_version` | `string` | `pin` | `user` | Lowest CLI version that still runs without a hard block. Also CHUTES_BUILD_MINIMUM_VERSION. |
-| `cli.npm_registry` | `string` | `yes` | `user` | npm registry used by the auto-updater. |
+| `cli.npm_registry` | `string` | `yes` | `user` | npm registry used by the legacy npm update path (automatic updates are compiled out; only an explicit `update` run uses it). |
 | `cli.nfs_worktree` | same as `cli.grove_worktree` | `yes` | `user` | Read alias of `cli.grove_worktree`. |
 | `cli.required_maximum_version` | `string` | `pin` | `user` | Hard maximum CLI version. Also CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION. |
 | `cli.required_minimum_version` | `string` | `pin` | `user` | Hard minimum CLI version. Also CHUTES_BUILD_REQUIRED_MINIMUM_VERSION. |

@@ -29,7 +29,7 @@ given in the advisory unless you ask otherwise.
 
 Anything in the fork's own surface belongs here:
 
-- credential resolution and storage (`CHUTES_API_KEY`, `auth.json`);
+- credential resolution and storage (`CHUTES_API_KEY`, `~/.chutes-build/api_key`);
 - which endpoints may receive a credential (`chutes-build-core::endpoint_policy`);
 - the plugin trust boundary, permission rules, and the sandbox;
 - the Chutes tools — media generation, OCR, the isolated browser, Context7;

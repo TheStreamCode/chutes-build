@@ -571,27 +571,27 @@ compatibility but change nothing (see
 
 ### Version pinning
 
-Control which versions the CLI may auto-update to and which versions may run. Set
-these in `[cli]`, or in a managed layer for fleet-wide policy. Each has an
-environment override that can only tighten the bound, for CI and testing.
+Control which versions the CLI may install or run. Set these in `[cli]`, or in a
+managed layer for fleet-wide policy. Each has an environment override that can
+only tighten the bound, for CI and testing.
 
 > **Changed:** `minimum_version` no longer blocks startup. It is now a soft
-> anti-downgrade floor for the updater. For a hard floor that prevents old
-> versions from starting, use `required_minimum_version`.
+> anti-downgrade floor for `chutes-build update`. For a hard floor that prevents
+> old versions from starting, use `required_minimum_version`.
 
 ```toml
 [cli]
-minimum_version = "0.2.109"          # updater won't downgrade below this
-maximum_version = "0.2.180"          # updater won't install above this
+minimum_version = "0.2.109"          # explicit update won't downgrade below this
+maximum_version = "0.2.180"          # explicit update won't install above this
 required_minimum_version = "0.2.100" # refuse to start below this
 required_maximum_version = "0.2.200" # refuse to start above this
 ```
 
-- `minimum_version` (`CHUTES_BUILD_MINIMUM_VERSION`) is a soft anti-downgrade floor. The
-  updater skips a target below it and keeps the current version. It never blocks
-  startup.
-- `maximum_version` (`CHUTES_BUILD_MAXIMUM_VERSION`) is a soft ceiling. The updater caps
-  its target at it and never installs above it.
+- `minimum_version` (`CHUTES_BUILD_MINIMUM_VERSION`) is a soft anti-downgrade floor. An
+  explicit `chutes-build update` skips a target below it and keeps the current
+  version. It never blocks startup.
+- `maximum_version` (`CHUTES_BUILD_MAXIMUM_VERSION`) is a soft ceiling. The explicit
+  update caps its target at it and never installs above it.
 - `required_minimum_version` (`CHUTES_BUILD_REQUIRED_MINIMUM_VERSION`) and
   `required_maximum_version` (`CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION`) are hard bounds. If
   the running version is outside the range, the CLI exits at startup and instructs
@@ -610,9 +610,10 @@ A complete config for enterprise use:
 
 ```toml
 [cli]
-auto_update = false
+auto_update = false                    # compatibility: automatic checks are compiled out
 
 [auth]
+# Dormant in this build: parsed but never honored (API key only).
 auth_provider_command = "/usr/local/bin/my-company-auth-provider"
 auth_provider_label = "Acme Corp"
 auth_token_ttl = 3600
@@ -744,12 +745,12 @@ The key ones. See the README for the complete list.
 | Variable | Description |
 |----------|-------------|
 | `CHUTES_API_KEY` | API key from chutes.ai/app/settings/api-keys |
-| `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` | External auth binary path |
-| `CHUTES_BUILD_AUTH_PROVIDER_LABEL` | Display name on TUI login screen |
-| `CHUTES_BUILD_AUTH_TOKEN_TTL` | Token lifetime in seconds |
-| `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` | Seconds before expiry to refresh (default: 300) |
-| `CHUTES_BUILD_OIDC_ISSUER` | OIDC issuer URL |
-| `CHUTES_BUILD_OIDC_CLIENT_ID` | OIDC client ID |
+| `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` | Dormant: parsed but never honored (API key only) |
+| `CHUTES_BUILD_AUTH_PROVIDER_LABEL` | Dormant: parsed but never honored |
+| `CHUTES_BUILD_AUTH_TOKEN_TTL` | Dormant: parsed but never honored |
+| `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` | Dormant: parsed but never honored |
+| `CHUTES_BUILD_OIDC_ISSUER` | Dormant: parsed but never honored (API key only) |
+| `CHUTES_BUILD_OIDC_CLIENT_ID` | Dormant: parsed but never honored |
 
 ### Endpoints
 
@@ -803,7 +804,7 @@ The key ones. See the README for the complete list.
 |------|-------------|
 | `~/.chutes-build/config.toml` | Main configuration file |
 | `~/.chutes-build/pager.toml` | TUI appearance configuration |
-| `~/.chutes-build/auth.json` | Authentication credentials (auto-managed) |
+| `~/.chutes-build/api_key` | Saved Chutes API key (written by `login` or the setup screen) |
 | `~/.chutes-build/sessions/` | Persisted sessions (organized by working directory) |
 | `~/.chutes-build/memory/` | Cross-session memory files and index |
 | `~/.chutes-build/skills/` | User-scoped skill definitions |

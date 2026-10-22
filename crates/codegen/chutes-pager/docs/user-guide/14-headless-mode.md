@@ -542,7 +542,7 @@ Key environment variables that affect headless mode:
 
 | Variable                        | Description                                                   |
 | ------------------------------- | ------------------------------------------------------------- |
-| `CHUTES_API_KEY`        | API key for authentication (required when no browser login)   |
+| `CHUTES_API_KEY`        | The only credential (this build has no browser login)          |
 | `CHUTES_BUILD_HOME`                    | Override config directory (default: `~/.chutes-build`)                |
 | `CHUTES_BUILD_LOG_FILE`                | Path to a log file (used verbatim as the path; works in headless and TUI, honors `RUST_LOG`) |
 | `RUST_LOG`                     | Log level filter (e.g. `debug`). Headless logs to stderr.     |

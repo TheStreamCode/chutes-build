@@ -4,11 +4,13 @@ A terminal-based AI coding assistant and agentic harness.
 
 Use it interactively as a TUI, or integrate it into your own apps via headless mode and the Agent Client Protocol (ACP).
 
+> **Fork note — Chutes Build 2.0.0.** This crate README is retained from the upstream tree this fork came from and is kept for engineering context. It still documents browser login, OIDC/SSO, device-code, `auth_provider_command`, `auth.json` session storage and automatic update checks — **none of which this build ships**. The Chutes API key (`CHUTES_API_KEY`, or the saved `~/.chutes-build/api_key`) is the only credential; there is no login store; automatic update checks are compiled out and only an explicit `chutes-build update` reaches the release channel. Per-model `[auth_provider.<name>]` helpers for BYOK tokens are supported and documented in the user guide. Where this file disagrees with `docs/product-spec.md`, the spec wins.
+
 ## Quick Start
 
 ```bash
-# Install
-curl -fsSL https://chutes.ai/cli/install.sh | bash
+# Install the npm launcher (resolves the native binary for this platform)
+npm install -g chutes-build
 
 # Interactive TUI
 chutes-build
@@ -23,7 +25,7 @@ chutes-build agent stdio
 ## Contents
 
 - [Installation](#installation)
-- [Authentication](#authentication) — browser login, API key, OIDC, external auth providers
+- [Authentication](#authentication) — API-key auth only in Chutes Build (the upstream browser/OIDC/provider model below is not shipped)
 - **Using Chutes Build**
   - [Interactive TUI](#interactive-tui) — shortcuts, slash commands, file references
   - [Headless Mode](#headless-mode) — scripting, CI/CD, output formats
@@ -57,12 +59,12 @@ chutes-build agent stdio
 
 ## Installation
 
+Chutes Build ships through the npm launcher, which resolves the prebuilt native
+binary for the current platform:
+
 ```bash
 # Install latest stable
-curl -fsSL https://chutes.ai/cli/install.sh | bash
-
-# Install a specific version
-curl -fsSL https://chutes.ai/cli/install.sh | bash -s 0.1.42
+npm install -g chutes-build
 ```
 
 Verify installation:
@@ -76,6 +78,10 @@ Update to the latest version:
 ```bash
 chutes-build update
 ```
+
+Automatic update checks are compiled out; `chutes-build update` is the explicit
+path and installs only a version you request (the release channel is served by
+the Chutes release infrastructure, not by this repository's CI).
 
 ---
 
@@ -93,6 +99,10 @@ chutes-build
 The API key takes precedence over browser credentials.
 
 ### OIDC (Customer SSO)
+
+> **Not shipped in Chutes Build.** This build has no OIDC/SSO; the section is
+> retained upstream documentation. See the fork note at the top and
+> `docs/product-spec.md` §2.
 
 Authenticate developers via your own Identity Provider (Okta, Azure AD, Auth0) instead of `accounts.chutes.ai`.
 
@@ -131,6 +141,11 @@ export CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL="https://chutes-proxy.acme.com/v1"
 | `audience` | None | Required by some IdPs (e.g. Auth0) |
 
 ### External Auth Provider
+
+> **Not shipped in Chutes Build.** `auth_provider_command` and `auth_provider_label`
+> are parsed but never honored (API key only); the section is retained upstream
+> documentation. Per-model `[auth_provider.<name>]` helpers for BYOK tokens are a
+> different, supported feature — see the user guide's custom-models chapter.
 
 For environments where browser-based login isn't possible (sandboxed VMs, CI runners, air-gapped networks), delegate authentication to an external binary or script. This is the recommended approach for enterprise deployments where your company runs its own auth infrastructure (SSO, device code flows, certificate auth, etc.).
 
@@ -372,6 +387,10 @@ auth_provider = "litellm"
 **Security:** provider commands execute code, so they are honored only from trusted config layers (`~/.chutes-build/config.toml`, managed config, requirements). A project's `.chutes-build/config.toml` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent, and `base_url` (unlike the provider table) is not stripped from remote or campaign patches, the same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust. The command inherits Chutes Build's environment (so it sees `PATH`, `HOME`, and any other secrets there), but Chutes Build's own first-party credentials (`CHUTES_API_KEY`, `CHUTES_BUILD_DEPLOYMENT_KEY`, and related keys) are removed so a BYOK helper never receives them; write helpers that read only what they need, and prefer the `CHUTES_BUILD_AUTH_PROVIDER_*` handback for the prior credential.
 
 ### Using auth.json for API Access
+
+> **Not shipped in Chutes Build.** There is no `auth.json` login store; the saved
+> credential is the API key at `~/.chutes-build/api_key`. This section is retained
+> upstream documentation.
 
 If you've authenticated with `chutes-build login`, you can use the stored credentials to call the CLI chat proxy directly via curl. The proxy requires specific headers that mirror what the chutes-build CLI sends internally:
 
@@ -1315,7 +1334,7 @@ Each feature section below documents its own config. This section covers the gen
 
 ```toml
 [cli]
-auto_update = true                     # check for updates on launch
+auto_update = true                     # compatibility: automatic checks are compiled out
 
 [models]
 default = "model-router"               # model used for new sessions
@@ -1503,7 +1522,7 @@ A complete `config.toml` for an enterprise deployment with external auth, corpor
 
 ```toml
 [cli]
-auto_update = false
+auto_update = false                    # compatibility: automatic checks are compiled out
 
 [auth]
 auth_provider_command = "/usr/local/bin/my-company-auth-provider"
@@ -2476,7 +2495,7 @@ The agent persists all session updates automatically. Clients can reconnect and 
 | --------------------- | --------------------------------------------------- |
 | `~/.chutes-build/config.toml` | Configuration file                                  |
 | `~/.chutes-build/sessions/`   | Persisted sessions (organized by working directory) |
-| `~/.chutes-build/auth.json`   | Authentication credentials (auto-managed)           |
+| `~/.chutes-build/api_key`     | Saved Chutes API key (this build has no `auth.json` store) |
 | `~/.chutes-build/memory/`     | Cross-session memory files and index                |
 | `~/.chutes-build/skills/`     | User-scoped skill definitions                       |
 | `~/.chutes-build/plugins/`    | User-scoped plugins                                 |
