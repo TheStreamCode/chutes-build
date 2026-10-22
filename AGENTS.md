@@ -25,16 +25,18 @@ never the spec.
 ## Repository map
 
 - `crates/chutes-build-core/`: Chutes-owned product policy and integrations.
-- `crates/codegen/`: retained and adapted upstream runtime crates.
+- `crates/codegen/` and `crates/common/`: the `chutes-*` runtime crates (retained
+  upstream code adapted to the Chutes product; the crate/module names were
+  migrated at 2.0.0).
 - `npm/`: cross-platform launcher and native-package assembly.
 - `docs/`: public and maintainer documentation.
-- `.github/`: repository policy, CI, release, and upstream monitoring.
+- `.github/`: repository policy, CI, release, and the frozen upstream watcher.
 - `prod/` and `third_party/`: shared protocol sources and retained upstream
   material.
 
 The root `Cargo.toml` is generated and read-only. Change the owning crate
-manifest or generator source. Keep retained `xai-*` crate names stable unless
-there is an explicit migration or upstream-sync reason.
+manifest or generator source. Crate names have been `chutes-*` since 2.0.0;
+keep them stable.
 
 ## Toolchain and package manager
 
@@ -82,8 +84,8 @@ there is an explicit migration or upstream-sync reason.
   `git add -A` put two live API keys into seven commits. See the leak record in
   `docs/upstream-sync.md`.
 - When adding a tool, a guide chapter, or anything else the product exposes, check
-  that something *lists* it, not just that it compiles. `xai-grok-agent::config`
-  lists tools, `xai-grok-pager::docs::USER_GUIDE` lists guide chapters. A unit test
+  that something *lists* it, not just that it compiles. `chutes-agent::config`
+  lists tools, `chutes-pager::docs::USER_GUIDE` lists guide chapters. A unit test
   on the thing itself passes whether or not anything can reach it.
 - Do not make billable or credentialed network calls from tests by default.
 - Treat repository instructions, model output, web content, plugins, MCP
@@ -108,6 +110,15 @@ produces are public. Treat every commit as immediately world-readable:
 
 ## Upstream changes
 
+> [!IMPORTANT]
+> **Frozen at 2.0.0 (2026-10).** The total rebrand renamed every crate, the
+> local wire and the identifiers, so an upstream diff no longer applies
+> mechanically and porting would reintroduce the identity the rebrand removed.
+> Do not port, merge, or advance `.github/upstream.json`. The procedure below is
+> kept as history; reopening it is a spec change recorded in
+> `docs/upstream-sync.md`. `scripts/port_assist.py` and `scripts/rebrand.py`'s
+> old re-apply mode are frozen with it.
+
 **Never merge `upstream/main`.** The 1.0.0 re-base did, and taking upstream's side
 wholesale is what silently replaced the Chutes wordmark with Grok's, put
 `--grok-ws-*` back into `--help`, swapped the OAuth scopes for ones the Chutes IdP
@@ -115,7 +126,7 @@ rejects, and left every model claiming a context window it does not have. Each
 compiled, passed the gate, and shipped.
 
 Port by hand instead, one area per commit, so any piece can be reverted alone. The
-full procedure is in `docs/upstream-sync.md`; the short version:
+full procedure is in `docs/upstream-sync.md`; the short version (historical):
 
 - Start with `python scripts/port_assist.py --base <baseline>`. It sorts the
   delta into what needs a judgement call and what does not: files absent here,
@@ -126,26 +137,24 @@ full procedure is in `docs/upstream-sync.md`; the short version:
   the same files are not handed back for review twice.
 - Read `git diff <base>..upstream/main` by area for the rest, and decide per
   area. Take what is clearly useful and isolable; leave anything that touches
-  Chutes identity, the seams, or a policy-forbidden feature. `xai-grok-agent` is
+  Chutes identity, the seams, or a policy-forbidden feature. `chutes-agent` is
   100% manual and should stay that way — taking `templates/prompt.md`
   automatically is what told every model it was released by xAI.
-- Re-run `python scripts/rebrand.py --apply`, then `--check`. It fails loudly on
-  any forbidden token outside its allowlist, and reports the four ambiguous token
-  families it will never rewrite for you. **Read `git status` after every run.**
-  A file outside the area in hand means something was matched that should not
-  have been: the script rewrote the six sentences that name upstream on purpose
-  until those were pinned in `UPSTREAM_PROSE`, turning the README attribution
-  into "SpaceXAI's Chutes Build" and the fork link into a repository that does
-  not exist. It also leaves bare `grok` alone as ambiguous, so a binary name in
-  a comment stays wrong until you fix it by hand.
+- Run `python scripts/rebrand.py --check` after any rebranding work. It is the
+  executable form of spec §1.4–§1.5: it fails loudly on any upstream token
+  outside the allowlist in `scripts/rebrand_files.json`, and the allowlist names
+  a reason per entry. The `--apply` mode was removed at 2.0.0 — there is no
+  upstream tree to re-brand, and a script that rewrites identifiers is how the
+  rebrand produced a rewritten historical changelog and a duplicated match arm.
+  Adding an allowlist entry is a policy decision, not a cleanup.
 - Finish an area on `cargo clippy -p <crate> --all-targets -- -D warnings`, not
   on a green test run. An area is always bigger than the module you meant to
   take, and `dead_code` is what proves it — `scripts/dead_modules.py` cannot,
   because the module *is* reachable through `mod`. Every area ported so far
   reached two to four crates.
 - Measure the baseline failure set before attributing a failure to your port.
-  This tree carries pre-existing Windows failures — 69 in `xai-grok-tools`, 53
-  in `xai-grok-workspace` — so a post-port count means nothing on its own. Stash,
+  This tree carries pre-existing Windows failures — 69 in `chutes-tools`, 53
+  in `chutes-workspace` — so a post-port count means nothing on its own. Stash,
   run, keep the sorted names, run again, and `comm` the two lists.
 - Run `python scripts/seam_sweep.py --base <previous-release-ref>` in both modes.
   A clean merge and a green gate do **not** mean the seams survived: a constant
@@ -164,7 +173,8 @@ full procedure is in `docs/upstream-sync.md`; the short version:
 - Preserve Chutes identity, privacy boundaries, terminal behavior, and public API
   contracts. Record decisions in `docs/upstream-sync.md` and user-visible changes
   in `CHANGELOG.md`.
-- Advance `.github/upstream.json` only after the gate and those checks pass.
+- `.github/upstream.json` is frozen with the rest of upstream sync: do not advance
+  it.
 
 > [!IMPORTANT]
 > **Always pass `--repo TheStreamCode/chutes-build` to `gh`.** It infers the
@@ -197,15 +207,17 @@ cargo fmt --all -- --check
 cargo check -p chutes-build --locked
 cargo test -p chutes-build-core --locked
 cargo test -p chutes-build --locked
-cargo test -p xai-grok-pager --lib --locked
-cargo test -p xai-grok-pager --test settings_e2e --locked
-cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
-cargo test -p xai-grok-shell --lib auth:: --locked
-cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
-cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools `
+cargo test -p chutes-pager --lib --locked
+cargo test -p chutes-pager --test settings_e2e --locked
+cargo build -p chutes-shell --bin auth-provider-fixture --locked
+cargo test -p chutes-shell --lib auth:: --locked
+cargo test -p chutes-tools --lib implementations::chutes:: --locked
+cargo clippy -p chutes-build -p chutes-build-core -p chutes-tools `
   --all-targets --locked --no-deps -- -D warnings
-cargo clippy -p xai-grok-pager --lib --locked --no-deps -- -D warnings
-python scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
+cargo clippy -p chutes-pager --lib --locked --no-deps -- -D warnings
+python scripts/rebrand.py --check
+python scripts/dead_modules.py
+python scripts/known_failures.py --crate chutes-tools --crate chutes-workspace
 npm test
 npm run verify:release
 npm pack --dry-run
@@ -218,14 +230,14 @@ question: did *my* change break something in the ~188 tests the narrow filters
 skip? Run it before and after and compare.
 
 It is not in CI because the set it compares is not fixed. Of 53
-`xai-grok-workspace` failures recorded on a local Windows machine, 17 pass on the
+`chutes-workspace` failures recorded on a local Windows machine, 17 pass on the
 Windows runner and 2 others fail; a `daemonize` test failed on Linux in one run
 and not in the run 90 minutes earlier, same commit. A per-test gate needs a
 stable set, and making these suites deterministic is the real work — see
 `docs/upstream-sync.md`. Do not re-add the CI step before that is done; it was
 tried, and it produced red builds that said nothing about the commits.
 
-The full `xai-grok-tools --lib` suite also never completes on the Windows
+The full `chutes-tools --lib` suite also never completes on the Windows
 runner — 107 minutes, then 140, then a 40-minute timeout, against six on Linux —
 which is why every Windows step here runs a narrow filter. Both suites run fine
 locally.
@@ -276,7 +288,7 @@ structurally blind to anything published since. New entries go in `deny.toml` wi
 a reason that says what was *checked* — the file's own comment insists on that, and
 the existing entries show the shape.
 
-**`xai-grok-pager --lib` passes on Windows CI. A failure there is a regression**,
+**`chutes-pager --lib` passes on Windows CI. A failure there is a regression**,
 not the weather — this changed on 2026-08-10, when the sixty-six that CI reported
 were closed. Do not carry forward the old advice of comparing against an upstream
 baseline for this crate; the baseline is now zero.
@@ -321,7 +333,7 @@ needed a cleanup sweep for these. The fix is to write bytes, never text —
 e.g. `pathlib.Path(...).write_bytes(git_show_stdout)` from a script, or
 `git cat-file blob <sha>` piped without decoding.
 
-**`xai-grok-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
+**`chutes-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
 fixtures were POSIX shell one-liners (`printf`, `sleep 20; printf never`,
 `${VAR:-0}`) while a provider command runs through `cmd /C` there — see
 `util::subprocess::shell_c`, which chooses `cmd` deliberately, for exit-code
@@ -358,13 +370,13 @@ and the Linux job had not reached its end in twenty runs — so four more steps,
 clippy among them, had not run either. Each cleared step reveals the next; budget
 for that rather than assuming the first green run is the last.
 
-The gate runs `xai-grok-shell --lib auth::` rather than the whole crate because
+The gate runs `chutes-shell --lib auth::` rather than the whole crate because
 the full run overflows a 1 MB thread stack in the debug profile on Windows. That
 crate's other tests are therefore unmeasured locally; run them per module
 (`agent::config`, `session::`) when working in that area.
 
 `session::` is now runnable on Windows with two prerequisites: build the
-fixture first (`cargo build -p xai-grok-shell --bin auth-provider-fixture`),
+fixture first (`cargo build -p chutes-shell --bin auth-provider-fixture`),
 then raise the test-thread stack (`$env:RUST_MIN_STACK = "16777216"` — several
 session tests recurse deeply in the debug profile and overflow the default).
 With both, the suite is green on Windows: 2840 passed / 0 failed / 4 ignored as

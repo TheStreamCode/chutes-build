@@ -170,13 +170,13 @@ checkpoint files.
 ## Module ownership
 
 This is a fork, not a rewrite: most of the runtime is upstream `grok-build`
-infrastructure, unmodified or lightly adapted. Renaming every `xai-*` crate to
-match the fork's identity is explicitly out of scope (it would complicate
-future upstream syncs for no functional benefit) — this section documents the
-*intended* ownership boundary instead, so a future change lands in the layer
-it actually belongs to. It's a map of intent, not a strict enforcement
-boundary; treat crate placement as one useful signal among several, not a
-guarantee.
+infrastructure, unmodified or lightly adapted. Since 2.0.0 the whole runtime
+carries `chutes-*` names — the total rebrand renamed every crate and module
+(upstream synchronization is now frozen; see `docs/upstream-sync.md`), so this
+section documents the *intended* ownership boundary instead: which layer a
+change belongs to, not which names are inherited. It's a map of intent, not a
+strict enforcement boundary; treat crate placement as one useful signal among
+several, not a guarantee.
 
 **Chutes-owned** (product identity, provider integration, privacy posture):
 
@@ -186,58 +186,57 @@ guarantee.
   media catalog/invocation client, Context7 client, credential-endpoint trust
   policy and SSRF-safe DNS resolution, memory secret-filtering, and wellness
   nudges.
-- `xai-grok-tools::implementations::chutes` — the agent-callable tools backed
+- `chutes-tools::implementations::chutes` — the agent-callable tools backed
   by the above (media generation/discovery, Context7 lookup, OCR
   transcription, account usage, isolated browser control). Despite living
   inside the (upstream) generic tool-runtime crate, this module is
   Chutes-owned; everything else under `implementations/` is upstream-style
   generic tooling (`read_file`, `bash`, `grep`, `web_search`, LSP, ...).
-- `xai-grok-voice`, `xai-grok-models` — Chutes-hosted STT integration and the
+- `chutes-voice`, `chutes-models` — Chutes-hosted STT integration and the
   trimmed Chutes default model catalog, respectively.
-- `xai-grok-secrets` — upstream-authored, but per this fork's policy it is
+- `chutes-secrets` — upstream-authored, but per this fork's policy it is
   now the single canonical secret-detection/redaction layer; Chutes-specific
   call sites (memory persistence, Context7's outbound guard) and upstream
   call sites (telemetry/log sanitization) both route through it rather than
   keeping separate detectors.
 - Product-identity slices scattered through otherwise-upstream crates:
-  rebranded welcome/auth screens and "Sign in with Chutes" OAuth in
-  `xai-grok-pager`/`xai-grok-shell`, plus compile-time product policy in
-  `chutes-build-core::product` that disables remote session sharing/search,
-  workspace exposure, feedback/data-retention controls, trace upload, and
-  automatic updates.
+  rebranded welcome screen and API-key entry in `chutes-pager`/`chutes-shell`,
+  plus compile-time product policy in `chutes-build-core::product` that
+  disables remote session sharing/search, workspace exposure,
+  feedback/data-retention controls, trace upload, and automatic updates.
 
 **Retained upstream infrastructure** (the proven agent runtime this fork
 builds on, not specific to any provider):
 
-- `xai-grok-agent` — prompt construction, planning, subagent
+- `chutes-agent` — prompt construction, planning, subagent
   orchestration, goal tracking.
-- `xai-grok-shell`, `xai-grok-shell-base` — session lifecycle, config
+- `chutes-shell`, `chutes-shell-base` — session lifecycle, config
   resolution/persistence, credential provider, ACP session handling.
-- `xai-grok-sampler`, `xai-grok-sampling-types` — the HTTP/streaming client
+- `chutes-sampler`, `chutes-sampling-types` — the HTTP/streaming client
   and wire types for chat completions (Chutes-specific handling, e.g. legacy
   auto-id mapping and role-run merging, is a small, explicitly-commented
   carve-out inside otherwise-generic client code, not a separate Chutes
   crate).
-- `xai-tool-runtime`, `xai-tool-protocol`, `xai-tool-types` — the tool trait,
+- `chutes-tool-runtime`, `chutes-tool-protocol`, `chutes-tool-types` — the tool trait,
   wire protocol, and shared type definitions any tool (Chutes-owned or not)
   is built on.
-- `xai-grok-tools` (outside `implementations::chutes`) — the generic tool
+- `chutes-tools` (outside `implementations::chutes`) — the generic tool
   implementations: filesystem, shell, search, LSP, MCP, skills.
-- `xai-grok-pager`, `xai-grok-pager-render` — the TUI: rendering, input,
+- `chutes-pager`, `chutes-pager-render` — the TUI: rendering, input,
   scrollback, views. Chutes product identity is layered on top (see above),
   the rendering engine itself is upstream.
-- `xai-grok-workspace` — permission model, sandboxing, worktrees.
-- `xai-grok-auth` — OAuth/credential machinery in general; the Chutes issuer
+- `chutes-workspace` — permission model, sandboxing, worktrees.
+- `chutes-auth` — OAuth/credential machinery in general; the Chutes issuer
   configuration is a caller-supplied parameter, not a fork of this crate.
 - Supporting crates upstream factored out after 1.0.0, all retained and
-  rebranded: `xai-grok-active-sessions` / `xai-grok-foreign-sessions`
-  (session registries), `xai-grok-session-events` / `xai-grok-session-search`
-  (per-session event log and local FTS search), `xai-grok-home` (home-dir
-  resolution), `xai-grok-workspace-daemon` / `xai-grok-diag-server`
+  rebranded: `chutes-active-sessions` / `chutes-foreign-sessions`
+  (session registries), `chutes-session-events` / `chutes-session-search`
+  (per-session event log and local FTS search), `chutes-dirs`/`chutes-paths`
+  (home-dir resolution), `chutes-workspace-daemon` / `chutes-diag-server`
   (workspace-server process lifecycle and in-guest loopback diagnostics),
-  `xai-grok-bundle` (subagent bundle cache), `xai-compaction-transcript`
-  (compacted-segment markdown), and `xai-fuzzy-file-search` (walk + nucleo
-  matcher). `xai-file-utils`'s old `events` module and the shell's
+  `chutes-bundle` (subagent bundle cache), `chutes-compaction-transcript`
+  (compacted-segment markdown), and `chutes-fuzzy-file-search` (walk + nucleo
+  matcher). `chutes-file-utils`'s old `events` module and the shell's
   `active_sessions`/`storage/search_*` modules moved into them.
 
 ### Where the Chutes layer is wired in
@@ -246,11 +245,11 @@ Ownership is not the whole picture: a Chutes-owned tool is only reachable if an
 upstream file lists it. Two places do, and the 1.0.0 re-base lost both — every
 implementation survived and not one tool was callable.
 
-- `xai-grok-agent::config` — the toolset presets. A tool absent from the preset
+- `chutes-agent::config` — the toolset presets. A tool absent from the preset
   the session runs under does not exist as far as the model is concerned. The
   presets also decide *which* sessions get it: the read-only `explore` and `plan`
   toolsets carry the documentation lookups and nothing heavier.
-- `xai-grok-agent::builder` — `ensure_chutes_tools` covers agents whose toolset
+- `chutes-agent::builder` — `ensure_chutes_tools` covers agents whose toolset
   came from a config file rather than a preset, and the lazy pair
   (`take_lazy_chutes_tools` / `register_lazy_chutes_tools`) moves these tools off
   the per-turn schema list while registering them on the bridge so `use_tool` can
@@ -262,7 +261,7 @@ implementation survived and not one tool was callable.
 own unit tests pass whether or not anything can reach it — which is how six
 thousand lines of working code sat unreachable through a green gate.
 
-The same shape caught the docs: `xai-grok-pager::docs::USER_GUIDE` lists which
+The same shape caught the docs: `chutes-pager::docs::USER_GUIDE` lists which
 guide chapters ship, and the fork's two chapters were on disk, unlisted, for the
 same reason.
 

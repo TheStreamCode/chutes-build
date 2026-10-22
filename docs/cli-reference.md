@@ -111,20 +111,22 @@ their version-specific value syntax.
 | `logout` | Delete the saved Chutes API key | No subcommands |
 | `mcp` | Manage MCP server configuration | `list`, `add`, `remove`, `doctor` |
 | `memory` | Manage local cross-session memory | `clear [--workspace|--global|--all] [--yes]` |
-| `models` | List the resolved model catalog | `--json` |
+| `models` | List the resolved model catalog | `--json` prints `{authenticated, auth, defaultModel, models}` |
 | `plugin` | Manage plugins and marketplaces | `list`, `install`, `uninstall`, `update`, `enable`, `disable`, `details`, `validate`, `tag`, `marketplace` |
 | `sessions` | Manage the local session registry | `list`, `search`, `delete` |
-| `setup` | Fetch and install managed configuration | `--json` prints it instead of writing; the endpoint is a closed loopback port in this build, so it fails locally rather than reaching a server |
-| `trace <SESSION_ID>` | Create a local trace archive | `--output`, `--json`; remote upload is not available |
-| `update` | Report where to get a newer version | `--check`, `--json`. Installs nothing: self-update is compiled out and the update endpoints are closed loopback ports |
+| `setup` | Fetch and install your team's managed configuration | `--json` prints the report instead of writing; without a deployment key (or a configured operator endpoint) it exits with guidance |
+| `trace <SESSION_ID>` | Create a local trace archive | `--output`, `--json`, `--local`; uploads stay disabled unless trace upload is explicitly enabled in configuration |
+| `update` | Check the Chutes release channel, or install a version on request | `--check`, `--json`. Automatic self-update is compiled out; the command contacts the release channel only when run and installs only a version you request |
 | `version` (`v`) | Print version/channel information | `--json` |
 | `worktree` | Manage tracked git worktrees | `list`, `show`, `rm`, `gc`, `db` |
 | `wrap <CMD>...` | Forward OSC 52 clipboard writes from a local PTY | Pass the wrapped command and arguments verbatim |
 
 The inherited remote session/share and workspace-exposure commands are not part of
-the Chutes Build CLI. `update` and `setup` are present but cannot reach a server:
-their endpoints are closed loopback ports, so they fail locally and instantly
-rather than being silently absent. `trace` writes an archive and never uploads.
+the Chutes Build CLI. `setup` needs a deployment key (or a configured operator
+endpoint) and exits with guidance when neither exists; `update` contacts the
+Chutes release channel only on explicit request and reports honestly when the
+channel is unavailable. `trace` writes an archive and uploads nothing unless
+trace upload is explicitly enabled in configuration.
 
 ## Agent server
 

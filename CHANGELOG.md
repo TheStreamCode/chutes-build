@@ -4,6 +4,82 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-10-22
+
+### Breaking
+
+- **Chutes Build is the product all the way down.** Every retained upstream
+  crate, module, Rust identifier, environment variable and state path that
+  carried an `xai-*`/`grok` name now carries a Chutes name; the upstream
+  synchronization model that kept those names is frozen
+  (`docs/upstream-sync.md`). Legal attribution is unchanged in `NOTICE` and
+  `THIRD-PARTY-NOTICES`.
+- **The local wire speaks Chutes.** ACP method namespace `x.ai/*` ->
+  `chutes.ai/*`, request headers `x-grok-*` -> `x-chutes-build-*`, token header
+  `X-XAI-Token-Auth` -> `X-Chutes-Token-Auth`, protobuf package
+  `xai.grok.tools.v1` -> `chutes.tools.v1`, ACP initialize meta `grokShell` ->
+  `chutesShell`. 2.0.0 does not interoperate with 1.7.2 or older peers
+  (spec §1.7). A user-configured xAI-compatible endpoint now receives the
+  Chutes token header (or bearer alone) rather than the upstream one; xAI-host
+  BYOK compatibility is dropped.
+- **Local data keeps working.** Read compatibility is retained for data written
+  by 1.7.2 and older: `[grok_com_config]` parses as `[login_config]`,
+  `grok_ws_*`/`grok_version` fields resolve, legacy agent-type and client-type
+  spellings are accepted, `refs/grok/*` worktree pins are read (new pins are
+  `refs/chutes/*`), legacy `grok-*` downloads are pruned, and the `XAI_*`
+  orchestration environment names still resolve (spec §1.5).
+- **Upstream-only surfaces removed.** `chat_modes`/`ChatModelsClient`, the
+  preview-proxy supervisor, the "official marketplace" auto-trust concept and
+  the xAI tier vocabulary are gone (spec §7). Tier names are the Chutes plans,
+  and a max-tier check that cannot recognise a tier resolves false.
+- **Legacy endpoint configuration stays honored.** `CHUTES_BUILD_XAI_API_BASE_URL`
+  and the `xai_api_base_url` requirements key still select the endpoint when
+  the canonical names (`base_url`, `CHUTES_API_BASE_URL`, `chutes_api_base_url`)
+  are unset; the canonical names win when both are present.
+
+### Changed
+
+- CLI help and errors, the TUI, crate documentation and npm metadata identify
+  Chutes Build only. `authors` metadata on inherited crates reads "Chutes Build
+  contributors" (upstream attribution remains in the notice files).
+- Settings-cache HMAC read keys are versioned (`SETTINGS_CACHE_READ_HMAC_KEY_V1`
+  plus a key list) so rotating the key does not invalidate a valid cache.
+- Computer-hub donated-metric names are `donated_*` (were `preview_proxy_*`).
+
+### Fixed
+
+- Legacy `[grok_com_config]` configurations are honoured again through the
+  `login_config` normalisation path instead of being dropped.
+- Pager snapshot files follow the renamed crate (`chutes_pager__*`), so the
+  snapshot suite no longer reports every diff as new.
+- `known-failures` baselines name the real post-rebrand modules and tests.
+- **The documented JSON contracts now hold.** `models --json` emits the model
+  report (`authenticated`, `auth`, `authDetail`, `defaultModel`, `models`) as
+  documented, and `setup --json` / `trace --json` emit a parseable JSON error
+  envelope on their failure paths instead of human text.
+- **`update --check` fails honestly and quickly.** Release-channel failures are
+  reported as `HTTP <status>` without dumping the storage backend's XML/HTML
+  body, the channel-pointer deadline is 6s with retries only for transient
+  failures, and a definitive 4xx moves straight to the fallback base.
+- **`du` names the directory it measured.** With `CHUTES_BUILD_HOME` set, the
+  report header shows the resolved path instead of the literal
+  `$CHUTES_BUILD_HOME` shorthand.
+- **CLI help and docs describe shipped behavior.** `update`, `setup`, `trace`,
+  and `models` no longer promise a closed-loopback no-op or a remote trace
+  upload that the build does not perform; `setup`'s missing-key guidance drops
+  the impossible "team sign-in" step.
+
+### Internal
+
+- `scripts/rebrand.py` is now a check-only brand guard over
+  `scripts/rebrand_files.json`; `--apply`/`--reclassify` were removed because an
+  upstream tree no longer exists to re-brand. The guard runs in CI and in the
+  local gate.
+- `docs/product-spec.md` §1.4/§1.5/§1.7 define the identity and compatibility
+  boundary; `docs/upstream-sync.md` records the freeze and the rebrand audit.
+- The upstream watcher is manual-dispatch only and `.github/upstream.json` is
+  marked frozen.
+
 ## [1.7.2] - 2026-10-19
 
 ### Fixed

@@ -72,7 +72,7 @@ achieved yet.
 Run the implemented micro-benchmark locally with:
 
 ```powershell
-cargo run -p xai-grok-agent --example token_efficiency_benchmark --quiet
+cargo run -p chutes-agent --example token_efficiency_benchmark --quiet
 ```
 
 It uses built-in synthetic fixtures, prints JSON, performs no network access,

@@ -5,6 +5,13 @@ Chutes Build tracks `xai-org/grok-build`. As of 1.0.3 the relationship is a
 worth carrying. Never `git merge upstream/main`.
 
 > [!IMPORTANT]
+> **Frozen since 2.0.0 (2026-10).** The total rebrand renamed every crate, the
+> local wire, and the identifiers, so an upstream diff no longer applies
+> mechanically and porting would reintroduce the identity the rebrand removed.
+> Nothing is ported until the maintainer reopens this procedure. See "The total
+> rebrand and the freeze" below.
+
+> [!IMPORTANT]
 > This reverses the model 1.0.0 adopted, and the reversal was paid for. Merging
 > means taking upstream's side wherever there is no conflict, and "no conflict"
 > is exactly where a fork's identity lives: the same file, quietly replaced. The
@@ -17,6 +24,45 @@ worth carrying. Never `git merge upstream/main`.
 > named "Synced from monorepo", and its product changelog lives at
 > `x.ai/build/changelog`, off GitHub. So there is no version to "take": there is a
 > diff to read.
+
+## The total rebrand and the freeze
+
+The maintainer decision of 2026-10-17 ("complete 1.7.2 first, then the total
+rebrand, freeze upstream sync") closed the port model. The rebrand was carried
+out on 2026-10-19/21 across everything at once:
+
+- **Crates.** Every `xai-*` / `xai-grok-*` workspace member became `chutes-*`
+  (`xai-grok-pager-bin` -> `chutes-build`, `xai-proto-build` ->
+  `chutes-proto-build`); module trees followed (`implementations/grok_build` ->
+  `implementations/chutes_build`, `grok_auth_credentials` ->
+  `chutes_auth_credentials`, and so on). 4,379 files, mapped 1:1.
+- **Wire.** The local ACP namespace, request headers, protobuf package
+  (`chutes.tools.v1`), env vars and telemetry scope carry Chutes names.
+  Compatibility with peers built from 1.7.2 or earlier is deliberately not
+  retained (spec §1.7); local data written by those releases still parses
+  (spec §1.5).
+- **Removals.** `chat_modes`/`ChatModelsClient`, the preview-proxy supervisor,
+  and the "official marketplace" concept are gone (spec §7, "Removed in
+  2.0.0"). They had no Chutes backend or were defeated by withheld
+  capabilities.
+
+The rebrand was resumed on 2026-10-21 after an interruption and audited before
+completion. The audit pairs every HEAD file with its counterpart and compares
+token multisets against an explicit substitution table, so an edit the rules do
+not explain surfaces for review; it caught three real defects (a rewritten
+historical CHANGELOG line, a duplicated `match` arm from a blind rename, and
+stale `known-failures`/insta snapshot names) and catalogued the semantics the
+rebrand changed (tier vocabulary, marketplace trust naming, retired login
+scopes, preview removal). Details live in the resumption audit report kept
+outside the repository; the rules that stay enforced in-tree are spec §1.5 and
+`scripts/rebrand.py --check`.
+
+**What this means for this document.** The procedure below is history, not an
+operating instruction. `scripts/port_assist.py` and the `--reclassify` mode of
+`scripts/rebrand.py` are equally frozen: they assume upstream and fork share
+paths and identifiers, which is no longer true. `.github/upstream.json` is not
+advanced; the upstream watcher runs only on manual dispatch. Reopening the port
+model means re-mapping the tree first — that is a spec change, not a sync.
 
 ## Why this changed
 
@@ -34,7 +80,7 @@ So 1.0.0 re-based onto upstream's tree and re-applied the Chutes layer on top.
 That layer is thin — 102 files exist only here, and only 26 consume
 `chutes-build-core` — which is what makes the merge model viable.
 
-## The procedure
+## The procedure (frozen at 2.0.0)
 
 ```powershell
 git fetch upstream main
@@ -45,10 +91,10 @@ Group the diff by area and take one area per commit, so each can be reverted on
 its own. Three areas need judgement rather than a decision rule:
 
 1. **The 26 seams** — the files that consume `chutes-build-core`: the routing
-   and endpoint policy in `xai-grok-sampler/src/client.rs`, the agent config /
+   and endpoint policy in `chutes-sampler/src/client.rs`, the agent config /
    init / models trio, the privacy and kill-switch call sites in
-   `xai-grok-shell/src/extensions/`, `leader/server.rs`, the session and pager
-   surfaces, and `xai-grok-memory/src/storage.rs`. Resolve these by hand, every
+   `chutes-shell/src/extensions/`, `leader/server.rs`, the session and pager
+   surfaces, and `chutes-memory/src/storage.rs`. Resolve these by hand, every
    time. They are the product.
 2. **Branding** — re-run `python scripts/rebrand.py --apply`, then
    `--check`. The script carries an explicit map and fails on any forbidden
@@ -119,7 +165,7 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
 
 ## Deliberate divergences to preserve
 
-- `crates/chutes-build-core/` and `xai-grok-tools/src/implementations/chutes/`
+- `crates/chutes-build-core/` and `chutes-tools/src/implementations/chutes/`
   are ours outright.
 - Chutes routing: the virtual `model-router` model, `CHUTES_FALLBACK_MODELS`,
   and the per-family reasoning normalisation.
@@ -129,7 +175,7 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
 - The `chutesnight` / `chutesday` themes replace upstream's.
 - A vendored `protoc` fallback in `find_protoc`, because `bin/protoc` is a
   DotSlash wrapper Windows cannot execute from a build script.
-- The endpoint table in `xai-grok-env`: the relay and gateway WebSocket URLs are
+- The endpoint table in `chutes-env`: the relay and gateway WebSocket URLs are
   loopback sentinels, not upstream hosts. Chutes Build has no vendor relay and no
   cloud-sandbox control plane, so those paths must fail closed rather than
   resolve.
@@ -248,12 +294,12 @@ dependency scan writing to a temp file instead of `/dev/stdout`.
 Three defects the compiler found that review had not:
 
 - `chutes-build-plugin` matched inside the crate name
-  `xai-grok-plugin-marketplace`, renaming a workspace member.
+  `chutes-plugin-marketplace`, renaming a workspace member.
 - Bare `grok` was renamed in 25 files where it was a Rust identifier, producing
   `let chutes-build = ...`. The per-file classifier had read "the fork has zero
   occurrences" as "the fork renamed them all", when sometimes the fork had
   simply deleted the code they lived in.
-- `xai-grok-pager-pty-harness` imported `process_has_exited_without_reap`
+- `chutes-pager-pty-harness` imported `process_has_exited_without_reap`
   unconditionally while the function and every call site are `#[cfg(unix)]` —
   an upstream bug visible only on Windows, worth sending back.
 
@@ -269,8 +315,8 @@ without that baseline the failure counts here are unreadable:
 
 | Suite | pristine upstream 1.0.0 | this tree |
 | --- | ---: | ---: |
-| `xai-grok-pager --lib` | 82 failures | 82 — identical sets |
-| `xai-grok-shell --lib auth::` | 24 failures | 24 — identical sets |
+| `chutes-pager --lib` | 82 failures | 82 — identical sets |
+| `chutes-shell --lib auth::` | 24 failures | 24 — identical sets |
 
 Zero regressions. The table stands as measured; the conclusion drawn from it does
 not. "Not ours to fix" held only while nobody looked: on 2026-08-10 the pager's
@@ -363,7 +409,7 @@ Two lessons worth keeping:
 ### Known upstream failures on Windows
 
 > [!IMPORTANT]
-> **Superseded for the pager, 2026-08-10.** `xai-grok-pager --lib` now passes on
+> **Superseded for the pager, 2026-08-10.** `chutes-pager --lib` now passes on
 > Windows CI: sixty-six failures closed, five of them product defects rather than
 > test bugs — see "Closing the Windows failures" below. The comparison-against-
 > upstream advice no longer applies to that crate, because its baseline is zero
@@ -374,13 +420,13 @@ Two lessons worth keeping:
 Measured against a pristine `upstream/main` worktree on the same machine, so
 these are not re-base damage:
 
-- `xai-grok-pager --lib`: 82 failures against this tree's 79, stable across four
+- `chutes-pager --lib`: 82 failures against this tree's 79, stable across four
   consecutive runs. One of those runs had previously produced an 80th: a
   quote-bar test compares a span's style against the theme's, both read from the
   process-global `Theme::current()` that the `set_theme` tests mutate. It holds
   `pin_theme()` now, like the layout tests that had already met this.
-  `xai-grok-shell --lib auth::`: 24 — all 24 of which this tree now passes.
-- **`xai-grok-shell --lib` cannot be run whole on Windows**: it overflows a 1 MB
+  `chutes-shell --lib auth::`: 24 — all 24 of which this tree now passes.
+- **`chutes-shell --lib` cannot be run whole on Windows**: it overflows a 1 MB
   thread stack partway through the session tests, in the debug profile only. That
   is why the gate runs `auth::` rather than the crate. `agent::config` was checked
   separately and passes 334/334 after twelve fixtures were moved onto a
@@ -389,7 +435,7 @@ these are not re-base damage:
   `endpoint_policy`. The fork had already rewritten every one of them; the re-base
   kept upstream's. Anything else in that crate's non-`auth::` tests is unmeasured
   here, and that is a gap, not a clean bill.
-- `xai-grok-agent --lib`: upstream fails 5 here; this tree passes all 578. The
+- `chutes-agent --lib`: upstream fails 5 here; this tree passes all 578. The
   five were worth fixing rather than documenting, and two of them were not test
   bugs:
   - Two skills tests compared a `String` path against a `/`-spelled suffix.
@@ -511,7 +557,7 @@ a file that no `mod` declaration reaches is not even compiled, so nothing failed
 - **API-key login inside the TUI** was one file, `slash/commands/apikey.rs`,
   undeclared, and everything it calls was missing.
 - **`CHUTES_EXTRA_CA_BUNDLE`** did come forward, but through upstream's new
-  `xai-grok-extra-ca` crate rather than the fork's module — which was left behind as
+  `chutes-extra-ca` crate rather than the fork's module — which was left behind as
   dead code a reader would have taken for the live one, and is now deleted.
 
 All four are fixed as of 1.0.0. `scripts/dead_modules.py` is the check: it lists
@@ -529,7 +575,7 @@ doc comments. They remain a clean copy away in `main` if the analysis is wanted
 again.
 
 **Dropped with the code they covered**, because upstream restructured or removed
-it: the Windows CI stabilisations in `ptyctl` and `xai-crash-handler` (upstream
+it: the Windows CI stabilisations in `ptyctl` and `chutes-crash-handler` (upstream
 fixed them differently), the permission/exec-risk cluster (upstream carried it
 past our version), and the retry/permission work — which arrived with the re-base
 itself. The toolchain pin follows upstream: the
@@ -680,15 +726,15 @@ tool invocable.
 - The pre-stream fallback chain (`CHUTES_FALLBACK_MODELS`), which needs a model to
   be genuinely unavailable to trigger. The short-`Retry-After` wait added in
   1.0.4 needs the same: a real capacity 429 carrying the header.
-- **Making `xai-grok-tools` and `xai-grok-workspace` deterministic.** Their
-  failing sets move: of 53 `xai-grok-workspace` failures recorded on a local
+- **Making `chutes-tools` and `chutes-workspace` deterministic.** Their
+  failing sets move: of 53 `chutes-workspace` failures recorded on a local
   Windows machine, 17 pass on the Windows runner and 2 others fail, and a
   `daemonize` test failed on Linux in one run and not in the run 90 minutes
   earlier on the same commit. That is why `known_failures.py` is a local
   diagnostic rather than a CI gate — a per-test baseline needs a fixed set. This
   is the work that would make ~188 currently unwatched tests watchable, and it is
   larger than the tooling that exposed it.
-- **Why `xai-grok-tools --lib` never finishes on the Windows CI runner.** It ran
+- **Why `chutes-tools --lib` never finishes on the Windows CI runner.** It ran
   107 minutes, then 140, then hit a 40-minute timeout, against six minutes on
   Linux and about five on a local Windows machine. Every Windows step in the
   workflow runs `implementations::chutes::`, which skips
@@ -696,13 +742,13 @@ tool invocable.
   the hang had never been seen. Not reproducible from a machine where it passes,
   so the way in is a throwaway Windows job running that suite with `--nocapture`
   and `--test-threads=1` to see which test it stops on. Until then the Windows
-  job gates `xai-grok-workspace` only.
+  job gates `chutes-workspace` only.
 - The `AuthFileStamp` memo cannot distinguish two same-length rewrites within one
   ~15ms clock tick on Windows, where there is no inode. Judged unreachable in
   practice (a rotation is minutes apart, and refresh does not use this memo) and
   left with the reasoning in place; closing it means
   `GetFileInformationByHandle`, since `file_index()` is still unstable in std.
-- `xai-grok-shell --lib` as a whole: it overflows a 1 MB thread stack on Windows in
+- `chutes-shell --lib` as a whole: it overflows a 1 MB thread stack on Windows in
   debug, so that crate's non-`auth::` tests are unmeasured here. `agent::config`
   and `remote::client` were checked per-module and pass.
 
@@ -732,7 +778,7 @@ what we changed, both measured from the same baseline:
   ours to lose. 17 are new files; 74 already exist here unmodified.
 
 The overlap list is the argument against merging, in concrete form: it contains
-`xai-grok-agent/templates/prompt.md` and `prompt/prompt_encrypted.rs`. A merge
+`chutes-agent/templates/prompt.md` and `prompt/prompt_encrypted.rs`. A merge
 would take upstream's system prompt again and silently re-introduce exactly the
 regression 1.0.3 fixed — the agent introducing itself as xAI's, and the
 `<official_chutes_sources>` block with its "never put credentials in a search
@@ -783,7 +829,7 @@ where the work starts, not where it ends — every area ported so far reached tw
 to four crates, so compile, run the suite and check `known_failures.py` before
 believing any of it.
 
-A useful sanity check on the tool: `--path crates/codegen/xai-grok-agent`
+A useful sanity check on the tool: `--path crates/codegen/chutes-agent`
 reports 100% manual. That is the crate holding `templates/prompt.md`, and
 taking it automatically is exactly what told every model it was released by xAI.
 
@@ -794,7 +840,7 @@ with its own tests green, measured against a pre-port baseline.
 
 | Area | Files | What it brings |
 | --- | ---: | --- |
-| `xai-tty-utils` | 5 | Runtime worker sizing against `pids.max` / `RLIMIT_NPROC`, plus 329 lines of tests it had none of, including EAGAIN |
+| `chutes-tty-utils` | 5 | Runtime worker sizing against `pids.max` / `RLIMIT_NPROC`, plus 329 lines of tests it had none of, including EAGAIN |
 | Skill-path suggestion | 6 | A failed `SKILL.md` read answers with where the skill is registered |
 | Workspace RPC | 17 | Every RPC declares read or write (`ACTIVITY`); proxy client reports the server binary version |
 | Sandbox write-deny | 3 | Compiled only where it enforces — Linux, plus the test arm |
@@ -817,7 +863,7 @@ lint is the detector, which means an area is not finished until
 it compiles and its own tests are green.
 
 **Measure the baseline failure set before attributing anything.** This tree has
-pre-existing Windows failures — 69 in `xai-grok-tools` alone — so a post-port
+pre-existing Windows failures — 69 in `chutes-tools` alone — so a post-port
 count is meaningless on its own. Stash, run, save the sorted failure names, run
 again after, and `comm` the two lists. "73 failures" told us nothing; "these
 exact four are new" told us everything.
@@ -934,8 +980,8 @@ clippy, so compilation is not what fills the hour, and the headroom is roughly a
 quarter rather than a half.
 
 Final state, 2026-08-10: all five jobs green, which is the first complete run this
-repository has had. `xai-grok-pager --lib` 8274 passing on Windows against 83
-failures at the start, `xai-grok-shell --lib auth::` 374 against 24 in a step that
+repository has had. `chutes-pager --lib` 8274 passing on Windows against 83
+failures at the start, `chutes-shell --lib auth::` 374 against 24 in a step that
 had never run.
 
 **Reproduce the runner rather than trusting the local number.** Local runs on the
@@ -960,7 +1006,7 @@ amount of clock could fix.
 ### The auth suite, and the step below the step
 
 Clearing the pager let the Windows job reach its second step for the first time —
-`xai-grok-shell --lib auth::`, which failed 24. One cause: a provider command goes
+`chutes-shell --lib auth::`, which failed 24. One cause: a provider command goes
 through the platform shell, and off Unix `util::subprocess::shell_c` picks `cmd /C`
 deliberately, because the contract is "exit 0 means success" and PowerShell's
 `-Command` does not propagate a child's exit code. The fixtures were POSIX
@@ -970,7 +1016,7 @@ one-liners — `printf`, `sleep 20; printf never`, `$(wc -l < …)`, `${VAR:-0}`
 Writing each fixture twice, once per dialect, would have encoded the problem
 instead of removing it: `cmd` has no `sleep`, no `printf`, no default-valued
 expansion, and quoting JSON through it is its own nightmare. The suite now drives
-`crates/codegen/xai-grok-shell/src/bin/auth-provider-fixture.rs`, invoked with
+`crates/codegen/chutes-shell/src/bin/auth-provider-fixture.rs`, invoked with
 `args`, which takes the direct-exec branch where no shell interprets anything.
 
 Three constraints that shaped it, worth knowing before touching it:
@@ -1038,7 +1084,7 @@ Ported — security:
   servers, including the on-disk attribution loader that bypasses the
   import-marker cutoff, applied at all three ingress points.
 - Char-safe bearer fragment. Upstream extracted it into a new
-  `xai-grok-auth::bearer_fragment`; this fork had the same byte-slicing bug in
+  `chutes-auth::bearer_fragment`; this fork had the same byte-slicing bug in
   its own `token_suffix`, which now delegates to that one definition.
 - Sandbox deny-glob rework: the 200k visited-entry cap that refused startup on
   ordinary large workspaces, symlink-target masking, and fail-closed walk
@@ -1076,7 +1122,7 @@ Excluded as upstream-specific: dropping the Beta label, the `chutesday` /
 `chutesnight` themes, the Finance `ToolUsageCard` variant, and a deprecation-doc
 path fix for a file this fork does not have. Not applicable: the toolchain bump
 to 1.93.0 (this fork is on 1.94.1) and the workflow-subagent cap, which needs
-the upstream-only `xai-workflow` crate. Deliberately not taken: removing the
+the upstream-only `chutes-workflow` crate. Deliberately not taken: removing the
 project-directory picker, a feature this fork keeps.
 
 Ported — presentation and prompt:
@@ -1142,7 +1188,7 @@ Ported:
 - Extra TLS roots via `CHUTES_EXTRA_CA_BUNDLE`, for proxy-terminated TLS.
   Reworked rather than copied: upstream adds a crate that depends on `rustls`
   directly, which would mean editing the generated workspace root, so this uses
-  reqwest's own PEM bundle parsing inside `xai-grok-http`.
+  reqwest's own PEM bundle parsing inside `chutes-http`.
 - Cancelling an in-flight `/compact`, including the `is_compact_running` /
   `cancel_compact_command` state predicates it needs.
 
@@ -1198,7 +1244,7 @@ commits. The full delta — 968 files — was ported by hand, one area per commi
 on `port/upstream-d71f6e0c`.
 
 What upstream carried, in broad strokes: the session events log split out of
-`xai-file-utils`, the active-sessions and foreign-sessions registries split out
+`chutes-file-utils`, the active-sessions and foreign-sessions registries split out
 of the shell and workspace, SQLite FTS search over local sessions, an
 in-guest loopback diagnostics server, the workspace-server daemon split, the
 subagent bundle cache, the compaction-transcript renderer, and the
@@ -1210,15 +1256,15 @@ fuzzy-file-search walker — eleven new crates registered in the root manifest.
   chat-state, agent-lifecycle, config, config-types, sampler, sampling-types,
   hooks, hooks-plugins-types, shared, shell-base, test-support, telemetry,
   memory, mcp, tools, and the tool/computer-hub protocol crates.
-- **`xai-grok-agent`** — the prompt structure and `AgentDefinition` moved to the
+- **`chutes-agent`** — the prompt structure and `AgentDefinition` moved to the
   upstream shape, with a new runtime-only `builtin_name` keying the
   browser-verification gate. `templates/prompt.md`, `prompt_encrypted.rs` and
   `skills.rs` stayed byte-identical to the fork: the Chutes system prompt,
   subagent prompt and persona text were not taken from upstream.
-- **`xai-grok-shell`** — the session lifecycle, ACP, and config. The media-gen
+- **`chutes-shell`** — the session lifecycle, ACP, and config. The media-gen
   parallel-call caps the fork added converge with an independent upstream
   `media_gen_limits`; our version matches theirs exactly after rebrand.
-- **`xai-grok-workspace`** and **`xai-grok-pager`** — workspace/RPC, TUI and
+- **`chutes-workspace`** and **`chutes-pager`** — workspace/RPC, TUI and
   launcher, with their Chutes seams preserved.
 
 ### Windows-only defects found while verifying (upstream CI runs Linux/macOS)
@@ -1241,7 +1287,7 @@ suites did:
 
 ### What stayed manual
 
-`xai-grok-agent` remains 100 % manual by policy: the three identity files above
+`chutes-agent` remains 100 % manual by policy: the three identity files above
 were never auto-taken, and their divergence was confirmed byte-identical to
 the fork's before the agent commit.
 
@@ -1266,7 +1312,7 @@ keyboard support; tools (MCP elicitation, shared-HTTP reuse, cached schema
 generation, taxonomy updates); telemetry stream + version/tty-utils/extra-ca
 shims + MCP owned clients + McpOAuthProbeResolved; fast-worktree NFS backend;
 the workspace stack (DeleteScheduledTask, detach/salvage, hub sdk/core,
-diag-server revive, the new `xai-grok-status-line` crate, shell_access split,
+diag-server revive, the new `chutes-status-line` crate, shell_access split,
 guarded handle inserts); agent tool registration on ToolBridgeBuilder; and
 the restructured session lifecycle.
 
@@ -1284,7 +1330,7 @@ Deliberate divergences:
   build their app explicitly. `API_KEY_SCOPE` stayed `chutes::api_key`.
 - **Static API-key env names are Chutes'**: `CHUTES_API_KEY` /
   `CHUTES_BUILD_API_KEY`; upstream's `XAI_API_KEY` name is not read.
-- Templates/prompt identity remain ours; `xai-grok-agent` prompt sources are
+- Templates/prompt identity remain ours; `chutes-agent` prompt sources are
   hand-checked, never merged wholesale.
 
 The port also surfaced two silent-loss catches worth recording:
@@ -1403,7 +1449,7 @@ pinned in the tree:
 - **Upstream renamed Rust identifiers the rebrand map never touches**
   (`tasks_cancel` → `cancel`, `hub_auth.rs` → `hub_auth/`, `agent/models.rs`
   → `agent/models/`, `ToolKind::ActiveAgentMessage`, `ToolNamespace` uses,
-  `dirs` → `xai_dirs`). The fork's namespace stays `ChutesBuild` in Rust —
+  `dirs` → `chutes_dirs`). The fork's namespace stays `ChutesBuild` in Rust —
   the rename is applied mechanically across the ported files.
 - **Fork-owned items upstream dropped and that came back from `main`:**
   `chutesday`/`chutesnight` themes, the wordmark pin in `logo.rs`,
@@ -1567,7 +1613,7 @@ Re-applied fork seams, all verified by the suites named:
 
 - OAuth to the Chutes IdP (issuer `https://api.chutes.ai`, live discovery
   document fetched 2026-10-14; no compiled-in client id;
-  `xai-grok-login --lib`: 435 passed, 26 failed — the failures are upstream
+  `chutes-login --lib`: 435 passed, 26 failed — the failures are upstream
   tests spawning `sh`/`printf` on Windows, not fork logic).
 - Prompt fusion: upstream 1.0.45 template plus the fork's
   `official_chutes_sources` block and Chutes identity
@@ -1575,17 +1621,17 @@ Re-applied fork seams, all verified by the suites named:
 - `/apikey` rewritten as an instructions message (upstream removed
   `AuthMode::ApiKeyEntry`).
 - Chutes tool pack registration moved before the registry snapshot so
-  curated `ChutesBuild:*` toolsets resolve (`xai-grok-agent --lib`:
+  curated `ChutesBuild:*` toolsets resolve (`chutes-agent --lib`:
   581 passed, 4 failed — the failures are upstream tests assuming
   Unix paths/messages on Windows).
 - Pre-rebrand preset aliases (`grok-build`, `grok-computer`, concise/plan
   variants) so existing configs keep resolving.
 - Chutes ecosystem tools: document extraction, speech transcription,
   embeddings, image/video/music generation, image edit, OCR, usage,
-  browser, Context7 (`xai-grok-tools --lib -- chutes`: 50 passed).
+  browser, Context7 (`chutes-tools --lib -- chutes`: 50 passed).
 - Single-shot equivalent-model fallback in the sampler plus media fallback,
   with an honest error note when nothing can serve
-  (`xai-grok-sampler --lib`: 252 passed; `chutes-build-core --lib`: 80 passed).
+  (`chutes-sampler --lib`: 252 passed; `chutes-build-core --lib`: 80 passed).
 - Reasoning registry refreshed against the 14-model live catalog; Qwen3.8
   verified (`enable_thinking`), Kimi-K3 / DeepSeek-V4-Flash /
   Nemotron-3-Nano fail closed.
@@ -1643,13 +1689,13 @@ were each verified by stash-compare against the untouched rebase
 commit, with `RUST_MIN_STACK=16777216` (without it the `mvp_agent`
 tests overflow the 2 MiB debug test stacks on Windows, same failure
 class as the documented `parse_cli` debug overflow):
-- `xai-grok-config --lib`: 398 passed, 16 failed, plus one deadlock
+- `chutes-config --lib`: 398 passed, 16 failed, plus one deadlock
   (`transaction_lock_...`), all inside `fs_atomic` Windows-symlink,
   `managed_text`, and one `mcp_servers` test — files this fork never
   touched. The identical failure set and the deadlock reproduce on the
   untouched tree; a parallel-mode extra (`ensure_creates_hooks_dir`)
   passes in isolation and single-threaded, i.e. flaky under load.
-- `xai-grok-shell --lib`: 5,981 passed, 946 failed. The failure set is
+- `chutes-shell --lib`: 5,981 passed, 946 failed. The failure set is
   identical to pristine — every failure is a pre-existing
   Windows-environment issue (Unix-path assumptions, symlink
   privileges, timing flakes). The gate caught and fixed 21 genuine
@@ -1660,7 +1706,7 @@ class as the documented `parse_cli` debug overflow):
   STOCK, and four new tests pin the CHUTES withhold. Two pristine
   failures (`cli_models` session resolution) are fixed by the Chutes
   endpoint defaults.
-- `xai-grok-pager --lib`: the binary aborts with
+- `chutes-pager --lib`: the binary aborts with
   `STATUS_ACCESS_VIOLATION` identically on pristine (pre-existing,
   environmental). Before the crash point, six voice-gating failures
   were fixed: the pager's `resolve_voice_mode_enabled_as` never

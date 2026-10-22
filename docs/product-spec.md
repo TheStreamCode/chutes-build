@@ -24,27 +24,36 @@ where §§1.4–1.5 allow.
 the TUI terminal title is `chutes-build` (or `<title> - chutes-build`,
 80 columns max).
 
-1.4. Retained internal names are allowed and MUST stay internal: `xai-*`
-crate/module identifiers, `~/.chutes-build/` paths, the
-`CHUTES_BUILD_API_KEY` legacy fallback, and `grok-*` prefixes kept only to
-recognize and prune legacy downloads. A retained name that reaches a user
-surface is a bug.
+1.4. The workspace carries Chutes names. Crates, modules, Rust identifiers,
+protobuf packages, request headers, environment variables, state paths and
+the telemetry taxonomy all read `chutes*`; a `grok`, `xai` or `x.ai` token in
+a live code path is a bug. `~/.chutes-build/` paths and the
+`CHUTES_BUILD_API_KEY` fallback are already Chutes names and stay.
 
-1.5. Retained wire compatibilities are allowed and MUST stay invisible in
-normal use: the local ACP `x.ai/*` method namespace, the `grok.com` ACP
-auth-method id, the `x-grok-client-*` request headers (attached only on
-xAI hosts for BYOK users; Chutes traffic carries none), `refs/grok/*`
-worktree pins in user repos (renaming orphans live worktrees), the
-`CHUTES_BUILD_XAI_API_BASE_URL` env fallback, matching (never emitting)
-server-sent `grok.com/supergrok` upsell copy in order to rewrite it, and
-displaying server-sent tier names verbatim, the ACP/voice client-type
-identifiers (`grok-pager`, `grok-shell`, the `grok-shell/<version>` voice
-user-agent, the unified-log `src` tag) matched on both ends of the local
-protocols, and the telemetry schema's external-client allowlist entries
-(`grok-agent-sdk`) for third-party SDK interop. The external OTLP
-taxonomy is `chutes_build.*` under scope `ai.chutes.build`; the
-internal-only `SuperGrokUpsell*` events have no external mapping and
-MUST NOT gain one.
+1.5. Retained upstream spellings are a compatibility surface, not an
+identity, and MUST stay invisible in normal use. Three classes are allowed:
+
+- **History and attribution**: past `CHANGELOG` entries, bundled crate
+  changelogs, the upstream repository link in `NOTICE` /
+  `THIRD-PARTY-NOTICES`, and the README's fork attribution.
+- **Local data written by releases up to 1.7.2**, read-compat only: the
+  `[grok_com_config]` table (aliased to `[login_config]`), `grok_ws_*` keys,
+  persisted session/manifest fields, legacy agent-type spellings
+  (`grok-build*`, `grok_build_concise`), legacy client-type strings
+  (`grok-shell`, `grok-tui`, `grok-web`, `grok-desktop`, `grok-pager`),
+  `refs/grok/*` worktree pins (read; new pins are `refs/chutes/*`), legacy
+  `grok-*` download names pruned from `~/.chutes-build/`, the `XAI_*`
+  environment names older orchestration scripts export (including
+  `CHUTES_BUILD_XAI_API_BASE_URL` and the `xai_api_base_url` requirements
+  key, both read-compat fallbacks behind the canonical endpoint names).
+- **Inbound values, matched and never emitted**: server-sent upsell copy
+  (`grok.com/supergrok`, `chutes.ai/supergrok`), the legacy `grok.com` ACP
+  auth-method id, the `grok-agent-sdk` telemetry allowlist entry, and the
+  `modelFamily` values the catalog returns.
+
+Anything outside those classes is a release-blocking bug. The external OTLP
+taxonomy is `chutes_build.*` under scope `ai.chutes.build`; the internal-only
+`SuperGrokUpsell*` events have no external mapping and MUST NOT gain one.
 
 1.6. Legal, upsell, and key links MUST be live Chutes pages:
 `https://chutes.ai/terms`, `https://chutes.ai/privacy`,
@@ -53,6 +62,15 @@ MUST NOT gain one.
 Managed-configuration copy points at `https://chutes.ai`. A link to a
 `grok.com`, `x.ai`, `console.chutes.ai`, or any other 404 page is a
 release-blocking bug.
+
+1.7. 2.0.0 renamed the local wire — the ACP method namespace, request
+headers and protobuf packages all moved to Chutes names, and the workspace
+crates were renamed with them. Wire compatibility with peers built from
+1.7.2 or earlier is **not** retained; the local-data compatibility in §1.5
+is. The legacy endpoint configuration stays honored as read-compat:
+`CHUTES_BUILD_XAI_API_BASE_URL` and the `xai_api_base_url` requirements key
+still work when the canonical names (`base_url`, `CHUTES_API_BASE_URL`,
+`chutes_api_base_url`) are unset.
 
 ## 2. Authentication
 
@@ -90,26 +108,26 @@ never a login command.
 
 2.7. Enforcement map (all gated on `Distribution` withholding
 `Capability::AccountLogin`):
-`crates/codegen/xai-grok-config/src/distribution.rs` (flag + refusal text),
-`xai-grok-shell/src/agent/auth_method.rs` (`build_auth_methods`),
-`xai-grok-shell/src/agent/mvp_agent/acp_agent.rs` (`authenticate`),
-`xai-grok-login/src/storage.rs` (no login store),
-`xai-grok-login/src/flow.rs` (login flow refusal),
-`xai-grok-pager/src/views/welcome/mod.rs` (blocked screen),
-`xai-grok-pager-bin/src/main.rs` (`login`/`logout`),
-`xai-grok-pager/src/app/dispatch/auth.rs` + `slash/commands/login.rs|logout.rs`,
-`xai-grok-pager/src/app/effects/mod.rs` (no login upsell in session info),
+`crates/codegen/chutes-config/src/distribution.rs` (flag + refusal text),
+`chutes-shell/src/agent/auth_method.rs` (`build_auth_methods`),
+`chutes-shell/src/agent/mvp_agent/acp_agent.rs` (`authenticate`),
+`chutes-login/src/storage.rs` (no login store),
+`chutes-login/src/flow.rs` (login flow refusal),
+`chutes-pager/src/views/welcome/mod.rs` (blocked screen),
+`chutes-build/src/main.rs` (`login`/`logout`),
+`chutes-pager/src/app/dispatch/auth.rs` + `slash/commands/login.rs|logout.rs`,
+`chutes-pager/src/app/effects/mod.rs` (no login upsell in session info),
 `chutes-build-core/src/api_key_store.rs` (save/load/remove, file injected
 as env at startup; env always wins),
-`xai-grok-pager/src/app/actions.rs|dispatch/auth.rs|effects` (`AuthMode::ApiKeyEntry`,
+`chutes-pager/src/app/actions.rs|dispatch/auth.rs|effects` (`AuthMode::ApiKeyEntry`,
 `Action::EnterApiKey/SubmitApiKey/CancelApiKeyEntry`,
 `Effect::ValidateApiKey`, `TaskResult::ApiKeyAccepted/Rejected`,
 `Effect::AuthenticateWithApiKey` pushing the key into the agent over
 `chutes.ai/setApiKey` + `authenticate`, memory-only agent-side when the
 login store is withheld),
-`xai-grok-shell/src/session/acp_session_impl/tool_dispatch.rs` (dispatch
+`chutes-shell/src/session/acp_session_impl/tool_dispatch.rs` (dispatch
 publishes the resolved credentials on the call context) +
-`xai-grok-tools/src/implementations/chutes/mod.rs`
+`chutes-tools/src/implementations/chutes/mod.rs`
 (`resolve_credentials`, context first, env fallback).
 
 ## 3. Privacy and network
@@ -194,20 +212,18 @@ Any behavior change MUST, in one commit:
 ## 7. Known dormant code (do not revive without a spec change)
 
 - Upstream login machinery (OAuth/OIDC/device flows, refresh/recovery,
-  session store): unreachable while §2.2 holds. Its `xai-grok-login`
+  session store): unreachable while §2.2 holds. Its `chutes-login`
   machinery tests fail for lack of a store (see CHANGELOG 1.5.1); the
   injected-distribution storage tests pin both sides.
-- Upstream subscription/tier upsell surfaces (`SuperGrok`, free-tier
-  gating): unreachable while tiers come from Chutes; audit before any tier
-  work.
+- Upstream subscription/tier upsell surfaces: unreachable while tiers come
+  from Chutes. Server-sent upsell copy is matched only to rewrite it (§1.5);
+  the product's own plan vocabulary is the Chutes one, and a max-tier check
+  that cannot recognise a tier resolves false (fail-closed upsell gating).
 - `auth_provider_command`, `CHUTES_BUILD_OAUTH2_CLIENT_ID`, enterprise OIDC
   config keys: parsed but never honored while §2.2 holds.
 - Legacy Imagine clients (`image_gen`/`image_edit`/`video_gen`): default
   off per §4.6; they 404 on Chutes. Re-enable only against an
   xAI-compatible host.
-- `chat_modes`/`ChatModelsClient` (grok.com `/rest/modes`): hard-off
-  (`process_chat_mode_enabled() == false`); the grok.com default URL is
-  unreachable. Removal is a follow-up, not a revival.
 - `SuperGrokUpsell*` telemetry events: internal firehose only, no
   external OTLP mapping; the internal pipeline itself is inert unless a
   build-time URL is baked (§1.5).
@@ -222,32 +238,50 @@ Any behavior change MUST, in one commit:
   match arms and the registry alias map: accepted as input for
   back-compat, never emitted (§1.5).
 
+### Removed in 2.0.0
+
+These went away with the rebrand; do not revive them without a spec change:
+
+- `chat_modes` / `ChatModelsClient` and the remote chat-mode URL: the chat
+  mode was hard-off and its remote listing had no Chutes backend.
+- The preview-proxy supervisor (`preview_supervisor`, preview-activity
+  scraping in `status_config`/`activity`) in the workspace daemon: remote
+  workspace exposure is withheld (§3.1), so there is no preview proxy to
+  supervise.
+- The "official marketplace" concept: marketplace sources are configured by
+  the user; there is no first-party marketplace URL to auto-trust.
+- The xAI tier vocabulary (`Basic`, `Premium`, `Heavy`, `Lite`, `SuperGrok`)
+  and the `X-XAI-Token-Auth` wire header.
+
 ## 8. Spec → test map
 
 | Clause | Pin test |
 |---|---|
-| 1.3 title | `xai-grok-pager` `terminal_title_strips_control_characters` |
-| 2.3 blocked screen | `xai-grok-pager` `pending_without_account_login_shows_api_key_setup_instead_of_login` |
+| 1.3 title | `chutes-pager` `terminal_title_strips_control_characters` |
+| 2.3 blocked screen | `chutes-pager` `pending_without_account_login_shows_api_key_setup_instead_of_login` |
 | 2.4 CLI key entry | release smoke: piped `login` validates+saves, `logout` removes; `chutes-build-core` `api_key_store::*` |
-| 2.5 advertisement | `xai-grok-shell` `withheld_login_with_key_advertises_only_api_key`, `withheld_login_without_key_advertises_nothing` |
-| 2.2 no session | `xai-grok-shell` `legacy_token_in_env_ignored_without_account_login`, `resolve_session_env_ignored_without_account_login` |
-| 2.7 store | `xai-grok-login` `storage_distribution_tests::*` |
-| 2.4/2.6 no upsell | `xai-grok-pager` `format_session_info_api_key_auth_suggests_no_login` |
+| 2.5 advertisement | `chutes-shell` `withheld_login_with_key_advertises_only_api_key`, `withheld_login_without_key_advertises_nothing` |
+| 2.2 no session | `chutes-shell` `legacy_token_in_env_ignored_without_account_login`, `resolve_session_env_ignored_without_account_login` |
+| 2.7 store | `chutes-login` `storage_distribution_tests::*` |
+| 2.4/2.6 no upsell | `chutes-pager` `format_session_info_api_key_auth_suggests_no_login` |
 | 4.3 fallback | `chutes-build-core` `equivalent_model_skips_excluded_aliases_and_pools`, `equivalent_model_returns_none_when_only_excluded_remains` |
-| 4.2 delegation | `xai-grok-shell` `prompt_build::needs_image_transcription_tests::{confirmed_image_input_stays_inline, text_only_model_transcribes, unknown_capability_transcribes}` |
-| 2.4/2.6 re-auth text | `xai-grok-pager` `reauth_required_message_points_at_api_key` |
-| 4.4 account CLI | `xai-grok-pager` `account_cmd::tests::*` |
-| 4.4 account TUI | `xai-grok-pager` `show_account_schedules_direct_fetch`, `account_complete_renders_dashboard_text`, `account_failed_renders_honest_error`, `account_dispatches_show_account` |
-| 4.5 inference speed | `xai-grok-pager` `turn_completed_message`, `status_blocks` `session_usage_block_*` + snapshots |
-| 1.5 OTLP taxonomy | `xai-grok-telemetry` `external::tests::*` + `external_otlp*` e2e (scope `ai.chutes.build`, `chutes_build.*` events) |
-| 1.6 legal links | `xai-grok-pager` privacy-banner/banner-URL tests pin `chutes.ai/terms` + `chutes.ai/privacy`; billing upsell pins `_s=usage` |
-| 2.3/2.4 key entry | `xai-grok-pager` `api_key_entry::*`, `api_key_accepted::*`, `api_key_rejected::*`, `welcome_entry::*`, `welcome_pending::*`, `dispatch::tests::auth::*`, `api_key_entry_auth_complete_finishes_and_resets_entry_flags`, `api_key_entry_auth_failed_rolls_back_to_pending`; `xai-grok-shell` `set_api_key_is_memory_only_without_account_login` |
-| 4.6 media routing | `xai-grok-tools-api` `imagine_instruction_carries_prompt_verbatim`, `imagine_video_instruction_carries_prompt_and_workflow`; `xai-grok-pager` `requires_generate_media_tool` ×2; `xai-grok-shell` `resolve_image_gen_gates`, `resolve_video_gen_gates`, `imagine_tools_disabled_gates_image_edit`; `xai-grok-tools` `generate_media_takes_image_budget_by_name` |
-| 1.3 CLI name | `xai-grok-pager` `cli_command_name_is_chutes_build`, `cli_help_output_header`, `zsh_completions_drop_prompt_slot_and_dispatch_on_line_1` |
-| 1.5 agent profiles | `xai-grok-pager` `effects::tests::{all_flags_meta, plan_only_meta, plan_with_ask_user_uses_plan_profile, plan_with_subagents_meta, runtime_default_flags_produce_plan_meta, ask_user_alone_meta, agent_profile_names_are_valid_builtins, agent_profile_definitions_have_correct_names}`; `xai-grok-agent` `test_builtin_agent_name_strum_round_trip` |
-| 1.5 leader mismatch | `xai-grok-pager` `acp::version_mismatch*` + `headless::ext_protocol` version-mismatch arm (`chutes.ai/leader/version_mismatch`) |
-| 1.6 rate-limit/usage URLs | `xai-grok-shell` `sampling::error::tests::{rate_limited_fallback_oauth_vs_api_key, format_rate_limited_*}`; `xai-grok-pager` `free_usage_translate_local_submit_maps_options`, `upsell_non_max_upgrade_url_is_usage` |
-| Settings footer | `xai-grok-pager` `settings_e2e::docs_footer_renders_for_browse_and_picker` (MEDIUM variant at 120 cols) |
+| 4.2 delegation | `chutes-shell` `prompt_build::needs_image_transcription_tests::{confirmed_image_input_stays_inline, text_only_model_transcribes, unknown_capability_transcribes}` |
+| 2.4/2.6 re-auth text | `chutes-pager` `reauth_required_message_points_at_api_key` |
+| 4.4 account CLI | `chutes-pager` `account_cmd::tests::*` |
+| 4.4 account TUI | `chutes-pager` `show_account_schedules_direct_fetch`, `account_complete_renders_dashboard_text`, `account_failed_renders_honest_error`, `account_dispatches_show_account` |
+| 4.5 inference speed | `chutes-pager` `turn_completed_message`, `status_blocks` `session_usage_block_*` + snapshots |
+| 1.5 OTLP taxonomy | `chutes-telemetry` `external::tests::*` + `external_otlp*` e2e (scope `ai.chutes.build`, `chutes_build.*` events) |
+| 1.6 legal links | `chutes-pager` privacy-banner/banner-URL tests pin `chutes.ai/terms` + `chutes.ai/privacy`; billing upsell pins `_s=usage` |
+| 2.3/2.4 key entry | `chutes-pager` `api_key_entry::*`, `api_key_accepted::*`, `api_key_rejected::*`, `welcome_entry::*`, `welcome_pending::*`, `dispatch::tests::auth::*`, `api_key_entry_auth_complete_finishes_and_resets_entry_flags`, `api_key_entry_auth_failed_rolls_back_to_pending`; `chutes-shell` `set_api_key_is_memory_only_without_account_login` |
+| 4.6 media routing | `chutes-tools-api` `imagine_instruction_carries_prompt_verbatim`, `imagine_video_instruction_carries_prompt_and_workflow`; `chutes-pager` `requires_generate_media_tool` ×2; `chutes-shell` `resolve_image_gen_gates`, `resolve_video_gen_gates`, `imagine_tools_disabled_gates_image_edit`; `chutes-tools` `generate_media_takes_image_budget_by_name` |
+| 1.3 CLI name | `chutes-pager` `cli_command_name_is_chutes_build`, `cli_help_output_header`, `zsh_completions_drop_prompt_slot_and_dispatch_on_line_1` |
+| 1.5 agent profiles | `chutes-pager` `effects::tests::{all_flags_meta, plan_only_meta, plan_with_ask_user_uses_plan_profile, plan_with_subagents_meta, runtime_default_flags_produce_plan_meta, ask_user_alone_meta, agent_profile_names_are_valid_builtins, agent_profile_definitions_have_correct_names}`; `chutes-agent` `test_builtin_agent_name_strum_round_trip` |
+| 1.5 local-data compat | `chutes-login` `legacy_grok_com_config_table_parses_into_login_config`, `login_config_table_wins_over_legacy_alias`, `requirements_force_login_team_reads_legacy_table_tiers`, `expand_auth_alias_folds_auth_over_legacy_table`; `chutes-shell` `legacy_grok_com_config_table_is_read_as_login_config_alias`; `chutes-workspace` permission client-type alias tests; `chutes-fast-worktree` `refs/grok/*` read test |
+| 1.7 endpoint read-compat | `chutes-config` `legacy_xai_api_base_url_key_parses_and_is_not_written`; `chutes-shell` `public_api_base_url_env_reads_legacy_var_as_fallback`, `config::tests::apply_requirements_reads_legacy_xai_api_base_url_key` |
+| 1.7 wire names | `chutes-tool-protocol` serde round-trips and `chutes-pager` ACP tests pin `chutes.ai/*` + `x-chutes-build-*`; `scripts/rebrand.py --check` fails on any upstream token outside the §1.5 allowlist |
+| 1.5 leader mismatch | `chutes-pager` `acp::version_mismatch*` + `headless::ext_protocol` version-mismatch arm (`chutes.ai/leader/version_mismatch`) |
+| 1.6 rate-limit/usage URLs | `chutes-shell` `sampling::error::tests::{rate_limited_fallback_oauth_vs_api_key, format_rate_limited_*}`; `chutes-pager` `free_usage_translate_local_submit_maps_options`, `upsell_non_max_upgrade_url_is_usage` |
+| Settings footer | `chutes-pager` `settings_e2e::docs_footer_renders_for_browse_and_picker` (MEDIUM variant at 120 cols) |
 
 When a clause has no passing row here, the clause is aspirational: add the
 test or weaken the clause.

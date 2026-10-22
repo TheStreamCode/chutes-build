@@ -13,7 +13,7 @@ Five low-severity transitive alerts have compatible lockfile updates in this
 review. Two low-severity `lru` alerts remain because the only published fix is
 outside the version range accepted by `ratatui 0.29` and `aws-sdk-s3 1.112`.
 They require coordinated dependency migrations and are not silently suppressed.
-The direct `xai-grok-workspace` library suite also has 45 pre-existing Windows
+The direct `chutes-workspace` library suite also has 45 pre-existing Windows
 portability/isolation failures that are not exercised by the current CI matrix.
 
 ## Scope and method
@@ -42,10 +42,10 @@ result arrived, creating duplicate results and an invalid conversation history.
 
 The reminder now fires at the start of the following inference iteration, after
 the preceding result is committed, and a per-run latch makes the reminder
-one-shot (`crates/codegen/xai-grok-shell/src/session/acp_session_impl/turn.rs:1852`
+one-shot (`crates/codegen/chutes-shell/src/session/acp_session_impl/turn.rs:1852`
 and `:1886`). Unit coverage verifies the latch and integration coverage verifies
 the complete history invariant
-(`crates/codegen/xai-grok-shell/src/session/acp_session_tests/turn/chat_history_integrity_tests.rs:34`).
+(`crates/codegen/chutes-shell/src/session/acp_session_tests/turn/chat_history_integrity_tests.rs:34`).
 
 ### CR-002 — Low — resolved — vulnerable transitive patch versions
 
@@ -83,8 +83,8 @@ but taking it pulls the whole aws-smithy stack forward (17 crates updated, 6 add
 which requires rustc 1.94.1 against this repo's 1.94.0 pin — and it still would not
 close the advisory, because `ratatui 0.29` remains a source. Closing it properly
 means migrating to ratatui 0.30+ (the `ratatui-core` split) across six of our
-crates: `xai-grok-pager`, `-pager-minimal`, `-pager-render`, `-markdown`,
-`xai-ratatui-inline`, and `xai-ratatui-textarea`. That is a framework migration, not
+crates: `chutes-pager`, `-pager-minimal`, `-pager-render`, `-markdown`,
+`chutes-ratatui-inline`, and `chutes-ratatui-textarea`. That is a framework migration, not
 a security patch, and the risk it would retire is zero.
 
 The Dependabot alerts are dismissed as `not_used` with this reasoning rather than
@@ -134,7 +134,7 @@ process timeout. Linux, macOS, and a full local Windows run passed, isolating
 the issue to test process/timing behavior rather than product logic.
 
 Notification-hook tests that launch external shells now share a `serial_test`
-group (`crates/codegen/xai-grok-pager/src/notifications/hooks.rs:193`). The
+group (`crates/codegen/chutes-pager/src/notifications/hooks.rs:193`). The
 asynchronous case joins its private worker handle before reading output, while
 production remains fire-and-forget. The session-omission case inspects the
 constructed child environment directly and the runtime explicitly removes a
@@ -152,7 +152,7 @@ classification, and file containment behavior are unchanged.
 
 ### CR-010 — Medium — accepted temporarily — workspace tests on Windows
 
-A direct serial Windows run of the upstream-derived `xai-grok-workspace`
+A direct serial Windows run of the upstream-derived `chutes-workspace`
 library suite completed 1,384 tests but failed 45 and ignored one. The failures
 cluster around Unix-form absolute-path fixtures, CRLF-sensitive Git assertions,
 pidfile semantics, and tests that observe ambient HOME/configuration state.
@@ -194,7 +194,7 @@ target-specific workspace risks false positives.
    OAuth/SSO-disabled builds, MSRV, binary size, and cold compile time.
 3. Add an explicitly pinned unused-dependency tool only after establishing a
    checked-in allowlist for target-, feature-, build-, and fuzz-only crates.
-4. Make the `xai-grok-workspace` suite hermetic on Windows, then add it as a
+4. Make the `chutes-workspace` suite hermetic on Windows, then add it as a
    dedicated CI job or split it into stable platform-specific shards.
 5. Run publishing-disabled release assembly for `0.4.2`; publish npm packages
    and create a GitHub release only with explicit maintainer authorization.

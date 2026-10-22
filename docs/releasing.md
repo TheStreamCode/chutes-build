@@ -40,7 +40,7 @@ npm test
 npm pack --dry-run
 $env:CARGO_BUILD_JOBS = "1"
 cargo check -p chutes-build --locked
-python scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
+python scripts/known_failures.py --crate chutes-tools --crate chutes-workspace
 cargo deny --locked check advisories licenses bans sources
 ```
 

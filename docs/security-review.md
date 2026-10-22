@@ -160,7 +160,7 @@ cargo fmt --all -- --check
 $env:CARGO_BUILD_JOBS = "1"
 cargo check -p chutes-build --locked
 cargo test -p chutes-build-core --locked
-cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
+cargo test -p chutes-tools --lib implementations::chutes:: --locked
 cargo deny --locked check advisories licenses bans sources
 git diff --check
 ```

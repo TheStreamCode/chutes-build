@@ -20,7 +20,7 @@ each document is explicit.
   data boundaries, trust model, supported versions, and vulnerability reports.
 
 The concise guides shown by `/docs` live under
-`crates/codegen/xai-grok-pager/docs/user-guide/` and are embedded into the
+`crates/codegen/chutes-pager/docs/user-guide/` and are embedded into the
 binary. Update them with the matching public guide whenever behavior changes.
 
 ## Maintain the project

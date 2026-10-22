@@ -41,7 +41,7 @@ npx chutes-build
 
 Each release also publishes the six platform executables (macOS, Linux and Windows, x64 and arm64) as downloadable assets on the [releases page](https://github.com/TheStreamCode/chutes-build/releases). Older releases carry release notes only, so use npm for those.
 
-There is no self-update: `chutes-build` never contacts an update server, and the `update` subcommand reports where to get a newer version instead of fetching one. [`CHANGELOG.md`](CHANGELOG.md) records what changed in each release.
+There is no automatic self-update: `chutes-build` never checks for updates on its own. `chutes-build update` contacts the Chutes release channel only when you run it (`--check` reads just the channel pointer) and installs nothing unless you ask for a specific version. [`CHANGELOG.md`](CHANGELOG.md) records what changed in each release.
 
 ## Quick start
 
@@ -64,7 +64,7 @@ chutes-build -p "Return the package list" --output-format json
 
 Headless-only controls such as `--max-turns`, `--tools`, `--disallowed-tools` and `--json-schema` require a headless prompt.
 
-Full documentation lives in the repository: the [documentation hub](docs/README.md) links the [getting started guide](docs/getting-started.md), [configuration reference](docs/configuration.md), CLI reference and slash-command reference. The in-binary user guide at [`crates/codegen/xai-grok-pager/docs/user-guide/`](crates/codegen/xai-grok-pager/docs/user-guide/README.md) covers keyboard shortcuts, theming, MCP servers, skills, plugins, hooks, sessions, sandboxing, headless mode and more. There is no separate documentation site.
+Full documentation lives in the repository: the [documentation hub](docs/README.md) links the [getting started guide](docs/getting-started.md), [configuration reference](docs/configuration.md), CLI reference and slash-command reference. The in-binary user guide at [`crates/codegen/chutes-pager/docs/user-guide/`](crates/codegen/chutes-pager/docs/user-guide/README.md) covers keyboard shortcuts, theming, MCP servers, skills, plugins, hooks, sessions, sandboxing, headless mode and more. There is no separate documentation site.
 
 ## Features
 
@@ -142,22 +142,24 @@ cargo check --workspace                # fast validation
 Run checks on the crates you touched instead of the whole workspace:
 
 ```sh
-cargo test -p xai-grok-config   # per-crate tests
+cargo test -p chutes-config   # per-crate tests
 cargo clippy -p <crate>         # lint configuration: clippy.toml at the repository root
 ```
 
 The binary artifact is named `chutes-build`. The root `Cargo.toml` is generated and read-only: change the owning crate manifest or the generator source, and prefer per-crate `Cargo.toml` files. `Cargo.lock` is committed, and the npm launcher is a thin resolver for prebuilt native binaries: it never compiles Rust and has no install lifecycle script.
+
+Upstream synchronization from `xai-org/grok-build` is frozen at 2.0.0. The total rebrand renamed every crate, module and the local wire, so an upstream diff no longer applies mechanically; ports are manual and recorded in [`docs/upstream-sync.md`](docs/upstream-sync.md), and the crate and module names stay `chutes-*`.
 
 ### Repository layout
 
 | Path | Contents |
 | --- | --- |
 | `crates/chutes-build-core` | Chutes-owned product policy and integrations |
-| `crates/codegen/xai-grok-pager-bin` | Composition-root package `chutes-build`; builds the binary |
-| `crates/codegen/xai-grok-pager` | The TUI: scrollback, prompt, modals, rendering |
-| `crates/codegen/xai-grok-shell` | Agent runtime and leader, stdio and headless entry points |
-| `crates/codegen/xai-grok-tools` | Tool implementations (terminal, file edit, search, media, browser) |
-| `crates/codegen/xai-grok-workspace` | Host filesystem, VCS, execution and checkpoints |
+| `crates/codegen/chutes-build` | Composition-root package `chutes-build`; builds the binary |
+| `crates/codegen/chutes-pager` | The TUI: scrollback, prompt, modals, rendering |
+| `crates/codegen/chutes-shell` | Agent runtime and leader, stdio and headless entry points |
+| `crates/codegen/chutes-tools` | Tool implementations (terminal, file edit, search, media, browser) |
+| `crates/codegen/chutes-workspace` | Host filesystem, VCS, execution and checkpoints |
 | `crates/codegen/...` | The rest of the CLI crate closure (config, MCP, markdown, sandbox) |
 | `third_party/` | Vendored upstream source, including the Mermaid diagram stack |
 
@@ -176,7 +178,7 @@ First-party code in this repository is licensed under the **Apache License, Vers
 Third-party and vendored code remains under its original licenses:
 
 - [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) lists crates.io and git dependencies, bundled UI themes, and in-tree source ports, including the openai/codex and sst/opencode tool implementations.
-- [`crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md`](crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md) is the crate-local notice for the codex and opencode ports, with license texts and the Apache section 4(b) change notice.
+- [`crates/codegen/chutes-tools/THIRD_PARTY_NOTICES.md`](crates/codegen/chutes-tools/THIRD_PARTY_NOTICES.md) is the crate-local notice for the codex and opencode ports, with license texts and the Apache section 4(b) change notice.
 - [`third_party/NOTICE`](third_party/NOTICE) is the vendored Mermaid-stack index.
 
 ---
