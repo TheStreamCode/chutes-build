@@ -76,12 +76,23 @@ pub fn describe_write_failure(path: &Path, error: &io::Error) -> String {
         },
     };
     match error.raw_os_error() {
-        Some(code) => format!(
-            "{}: {} (os error {}); check that the directory is writable",
-            path.display(),
-            phrase,
-            code
-        ),
+        Some(code) => {
+            // Windows Controlled folder access treats an unsigned build as an untrusted
+            // app and refuses writes under the profile ("permission denied" on a directory
+            // the user can write). Name the fix, because "check that the directory is
+            // writable" is misleading there.
+            #[cfg(windows)]
+            let hint = if phrase == "permission denied" {
+                "; on Windows, Controlled folder access can block unsigned builds: \
+                 allow chutes-build.exe in Windows Security, or point CHUTES_BUILD_HOME \
+                 at a folder it does not protect"
+            } else {
+                "; check that the directory is writable"
+            };
+            #[cfg(not(windows))]
+            let hint = "; check that the directory is writable";
+            format!("{}: {} (os error {}){}", path.display(), phrase, code, hint)
+        }
         None => format!(
             "{}: {}; check that the directory is writable",
             path.display(),
@@ -179,6 +190,11 @@ mod tests {
         assert!(
             !text.contains("Accesso negato") && !text.contains("Access is denied"),
             "the OS-localized Display must never reach user copy: {text}"
+        );
+        #[cfg(windows)]
+        assert!(
+            text.contains("Controlled folder access"),
+            "Windows permission failures should name the controlled-folder-access fix: {text}"
         );
     }
 

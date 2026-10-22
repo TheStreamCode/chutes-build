@@ -119,6 +119,15 @@ On first launch Chutes Build asks for a key created at [chutes.ai/app/settings/a
 
 The default route is Chutes' native routing: the saved `default` pool (managed at chutes.ai/app, Model Routing) or an inline pool from `CHUTES_ROUTING_POOL`. When the `default` alias cannot resolve and no dashboard pool is saved, the built-in fallback chain steps down to a live inline pool from the current catalogue; a saved dashboard pool takes priority once configured. Check the saved pool, set `CHUTES_ROUTING_POOL` explicitly, review `CHUTES_FALLBACK_MODELS` ordering, and pick a strategy with `CHUTES_ROUTING_STRATEGY`.
 
+### Windows blocks saving the API key
+
+If the welcome screen or `chutes-build login` reports `permission denied (os error 5)` for
+`C:\Users\<you>\.chutes-build\api_key`, Windows Controlled folder access is blocking the
+unsigned binary; the directory itself is writable. Allow `chutes-build.exe` through
+**Windows Security → Virus & threat protection → Ransomware protection → Allow an app through
+Controlled folder access**, or point `CHUTES_BUILD_HOME` at a folder the protection does not
+cover.
+
 ### Windows console shows wrong glyphs
 
 The TUI degrades decorative glyphs on the legacy Windows console: arrows, checkmarks, diamonds and spinners fall back to ASCII or CP437-safe stand-ins. This is expected on legacy ConHost; for full rendering use Windows Terminal, the VS Code terminal or another modern emulator.

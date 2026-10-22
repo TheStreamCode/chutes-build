@@ -68,6 +68,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `models` no longer promise a closed-loopback no-op or a remote trace
   upload that the build does not perform; `setup`'s missing-key guidance drops
   the impossible "team sign-in" step.
+- **Key-save failures are English and actionable on any OS locale.** The
+  welcome screen and `chutes-build login` no longer embed the localized system
+  message ("Accesso negato." on an Italian Windows): the error names the path,
+  the English cause and the OS code, and on Windows points at Controlled folder
+  access, which blocks unsigned builds from writing under the user profile.
 
 ### Internal
 
