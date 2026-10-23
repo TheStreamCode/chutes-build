@@ -299,7 +299,12 @@ fn chutes_build_core_toolset_with(
     if include_workflow {
         tools.push((&chutes_build::WorkflowTool).into());
     }
-    if include_send_feedback {
+    // Feedback is a product capability: without a telemetry/feedback backend the
+    // tool could only return a refusal, while its schema costs ~1.2k prompt tokens
+    // on every turn. Keep it out of the advertised catalog in that build.
+    if include_send_feedback
+        && chutes_config::Distribution::current().allows(chutes_config::Capability::Telemetry)
+    {
         tools.push((&chutes_build::SendFeedbackTool).into());
     }
     ToolServerConfig {

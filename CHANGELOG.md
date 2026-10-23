@@ -15,6 +15,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/feedback <text>` keeps the report.** GitHub issue forms ignore a URL
   body prefill, so the command copies the message to the clipboard before
   opening the issue-form chooser.
+- **A build without a feedback backend no longer advertises `send_feedback`.**
+  The tool is gated on the telemetry capability the Chutes distribution withholds,
+  so its schema no longer costs ~1.2k prompt tokens on every turn while every call
+  would be refused; the default catalog is 29 tools / 11,573 estimated tokens
+  (was 30 / 12,784).
 - **Media generation follows the live catalog.** `/imagine` and
   `/imagine-video` no longer pin a model name: a bare command lists the
   currently available image/video models, `<description>` lets the tool pick

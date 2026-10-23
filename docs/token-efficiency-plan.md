@@ -63,6 +63,13 @@ plus parameter descriptions, so the compact-schema re-port (deferred-loading
 architecture) is still where the reduction lives; it needs a fresh port onto
 the 1.0.45 `ToolConfig` contract and stays follow-up work.
 
+Workstream 2 increment (2026-10-23, 2.0.2): `send_feedback` is now gated on
+the telemetry capability. The Chutes build withholds telemetry, so the tool
+could only return a refusal while its schema cost 1,269 estimated tokens on
+every turn; the default catalog drops 12,784 / 30 tools -> 11,573 / 29 tools
+(-1,211 tokens, -9.5%) and the budget ceiling follows to 11,700. Distributions
+that do serve feedback keep the tool unchanged.
+
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped
 schema loading, content-hash context reuse, structured conversation deltas, and

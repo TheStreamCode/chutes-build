@@ -768,7 +768,14 @@ impl AgentBuilder {
                     | BuiltinAgentName::ChutesBuildAskUser
             )
         );
-        if self.prompt_audience == PromptAudience::Primary
+        // Feedback is a product capability, not an unconditional built-in: a
+        // distribution that withholds telemetry has no feedback backend, so
+        // advertising `send_feedback` would spend its (large) schema on every
+        // turn while every call is refused. The tool follows the capability.
+        let feedback_served =
+            chutes_config::Distribution::current().allows(chutes_config::Capability::Telemetry);
+        if feedback_served
+            && self.prompt_audience == PromptAudience::Primary
             && is_parent_chutes_build
             && !tool_config
                 .tools
@@ -1953,13 +1960,17 @@ mod tests {
                 unresolved_template_markers(&defs),
                 "[{label}] rendered descriptions must not leak template markers"
             );
-            assert!(
+            let feedback_served =
+                chutes_config::Distribution::current().allows(chutes_config::Capability::Telemetry);
+            assert_eq!(
                 names.contains(&"send_feedback"),
-                "[{label}] parent chutes-build sessions must advertise send_feedback; got tools: {names:?}"
+                feedback_served,
+                "[{label}] send_feedback must follow the telemetry capability; got tools: {names:?}"
             );
-            assert!(
+            assert_eq!(
                 builtin_names.contains(&"send_feedback"),
-                "[{label}] parent chutes-build built-in definitions must advertise send_feedback; got tools: {builtin_names:?}"
+                feedback_served,
+                "[{label}] built-in send_feedback must follow the telemetry capability; got tools: {builtin_names:?}"
             );
             assert!(
                 names.contains(&"enter_plan_mode"),
@@ -2252,6 +2263,36 @@ mod tests {
             );
         }
     }
+    /// The feedback tool costs ~1.2k prompt tokens on every turn; a build with
+    /// no feedback backend must not advertise it.
+    #[tokio::test]
+    async fn feedback_tool_follows_the_telemetry_capability() {
+        use chutes_tools::computer::local::LocalTerminalBackend;
+        use chutes_tools::notification::ToolNotificationHandle;
+        let agent = AgentBuilder::new(
+            std::env::temp_dir(),
+            Arc::new(LocalTerminalBackend::new()),
+            ToolNotificationHandle::noop(),
+        )
+        .from_definition(crate::config::AgentDefinition::default_chutes_build())
+        .build()
+        .await
+        .expect("default agent builds");
+        let names: Vec<String> = agent
+            .tool_definitions()
+            .await
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect();
+        let expected =
+            chutes_config::Distribution::current().allows(chutes_config::Capability::Telemetry);
+        assert_eq!(
+            names.iter().any(|name| name == "send_feedback"),
+            expected,
+            "send_feedback follows the telemetry capability; tools: {names:?}"
+        );
+    }
+
     #[tokio::test]
     async fn curated_empty_toolset_fails_agent_build() {
         use chutes_tools::computer::local::LocalTerminalBackend;
@@ -2382,10 +2423,12 @@ mod tests {
             println!("{tokens:>6}  {name}");
         }
         println!("{:>6}  TOTAL ({} tools)", total, rows.len());
+        // 2.0.2 gates `send_feedback` on the telemetry capability, so the Chutes
+        // build advertises 29 tools / 11,573 estimated tokens (was 30 / 12,784).
         assert!(
-            total <= 12_820,
+            total <= 11_700,
             "tool catalog grew to {total} estimated tokens across {} tools \
-             (ceiling 12820, baseline 12784) — deduplicate or justify the growth",
+             (ceiling 11700, baseline 11573) — deduplicate or justify the growth",
             rows.len()
         );
     }
