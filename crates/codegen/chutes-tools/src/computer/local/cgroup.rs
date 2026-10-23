@@ -120,7 +120,13 @@ mod linux {
         fn new() -> std::io::Result<Self> {
             let raw = unsafe { inotify_init1(libc::O_NONBLOCK | libc::O_CLOEXEC) }?;
             let owned = unsafe { OwnedFd::from_raw_fd(raw) };
-            let fd = AsyncFd::with_interest(owned, Interest::READABLE)?;
+            // SAFETY: `owned` is the only owner of the inotify fd and moves into the
+            // AsyncFd, which keeps it open for the whole registration; nothing here
+            // closes or replaces the descriptor while it is registered. Tokio 1.54
+            // deprecated `with_interest` (RUSTSEC-2026-0386) in favour of this
+            // unchecked constructor, whose safety contract we satisfy by owning the fd.
+            let fd = unsafe { AsyncFd::register_with_interest(owned, Interest::READABLE) }
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
             Ok(Inotify { fd })
         }
 
