@@ -1791,8 +1791,8 @@ mod tests {
         use strum::IntoEnumIterator;
         // The Chutes distribution withholds telemetry, so no preset may expose a
         // feedback tool there; a build that serves feedback keeps the exposure.
-        let feedback_served = chutes_config::Distribution::current()
-            .allows(chutes_config::Capability::Telemetry);
+        let feedback_served =
+            chutes_config::Distribution::current().allows(chutes_config::Capability::Telemetry);
         let presets = all_toolset_presets();
         for (name, config) in &presets {
             let expected = name == "chutes-build" && feedback_served;
