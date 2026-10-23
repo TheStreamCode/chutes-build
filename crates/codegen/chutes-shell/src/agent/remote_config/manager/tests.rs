@@ -1072,6 +1072,47 @@ async fn sign_out_clears_catalog_rebuilds_bundled_without_fetching() {
         "sign-out publishes an outcome so parked waiters wake",
     );
 }
+/// An API key that arrives after the manager resolved `Session` (welcome-screen
+/// entry) must re-resolve to `ApiKey` and refetch, or the catalog stays on the
+/// bundled default and `/model` only offers "Chutes Auto".
+#[tokio::test]
+#[serial]
+async fn api_key_after_startup_refetches_with_api_key_auth() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let _no_key = EnvGuard::unset("CHUTES_API_KEY");
+    let _no_legacy_key = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    chutes_login::auth_method::clear_runtime_chutes_api_key();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let tmp = tempfile::TempDir::new().unwrap();
+    let auth_manager = Arc::new(AuthManager::new(tmp.path(), LoginConfig::default()));
+    let mgr = ModelsManagerBuilder::new(
+        None,
+        make_prefetched(&["model-router"]),
+        acp::ModelId::new("model-router"),
+        auth_manager,
+        config_from_toml(""),
+    )
+    .endpoint(Arc::new(CountingEndpoint {
+        calls: calls.clone(),
+    }))
+    .cache(test_cache_manager(tmp.path()))
+    .build();
+    assert_eq!(*mgr.inner.fetch_auth.read(), ModelFetchAuth::Session);
+    chutes_login::auth_method::set_runtime_chutes_api_key("cpk-test-key");
+    mgr.on_auth_changed().await;
+    assert_eq!(
+        *mgr.inner.fetch_auth.read(),
+        ModelFetchAuth::ApiKey,
+        "an API key must resolve the catalog credential to ApiKey"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the ApiKey identity must attempt the catalog fetch"
+    );
+    chutes_login::auth_method::clear_runtime_chutes_api_key();
+}
+
 #[test]
 fn from_config_without_prefetch_produces_usable_catalog() {
     let tmp = tempfile::TempDir::new().unwrap();

@@ -118,6 +118,7 @@ are unavailable. Skill-provided slash commands are dynamic and are listed by
 | `/scroll-debug` | Inspect scroll/render diagnostics |
 | `/gboom` | Open the built-in terminal game |
 
-Remote `/share`, feedback upload, and upstream coding-data retention controls
-are intentionally not registered in Chutes Build. Automatic update commands
+Remote `/share`, in-app feedback upload, and upstream coding-data retention
+controls are intentionally not registered in Chutes Build; `/feedback` opens
+the public GitHub issue form instead. Automatic update commands
 are also absent; update the installed package or release artifact manually.

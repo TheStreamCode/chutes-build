@@ -160,39 +160,8 @@ The title always includes the MCP server name.
 | `Shift+X` | Dismiss the question (the agent continues without an answer) |
 | `Ctrl+F` | Fullscreen the card |
 
-The `/feedback` form is the one exception to this table: its report box has no
-answers to walk, so it has its own keys (below).
-
 While typing a free-text answer, `Enter` submits and `Esc` returns to the
 answer rows; every other key goes to the text field.
-
-### `/feedback` form
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Switch between the Write and Drafts tabs |
-| `Esc` | Close the form (a focused label row or an open confirm is dismissed first) |
-
-Write tab:
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send the report |
-| `Tab` | Focus the type/task/failure label rows (shown when a draft supplied them); `Tab` again returns to the report box |
-| `←` / `→` | Pick a value on the focused label row |
-
-Drafts tab:
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓`, `j` / `k` | Select a saved draft |
-| `Enter` | Load the selected draft into Write |
-| `d` | Delete the selected draft (confirm with `y`) |
-| `/` | Search the drafts |
-
-When a trace upload can be offered, `Enter` on the report first shows an upload
-question (`↑`/`↓` choose, `Enter` sends with your choice, `Esc` skips the
-upload and still sends the report).
 
 ### Permission prompt
 
@@ -232,7 +201,7 @@ sends it and `Esc` returns to the options.
 
 **Mid-turn Esc grace:** for about a second after a mid-turn Esc, the idle rewind arm stays suppressed — mashing Esc at a turn that then ends cannot silently open the rewind picker. Only the rewind arm is held; every other Esc behavior is unaffected.
 
-**Steal-Esc (runs before the mid-turn hint and clear / rewind):** overlays, modals, slash/file/completion dropdowns, history search, scrollback search, text selection, link highlight, voice, and **Bash / Remember mode exit** when the prompt is empty (Esc leaves `!` / `#` mode and returns to the normal prompt, even while a turn is running). Bare `/feedback` opens the feedback form; Esc closes it.
+**Steal-Esc (runs before the mid-turn hint and clear / rewind):** overlays, modals, slash/file/completion dropdowns, history search, scrollback search, text selection, link highlight, voice, and **Bash / Remember mode exit** when the prompt is empty (Esc leaves `!` / `#` mode and returns to the normal prompt, even while a turn is running). Bare `/feedback` opens the GitHub issue form in your browser; nothing is sent by the app.
 
 **Ctrl+C vs Esc:** with a non-empty draft while a turn is running, Ctrl+C clears the draft and keeps the turn; a second Ctrl+C on an empty prompt cancels. Esc never cancels: mid-turn it only points you at Ctrl+C and leaves the draft alone. Idle non-empty Ctrl+C clears in one press; Esc requires two presses within 800ms. The two clears differ in what they leave behind: `Esc Esc` stashes the draft, so `Ctrl+S` (or `Ctrl+Z` pressed right after) brings it back, while `Ctrl+C` discards it (`Ctrl+Z` still undoes that clear, text only).
 

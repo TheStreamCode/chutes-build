@@ -13,7 +13,7 @@ A few worth knowing on day one:
 | `/btw` | Send Chutes Build an aside *without* interrupting its current task |
 | `/rewind` (alias `/undo`) | Rewind the conversation to an earlier turn |
 | `/docs` | Full How-to Guides, in the TUI or on the web |
-| `/feedback` | Send feedback to the team |
+| `/feedback` | Open the GitHub issue form for feedback and bug reports |
 
 Two of those deserve a second look:
 

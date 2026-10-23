@@ -4,6 +4,21 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-10-23
+
+### Fixed
+
+- **`/model` lists the full catalogue after the welcome-screen key.** The API-key
+  path never refreshed the model-catalog credential, so the shell kept the
+  `Session` auth it resolved at startup, every catalog fetch failed, and the
+  picker offered only the bundled "Chutes Auto" route. Saving a key now
+  re-resolves the catalog auth and refetches.
+- **`/feedback` goes to GitHub.** There is no in-app feedback backend: the
+  command opens the public issue form (prefilled when given text) and sends
+  nothing itself. The welcome subtitle advertises the repository instead of a
+  `/feedback` form, and the user guide, tutorials, keyboard reference,
+  config reference and slash-command reference describe the GitHub channel.
+
 ## [2.0.0] - 2026-10-22
 
 ### Breaking

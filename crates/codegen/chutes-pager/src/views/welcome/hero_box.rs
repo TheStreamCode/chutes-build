@@ -28,13 +28,13 @@ const UPGRADE_CTA_ROWS: u16 = 2;
 
 /// The "thanks" subtitle, longest first. The right column is only as wide as
 /// the box leaves beside the logo (57 cells at 120 columns, 27 at the 90-column
-/// minimum), so one fixed sentence cannot fit every hero-box width: the tail
-/// used to be clipped silently by the box border, turning `/feedback` into
-/// `/feedb` at a normal 120x30.
+/// minimum), so one fixed sentence cannot fit every hero-box width. Feedback is
+/// collected on the public GitHub repository (there is no in-app feedback
+/// backend), so the subtitle points there instead of at a slash command.
 const HERO_SUBTITLES: &[&str] = &[
-    "Thanks for trying Chutes Build, give feedback with /feedback!",
-    "Thanks for trying Chutes Build! Send /feedback",
-    "Feedback: /feedback",
+    "Thanks for trying Chutes Build! Report issues on GitHub.com",
+    "Thanks for trying Chutes Build! Feedback on GitHub",
+    "Feedback: GitHub issues",
 ];
 
 /// The longest subtitle that fits `width`, or the short one ellipsized when the
@@ -1022,8 +1022,8 @@ managed devices and accounts. Report security incidents";
 
     /// The right column is 57 cells at 120 columns and 27 at the hero box's
     /// 90-column minimum, so the subtitle has to step down with it. Picking the
-    /// longest that fits keeps the whole sentence (and `/feedback`) on screen;
-    /// the old fixed 61-cell sentence lost its tail to the border at 120x30.
+    /// longest that fits keeps the whole sentence on screen; the old fixed
+    /// 61-cell sentence lost its tail to the border at 120x30.
     #[test]
     fn hero_subtitle_picks_the_longest_variant_that_fits() {
         let long = HERO_SUBTITLES[0];

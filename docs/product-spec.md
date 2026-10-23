@@ -203,6 +203,12 @@ agree on authentication (API key only).
 5.3. `CHANGELOG.md` MUST gain a non-empty section per release; release notes
 are sliced from it and an absent section fails the release workflow.
 
+5.4. Feedback and bug reports MUST be collected on the public GitHub
+repository (`https://github.com/TheStreamCode/chutes-build/issues`). The
+product MUST NOT ship an in-app feedback uploader: `/feedback` opens the
+repository's issue form (prefilled when given text) and MUST NOT transmit
+report content itself.
+
 ## 6. Change protocol
 
 Any behavior change MUST, in one commit:
@@ -246,6 +252,10 @@ Any behavior change MUST, in one commit:
 - Legacy agent-type spellings (`grok-build*`, `grok_build_concise`) in
   match arms and the registry alias map: accepted as input for
   back-compat, never emitted (§1.5).
+- In-app feedback collection (the feedback modal, its local drafts, the
+  trace-consent card and the cli-chat-proxy feedback client): unreachable
+  in this build. Product feedback goes to the public GitHub repository and
+  `/feedback` only opens its issue form (§5.4).
 
 ### Removed in 2.0.0
 

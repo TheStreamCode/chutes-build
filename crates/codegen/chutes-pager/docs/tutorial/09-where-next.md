@@ -20,8 +20,9 @@ You know enough to be productive. When you want more:
 - Automate anything: `chutes-build -p "summarize new TODOs" --output-format json`
   runs headless — great for scripts and CI.
 - Stay current with `chutes-build update`; see what changed with `/release-notes`.
-- Something feel off? `/feedback <text>` goes straight to the team, and bare
-  `/feedback` opens a form with your saved drafts.
+- Something feel off? `/feedback <text>` opens a new GitHub issue with that text
+  prefilled; bare `/feedback` opens the issue chooser. Feedback and bug reports
+  are collected in the repository, not in the app.
 
 ## Reopen this tutorial
 

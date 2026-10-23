@@ -1,16 +1,25 @@
-//! `/feedback`: send a report inline or open the feedback modal.
+//! `/feedback`: open the public GitHub issue form.
+//!
+//! Chutes Build has no in-app feedback backend: remote feedback collection is
+//! compiled out (product-spec §1.5/§7), so reports belong on the public GitHub
+//! repository. The command opens the issue form, prefilled with any text given,
+//! and transmits nothing itself.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-/// Bare `/feedback` opens the feedback modal in every screen mode; `/feedback <text>` sends immediately,
-/// without a model turn and without waiting on the prompt queue.
+/// The public repository's issue chooser (template picker when templates exist).
+const FEEDBACK_ISSUES_URL: &str = "https://github.com/TheStreamCode/chutes-build/issues/new/choose";
+/// The blank new-issue form, used when the command carries text to prefill.
+const FEEDBACK_NEW_ISSUE_URL: &str = "https://github.com/TheStreamCode/chutes-build/issues/new";
+
+/// `/feedback` opens the repository's issue form for feedback and bug reports.
 pub struct FeedbackCommand;
 
 impl SlashCommand for FeedbackCommand {
     slash_meta! {
         name: "feedback",
-        description: "Send feedback about the current session",
+        description: "Open the GitHub issue form to report an issue",
         usage: "/feedback [text]",
         takes_args: true,
         arg_placeholder: "[feedback text]",
@@ -18,27 +27,21 @@ impl SlashCommand for FeedbackCommand {
 
     fn submission_refusal(&self, args: &str, voice_owns_prompt: bool) -> Option<&'static str> {
         if args.trim().is_empty() && voice_owns_prompt {
-            Some("Stop voice input before opening the feedback form")
+            Some("Stop voice input before opening the issue form")
         } else {
             None
         }
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
-        // Prompt dispatch removes live image elements before passing these arguments and
-        // attaches the composer images to the action it gets back.
         let user_text = args.trim();
-        let (action, result) = if user_text.is_empty() {
-            ("open_empty", Action::OpenFeedbackModal(Default::default()))
+        let (action, url) = if user_text.is_empty() {
+            ("open_issue_chooser", FEEDBACK_ISSUES_URL.to_owned())
         } else {
-            (
-                "send_inline",
-                Action::SendFeedback {
-                    text: user_text.to_owned(),
-                    images: Default::default(),
-                    trace: None,
-                },
-            )
+            let mut url = url::Url::parse(FEEDBACK_NEW_ISSUE_URL)
+                .expect("static feedback issue URL is valid");
+            url.query_pairs_mut().append_pair("body", user_text);
+            ("open_prefilled_issue", url.to_string())
         };
         crate::unified_log::info(
             "feedback.command",
@@ -49,7 +52,7 @@ impl SlashCommand for FeedbackCommand {
                 "action": action,
             })),
         );
-        CommandResult::Action(result)
+        CommandResult::Action(Action::OpenUrl(url))
     }
 }
 
@@ -71,43 +74,43 @@ mod tests {
         }
     }
 
+    fn opened_url(result: CommandResult) -> String {
+        match result {
+            CommandResult::Action(Action::OpenUrl(url)) => url,
+            other => panic!("feedback must open the GitHub issue form, got {other:?}"),
+        }
+    }
+
     /// The whitespace case matters: the composer keeps a trailing space while the user is still typing the command.
     #[test]
-    fn bare_and_whitespace_open_the_empty_modal() {
+    fn bare_and_whitespace_open_the_issue_chooser() {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
         let cmd = FeedbackCommand;
 
         for args in ["", "   ", "\t"] {
-            match cmd.run(&mut ctx, args) {
-                CommandResult::Action(Action::OpenFeedbackModal(open)) => {
-                    assert_eq!(open.text, None, "{args:?} should open empty");
-                    assert!(
-                        open.images.is_empty(),
-                        "images attach at dispatch, not here"
-                    );
-                }
-                other => panic!("{args:?} should open the modal, got {other:?}"),
-            }
+            assert_eq!(
+                opened_url(cmd.run(&mut ctx, args)),
+                FEEDBACK_ISSUES_URL,
+                "{args:?} should open the issue chooser"
+            );
         }
     }
 
     #[test]
-    fn inline_text_sends_immediately() {
+    fn inline_text_opens_a_prefilled_issue_form() {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
 
-        match FeedbackCommand.run(&mut ctx, "  todo is chopped  ") {
-            CommandResult::Action(Action::SendFeedback {
-                text,
-                images,
-                trace,
-            }) => {
-                assert_eq!("todo is chopped", text);
-                assert!(images.is_empty(), "images attach at dispatch, not here");
-                assert_eq!(None, trace);
-            }
-            other => panic!("inline text must send immediately, got {other:?}"),
-        }
+        let url = opened_url(FeedbackCommand.run(&mut ctx, "  todo is chopped  "));
+        let parsed = url::Url::parse(&url).expect("feedback URL parses");
+        assert_eq!(parsed.host_str(), Some("github.com"));
+        assert_eq!(parsed.path(), "/TheStreamCode/chutes-build/issues/new");
+        let body = parsed
+            .query_pairs()
+            .find(|(key, _)| key == "body")
+            .map(|(_, value)| value.into_owned())
+            .expect("prefilled issue carries the report body");
+        assert_eq!(body, "todo is chopped");
     }
 }

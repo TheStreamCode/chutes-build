@@ -4917,7 +4917,8 @@ the usual channels. "
 
     /// The hero box's right column is too narrow for the full subtitle: at
     /// 120x30 the painted sentence must fit instead of running under the right
-    /// border (which clipped `give feedback with /feedback!` to `/feedb`).
+    /// border. Feedback is collected on the public GitHub repository, so the
+    /// subtitle points there rather than at a slash command.
     #[test]
     fn hero_subtitle_fits_inside_the_box_at_120x30() {
         let auth = AuthState::Done;
@@ -4928,14 +4929,14 @@ the usual channels. "
             (
                 120u16,
                 30u16,
-                "Thanks for trying Chutes Build! Send /feedback",
+                "Thanks for trying Chutes Build! Feedback on GitHub",
             ),
             (
                 160,
                 40,
-                "Thanks for trying Chutes Build, give feedback with /feedback!",
+                "Thanks for trying Chutes Build! Report issues on GitHub.com",
             ),
-            (90, 30, "Feedback: /feedback"),
+            (90, 30, "Feedback: GitHub issues"),
         ] {
             let area = Rect::new(0, 0, width, height);
             let mut prompt = PromptWidget::new();

@@ -300,4 +300,4 @@ This is not a full mirrored RTL UI.
 
 ## Still Stuck?
 
-Run `/feedback` to report it.
+Run `/feedback` to open the GitHub issue form and report it.

@@ -338,7 +338,12 @@ Switch the color theme. Alias: `/t`.
 
 ### `/feedback [message]`
 
-Report an issue or send feedback. Bare `/feedback` opens the feedback form in every mode, including `--minimal`. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately, in any mode; if the send fails, the message is saved to Drafts.
+Open the public GitHub issue form for feedback and bug reports. Feedback
+is collected in the [Chutes Build repository](https://github.com/TheStreamCode/chutes-build/issues):
+this build has no in-app feedback backend and the command sends nothing
+itself. Bare `/feedback` opens the issue chooser; `/feedback <message>`
+opens a new issue with that text prefilled in the body, in any mode
+including `--minimal`.
 
 ```
 /feedback

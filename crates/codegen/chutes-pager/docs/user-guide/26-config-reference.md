@@ -207,8 +207,8 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.compaction_tool_choice` | `string` | `yes` | `user` | Tool-choice hint used during compaction. |
 | `features.compaction_verbatim_input` | `boolean` | `pin` | `user` | Enable or disable `compaction_verbatim_input`. Default true. Also `CHUTES_BUILD_COMPACTION_VERBATIM_INPUT`. |
 | `features.dock` | `boolean` | `pin` | `user` | Enable or disable `dock`. Default false. Also `CHUTES_BUILD_DOCK`. |
-| `features.feedback` | `boolean` | `pin` | `user` | Enable or disable `feedback`. Default true. Also `CHUTES_BUILD_FEEDBACK_ENABLED`. |
-| `features.feedback_trace_card` | `boolean` | `pin` | `user` | Show a trace-upload consent question after `/feedback`. Default false. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
+| `features.feedback` | `boolean` | `pin` | `user` | Inert in this build: there is no in-app feedback backend; `/feedback` opens the GitHub issue form. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_ENABLED`. |
+| `features.feedback_trace_card` | `boolean` | `pin` | `user` | Inert: remote trace upload is compiled out, so no consent card is shown. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
 | `features.file_acceleration` | `boolean` | `pin` | `user` | Hand local sessions' file systems to a file accelerator when the build installs one. Default false. Also `CHUTES_BUILD_FILE_ACCELERATION`. |
 | `features.image_edit_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_edit. `/imagine` uses the native `generate_media` tool instead. |
 | `features.image_gen` | `boolean` | `pin` | `user` | Enable the legacy image_gen tool (legacy Imagine API; off by default — `/imagine` uses `generate_media`). Also `CHUTES_BUILD_IMAGE_GEN`. |
