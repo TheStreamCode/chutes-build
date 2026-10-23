@@ -101,6 +101,7 @@ are unavailable. Skill-provided slash commands are dynamic and are listed by
 | Command | Purpose |
 | --- | --- |
 | `/help` | Browse commands and keyboard shortcuts |
+| `/feedback [message]` | Open the public GitHub issue form for feedback and bug reports (given text is copied to the clipboard) |
 | `/dashboard` | Open the local agent dashboard |
 | `/settings` | Open settings |
 | `/theme` | Change theme |

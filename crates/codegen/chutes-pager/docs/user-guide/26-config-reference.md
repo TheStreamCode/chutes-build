@@ -179,7 +179,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | --- | --- | --- | --- | --- |
 | `endpoints.cli_chat_proxy_base_url` | `string` | `pin` | `user` | Session-service API base URL. |
 | `endpoints.deployment_key` | `string` | `pin` | `user` | Management key for enterprise deployments. Also CHUTES_BUILD_DEPLOYMENT_KEY. |
-| `endpoints.feedback_base_url` | `string` | `yes` | `user` | Where feedback submissions go. Also CHUTES_BUILD_FEEDBACK_BASE_URL. |
+| `endpoints.feedback_base_url` | `string` | `yes` | `user` | Dormant: the in-app feedback client is capability-pinned off and feedback goes to the GitHub issue tracker; parsed for compatibility. Also CHUTES_BUILD_FEEDBACK_BASE_URL. |
 | `endpoints.managed_config_url` | `string` | `yes` | `user` | Override managed config endpoint. Also CHUTES_BUILD_MANAGED_CONFIG_URL. |
 | `endpoints.models_base_url` | `string` | `pin` | `user` | Custom inference base URL. With `auth_provider_command` set, `{models_base_url}/models` decides which models are offered. Also CHUTES_BUILD_MODELS_BASE_URL. |
 | `endpoints.models_list_url` | `string` | `pin` | `user` | Override model-list URL. With `auth_provider_command` set, this list decides which models are offered. Also CHUTES_BUILD_MODELS_LIST_URL. Alias `models_endpoint`. |
@@ -207,8 +207,8 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.compaction_tool_choice` | `string` | `yes` | `user` | Tool-choice hint used during compaction. |
 | `features.compaction_verbatim_input` | `boolean` | `pin` | `user` | Enable or disable `compaction_verbatim_input`. Default true. Also `CHUTES_BUILD_COMPACTION_VERBATIM_INPUT`. |
 | `features.dock` | `boolean` | `pin` | `user` | Enable or disable `dock`. Default false. Also `CHUTES_BUILD_DOCK`. |
-| `features.feedback` | `boolean` | `pin` | `user` | Inert in this build: there is no in-app feedback backend; `/feedback` opens the GitHub issue form. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_ENABLED`. |
-| `features.feedback_trace_card` | `boolean` | `pin` | `user` | Inert: remote trace upload is compiled out, so no consent card is shown. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
+| `features.feedback` | `boolean` | `pin` | `user` | Capability-pinned off: the withheld Telemetry capability keeps the in-app feedback uploader disabled, so nothing uploads and `/feedback` opens the GitHub issue form. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_ENABLED`. |
+| `features.feedback_trace_card` | `boolean` | `pin` | `user` | Capability-pinned off: remote trace upload is compiled out, so no consent card is shown. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
 | `features.file_acceleration` | `boolean` | `pin` | `user` | Hand local sessions' file systems to a file accelerator when the build installs one. Default false. Also `CHUTES_BUILD_FILE_ACCELERATION`. |
 | `features.image_edit_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_edit. `/imagine` uses the native `generate_media` tool instead. |
 | `features.image_gen` | `boolean` | `pin` | `user` | Enable the legacy image_gen tool (legacy Imagine API; off by default — `/imagine` uses `generate_media`). Also `CHUTES_BUILD_IMAGE_GEN`. |
@@ -242,9 +242,9 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `feedback.user.command` | `string` | `yes` | `user` | Shell command that prints name and email JSON for feedback submissions. |
-| `feedback.user.email` | `string[]` | `yes` | `user` | Sources for the feedback author email (`git_email` or a literal). |
-| `feedback.user.name` | `string[]` | `yes` | `user` | Sources for the feedback author name (`os_user` or a literal). |
+| `feedback.user.command` | `string` | `yes` | `user` | Dormant with the in-app feedback client; parsed for compatibility. |
+| `feedback.user.email` | `string[]` | `yes` | `user` | Dormant with the in-app feedback client; parsed for compatibility. |
+| `feedback.user.name` | `string[]` | `yes` | `user` | Dormant with the in-app feedback client; parsed for compatibility. |
 
 ### `file_acceleration`
 

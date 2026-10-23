@@ -16,12 +16,15 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         "chutes.ai/auth/getBearerToken" => handle_get_bearer_token(agent).await,
         "chutes.ai/getApiKey" => handle_get_api_key(),
         "chutes.ai/setApiKey" => {
+            let key_before = crate::agent::auth_method::read_chutes_api_key_env().ok();
             let result = handle_set_api_key(args);
             // The API-key path never runs a login flow, which is where the session
             // arms recompute the catalog credential. Without this the model-catalog
             // manager keeps the `Session` auth it resolved at startup, every fetch
-            // fails, and `/model` only offers the bundled default route.
-            if result.is_ok() && crate::agent::auth_method::has_chutes_api_key_env() {
+            // fails, and `/model` only offers the bundled default route. Clear the
+            // key and the same refresh drops the stale ApiKey identity.
+            let key_after = crate::agent::auth_method::read_chutes_api_key_env().ok();
+            if result.is_ok() && key_before != key_after {
                 agent.models_manager.on_auth_changed().await;
             }
             result

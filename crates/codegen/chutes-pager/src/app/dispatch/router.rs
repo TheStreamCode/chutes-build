@@ -1252,6 +1252,29 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
             }
             vec![]
         }
+        Action::OpenFeedbackIssue { report } => {
+            let message = match report {
+                Some(text) => {
+                    let copied =
+                        crate::clipboard::SystemClipboard::try_set(&text).reported_success();
+                    if copied {
+                        "Feedback: report copied to the clipboard - paste it into the GitHub issue form."
+                    } else {
+                        "Feedback: copy your report and paste it into the GitHub issue form."
+                    }
+                }
+                None => "Feedback: opening the GitHub issue form.",
+            };
+            if let Some(agent) = get_active_agent_mut(app) {
+                agent
+                    .scrollback
+                    .push_block(crate::scrollback::block::RenderBlock::system(message));
+            } else {
+                app.show_toast(message);
+            }
+            open_url_or_show(app, crate::slash::commands::feedback::FEEDBACK_ISSUES_URL);
+            vec![]
+        }
         Action::OpenManagedConnectors => {
             if let ActiveView::Agent(id) = app.active_view
                 && let Some(agent) = app.agents.get_mut(&id)

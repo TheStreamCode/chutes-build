@@ -205,9 +205,11 @@ are sliced from it and an absent section fails the release workflow.
 
 5.4. Feedback and bug reports MUST be collected on the public GitHub
 repository (`https://github.com/TheStreamCode/chutes-build/issues`). The
-product MUST NOT ship an in-app feedback uploader: `/feedback` opens the
-repository's issue form (prefilled when given text) and MUST NOT transmit
-report content itself.
+product MUST NOT expose an in-app feedback uploader: no reachable command,
+palette entry or popup may upload a report. Retained-but-unreachable client code
+is covered by §7. `/feedback` opens the repository's issue-form chooser (given
+text is copied to the clipboard first) and MUST NOT transmit report content
+itself.
 
 ## 6. Change protocol
 
@@ -299,6 +301,7 @@ These went away with the rebrand; do not revive them without a spec change:
 | 1.7 endpoint read-compat | `chutes-config` `legacy_xai_api_base_url_key_parses_and_is_not_written`; `chutes-shell` `public_api_base_url_env_reads_legacy_var_as_fallback`, `config::tests::apply_requirements_reads_legacy_xai_api_base_url_key` |
 | 1.7 wire names | `chutes-tool-protocol` serde round-trips and `chutes-pager` ACP tests pin `chutes.ai/*` + `x-chutes-build-*`; `scripts/rebrand.py --check` fails on any upstream token outside the §1.5 allowlist |
 | 1.5 leader mismatch | `chutes-pager` `acp::version_mismatch*` + `headless::ext_protocol` version-mismatch arm (`chutes.ai/leader/version_mismatch`) |
+| 5.4 feedback channel | `chutes-pager` `feedback::tests::bare_and_whitespace_open_the_issue_chooser`, `inline_text_copies_the_report_and_opens_the_issue_form` |
 | 1.6 rate-limit/usage URLs | `chutes-shell` `sampling::error::tests::{rate_limited_fallback_oauth_vs_api_key, format_rate_limited_*}`; `chutes-pager` `free_usage_translate_local_submit_maps_options`, `upsell_non_max_upgrade_url_is_usage` |
 | Settings footer | `chutes-pager` `settings_e2e::docs_footer_renders_for_browse_and_picker` (MEDIUM variant at 120 cols) |
 

@@ -507,7 +507,7 @@ Type `/` in the input to access commands:
 | `/hooks-list`                      |           | Show hooks loaded in this session                        |
 | `/hooks-trust`                     |           | Trust this folder for hooks (writes folder trust)        |
 | `/hooks-add <path>`                |           | Add a custom hook file or directory                      |
-| `/feedback [message]`              |           | Report an issue or send feedback                         |
+| `/feedback [message]`              |           | Dormant: feedback goes to the GitHub issue tracker        |
 | `/exit`                            | `/quit`   | Exit the TUI                                             |
 
 ```bash

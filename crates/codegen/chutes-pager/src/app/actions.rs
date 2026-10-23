@@ -108,6 +108,10 @@ pub enum Action {
     CheckSubscription,
     /// Open an arbitrary URL in the system browser (with scheme validation).
     OpenUrl(String),
+    /// Open the public GitHub issue form, copying the user's report to the clipboard first.
+    OpenFeedbackIssue {
+        report: Option<String>,
+    },
     /// Resubmit the prompt that last hit the credit/usage limit.
     RetryCreditLimitPrompt,
     /// Open a semantic scrollback link.

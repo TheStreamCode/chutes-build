@@ -5,15 +5,19 @@ use chutes_pager_pty_harness::{inference_request_count, inference_requests};
 const REPORT: &str = "plan-overlay-report-xyz";
 const APPROVE_REFUSAL: &str = "Run the slash command in the notes";
 
-/// A complete pager command typed into the plan-approval notes box runs as a command: `/feedback <text>` POSTs to
-/// the mock, the review stays parked, and neither the command nor a revision reaches the model. Approving over a
-/// slash command is refused until the notes are cleared.
+/// A complete pager command typed into the plan-approval notes box runs as a command: `/feedback <text>` opens the
+/// GitHub issue form, the review stays parked, and neither the command nor a revision reaches the model. Approving
+/// over a slash command is refused until the notes are cleared.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn plan_overlay_slash_runs_command() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} first turn done."));
-    let overrides = enable_feedback_posting(&content, "plan-overlay-slash");
+    let opened_urls = content.home().join("opened_urls.txt");
+    let overrides = [chutes_pager_pty_harness::EnvOp::set(
+        "CHUTES_BUILD_TEST_OPEN_URL_FILE",
+        opened_urls.to_str().expect("temp home is UTF-8"),
+    )];
 
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
@@ -80,14 +84,31 @@ async fn plan_overlay_slash_runs_command() {
     inject_keys_paced(&mut harness, format!("/feedback {REPORT}").as_bytes());
     harness.inject_keys(b"\r").expect("submit inline /feedback");
 
-    let body = wait_for_feedback_post(&mut harness, &content, "write");
+    harness
+        .wait_until(
+            "feedback issue page opened",
+            Duration::from_secs(20),
+            |_| {
+                std::fs::read_to_string(&opened_urls)
+                    .is_ok_and(|text| text.contains("/issues/new/choose"))
+            },
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "the command must open the GitHub issue form: {e}\nscreen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    let opened = std::fs::read_to_string(&opened_urls).expect("read opened URLs");
     assert!(
-        body["feedbackText"]
-            .as_str()
-            .is_some_and(|text| text.contains(REPORT)),
-        "POST body: {body}"
+        opened.contains("https://github.com/TheStreamCode/chutes-build/issues/new/choose"),
+        "opened URL must be the issue chooser: {opened}"
     );
-    assert_eq!(1, content.feedback_posts().len());
+    assert!(
+        harness.full_text().contains("GitHub issue form"),
+        "the command must say where the report went:\n{}",
+        harness.full_text()
+    );
 
     let screen = harness.screen_contents();
     assert!(
@@ -138,7 +159,14 @@ async fn plan_overlay_slash_runs_command() {
         "refused approve must leave plan approval open; screen:\n{}",
         harness.screen_contents()
     );
-    assert_eq!(1, content.feedback_posts().len(), "refusal must not send");
+    assert_eq!(
+        1,
+        std::fs::read_to_string(&opened_urls)
+            .expect("read opened URLs")
+            .lines()
+            .count(),
+        "refusal must not open another URL"
+    );
 
     // The approve refusal moved focus to the notes box, so Backspace edits the command
     let backspaces = vec![0x7f_u8; "/feedback again".len()];

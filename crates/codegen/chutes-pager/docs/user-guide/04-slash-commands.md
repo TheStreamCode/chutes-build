@@ -342,8 +342,8 @@ Open the public GitHub issue form for feedback and bug reports. Feedback
 is collected in the [Chutes Build repository](https://github.com/TheStreamCode/chutes-build/issues):
 this build has no in-app feedback backend and the command sends nothing
 itself. Bare `/feedback` opens the issue chooser; `/feedback <message>`
-opens a new issue with that text prefilled in the body, in any mode
-including `--minimal`.
+copies the message to the clipboard and opens the chooser so you can paste
+it into the issue form, in any mode including `--minimal`.
 
 ```
 /feedback

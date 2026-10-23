@@ -91,7 +91,7 @@ screen_mode = "fullscreen"             # default render mode: "fullscreen" | "mi
 
 [features]
 telemetry = false                      # inert in this build (see Telemetry below)
-feedback = true                        # feedback system (default: true)
+feedback = true                        # capability-pinned off by the withheld telemetry
 lsp_tools = false                      # expose the lsp tool
 codebase_indexing = true               # code graph indexing (default: true)
 two_pass_compaction = true             # prefire two-pass compaction (default: true)
@@ -793,7 +793,7 @@ The key ones. See the README for the complete list.
 | `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` | Inert in this build (telemetry withheld) |
 | `CHUTES_BUILD_TELEMETRY_MIXPANEL_ENABLED` | Inert in this build (telemetry withheld) |
 | `CHUTES_BUILD_EXTERNAL_OTEL` | Inert in this build (external OTEL deadened; see [24-monitoring-usage.md](24-monitoring-usage.md)) |
-| `CHUTES_BUILD_FEEDBACK_ENABLED` | Enable/disable feedback system |
+| `CHUTES_BUILD_FEEDBACK_ENABLED` | Capability-pinned off (telemetry withheld); feedback goes to the GitHub issue tracker |
 | `CHUTES_BUILD_DEPLOYMENT_KEY` | Management API key for enterprise |
 
 ---

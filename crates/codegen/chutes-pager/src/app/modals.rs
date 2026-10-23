@@ -844,10 +844,6 @@ impl AgentView {
                                 self.active_modal = None;
                                 InputOutcome::Action(Action::OpenConfigAgentsModal(None))
                             }
-                            PaletteCommand::OpenFeedbackModal => {
-                                self.active_modal = None;
-                                InputOutcome::Action(Action::OpenFeedbackModal(Default::default()))
-                            }
                             PaletteCommand::EditPromptExternal => {
                                 self.active_modal = None;
                                 InputOutcome::Action(Action::EditPromptExternal)

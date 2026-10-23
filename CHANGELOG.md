@@ -4,6 +4,26 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The palette's feedback entry opens GitHub.** "Send Feedback" still launched
+  the dormant in-app feedback modal, which made the spec's "unreachable" claim
+  false and advertised a flow the build cannot complete. The entry now runs
+  `/feedback`, so it opens the public issue form like the command does.
+- **`/feedback <text>` keeps the report.** GitHub issue forms ignore a URL
+  body prefill, so the command copies the message to the clipboard before
+  opening the issue-form chooser.
+- **Clearing the API key refreshes the model catalog.** The catalog credential
+  refresh now keys off any credential change, so removing a key cannot leave
+  the catalogue on the stale `ApiKey` identity.
+
+### Removed
+
+- The obsolete PTY tests that drove the in-app feedback modal and its drafts;
+  the plan-overlay command test now asserts the opened GitHub URL instead.
+
 ## [2.0.1] - 2026-10-23
 
 ### Fixed

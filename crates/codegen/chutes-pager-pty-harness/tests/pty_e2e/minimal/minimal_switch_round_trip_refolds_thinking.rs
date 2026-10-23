@@ -8,6 +8,7 @@ const REASONING_SENTINEL: &str = "REASONINGSENTINEL";
 
 /// GB-5502: a fullscreen → minimal → fullscreen round trip must not leave thinking folds sprung
 /// open.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn minimal_switch_round_trip_refolds_thinking() {
