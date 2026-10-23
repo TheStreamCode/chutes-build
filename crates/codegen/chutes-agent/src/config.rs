@@ -1787,11 +1787,15 @@ mod tests {
         ids
     }
     #[test]
-    fn send_feedback_exposure_is_chutes_build_only() {
+    fn send_feedback_exposure_is_chutes_build_only_when_feedback_is_served() {
         use strum::IntoEnumIterator;
+        // The Chutes distribution withholds telemetry, so no preset may expose a
+        // feedback tool there; a build that serves feedback keeps the exposure.
+        let feedback_served = chutes_config::Distribution::current()
+            .allows(chutes_config::Capability::Telemetry);
         let presets = all_toolset_presets();
         for (name, config) in &presets {
-            let expected = name == "chutes-build";
+            let expected = name == "chutes-build" && feedback_served;
             let count = config
                 .tools
                 .iter()
@@ -1805,7 +1809,7 @@ mod tests {
         }
         for builtin in BuiltinAgentName::iter() {
             let expected = match builtin {
-                BuiltinAgentName::ChutesBuild => true,
+                BuiltinAgentName::ChutesBuild => feedback_served,
                 BuiltinAgentName::ChutesBuildConcise
                 | BuiltinAgentName::ChutesBuildPlan
                 | BuiltinAgentName::ChutesBuildPlanNoSubagents
@@ -1841,7 +1845,7 @@ mod tests {
                 .iter()
                 .filter(|tool| tool.id == feedback_tool_id())
                 .count(),
-            1
+            usize::from(feedback_served)
         );
     }
     #[test]
