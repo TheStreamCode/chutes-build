@@ -309,6 +309,59 @@ fn safe_absolute_directory_rejects_hostile_home_and_byobu_values() {
     }
 }
 
+/// Windows CI runs with `%TEMP%` under an 8.3 short name (`RUNNER~1`). That `~` is a literal
+/// character, not shell tilde expansion, so the guard must accept the path: rejecting it made
+/// every temp-dir-backed fix test panic with `UnsafeDirectory { label: "HOME", .. }`.
+#[cfg(windows)]
+#[test]
+fn safe_absolute_directory_accepts_windows_short_name_temp_path() {
+    for value in [
+        r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpX",
+        r"C:\Users\RUNNER~1",
+    ] {
+        assert!(
+            SafeAbsoluteDirectory::parse(PathBuf::from(value), "HOME").is_ok(),
+            "8.3 short-name path must be accepted: {value:?}"
+        );
+    }
+}
+
+/// Only a leading `~` is shell tilde expansion (`~`, `~user`, `~/…`); a `~` inside a component
+/// (like an 8.3 short name) is literal.
+#[test]
+fn safe_absolute_directory_accepts_tilde_inside_a_component() {
+    #[cfg(windows)]
+    let values = [r"C:\Users\RUNNER~1", r"C:\Users\RUNNER~1\tmp~dir"];
+    #[cfg(unix)]
+    let values = ["/home/RUNNER~1", "/home/tmp~dir"];
+
+    for value in values {
+        assert!(
+            SafeAbsoluteDirectory::parse(PathBuf::from(value), "HOME").is_ok(),
+            "literal `~` inside a component must be accepted: {value:?}"
+        );
+    }
+}
+
+/// `~`-prefixed components are still rejected: they are what a shell would expand.
+#[test]
+fn safe_absolute_directory_rejects_tilde_prefixed_components() {
+    #[cfg(windows)]
+    let values = [r"C:\Users\~", r"C:\Users\~runner", r"C:\Users\~\tmp"];
+    #[cfg(unix)]
+    let values = ["/home/~", "/home/~runner", "/home/~/tmp"];
+
+    for value in values {
+        assert!(
+            matches!(
+                SafeAbsoluteDirectory::parse(PathBuf::from(value), "HOME"),
+                Err(FixError::UnsafeDirectory { .. })
+            ),
+            "tilde-prefixed component must be rejected: {value:?}"
+        );
+    }
+}
+
 #[test]
 fn reload_instruction_shell_quotes_and_markdown_escapes_paths() {
     assert_eq!(
@@ -361,17 +414,18 @@ fn full_preview_safely_renders_backtick_requested_symlink_target_and_backup_path
 #[test]
 fn tmux_plain_byobu_and_custom_config_paths_are_physical() {
     let temp = tempfile::tempdir().unwrap();
+    // On Windows CI `%TEMP%` is an 8.3 short path (`C:\Users\RUNNER~1\...`). Canonicalize
+    // the fixture root so `requested_path` is the physical long path this test is about,
+    // rather than a short-name path that legitimately contains a literal `~`.
+    let root = dunce::canonicalize(temp.path()).unwrap();
     let report = tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard);
     let plain = plan_fix(
-        tmux_request(temp.path(), TMUX_CLIPBOARD_ID),
+        tmux_request(&root, TMUX_CLIPBOARD_ID),
         &report,
         &tmux_terminal(false),
     )
     .unwrap();
-    assert_eq!(
-        plain.change().requested_path,
-        temp.path().join(".tmux.conf")
-    );
+    assert_eq!(plain.change().requested_path, root.join(".tmux.conf"));
     assert!(
         !plain
             .change()
@@ -382,21 +436,21 @@ fn tmux_plain_byobu_and_custom_config_paths_are_physical() {
 
     let custom = FixRequest::new_for_test(
         TMUX_CLIPBOARD_ID,
-        temp.path(),
+        &root,
         None,
         None,
-        Some(temp.path().join("custom-byobu")),
+        Some(root.join("custom-byobu")),
     )
     .unwrap();
     let byobu = plan_fix(custom, &report, &tmux_terminal(true)).unwrap();
     assert_eq!(
         byobu.change().requested_path,
-        temp.path().join("custom-byobu/.tmux.conf")
+        root.join("custom-byobu/.tmux.conf")
     );
 
     assert!(matches!(
         plan_fix(
-            tmux_request(temp.path(), TMUX_CLIPBOARD_ID),
+            tmux_request(&root, TMUX_CLIPBOARD_ID),
             &report,
             &tmux_terminal(true)
         ),

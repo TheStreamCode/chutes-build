@@ -52,10 +52,25 @@ impl SafeAbsoluteDirectory {
         let has_unsafe_component = path
             .components()
             .any(|component| matches!(component, Component::CurDir | Component::ParentDir));
+        // Reject only shell tilde expansion: a component that starts with `~` (`~`, `~user`,
+        // `~/…`). A `~` anywhere else is a literal character, as in Windows 8.3 short names
+        // (`RUNNER~1`), which legitimate temp/home paths on CI runners use.
+        let has_tilde_component = path.components().any(|component| {
+            matches!(
+                component,
+                Component::Normal(name)
+                    if name.to_str().is_some_and(|name| name.starts_with('~'))
+            )
+        });
         let is_renderable = path
             .to_str()
-            .is_some_and(|value| !value.chars().any(char::is_control) && !value.contains('~'));
-        if !path.is_absolute() || is_root_only || has_unsafe_component || !is_renderable {
+            .is_some_and(|value| !value.chars().any(char::is_control));
+        if !path.is_absolute()
+            || is_root_only
+            || has_unsafe_component
+            || has_tilde_component
+            || !is_renderable
+        {
             return Err(FixError::UnsafeDirectory { label, path });
         }
         Ok(Self(path))
@@ -333,7 +348,7 @@ impl std::fmt::Display for FixError {
             ),
             Self::UnsafeDirectory { label, path } => write!(
                 formatter,
-                "Chutes Build refused unsafe {label} `{}`. Use a non-root absolute directory without control characters, `~`, `.` or `..` components.",
+                "Chutes Build refused unsafe {label} `{}`. Use a non-root absolute directory without control characters, `~`-prefixed, `.` or `..` components.",
                 path.display()
             ),
             Self::ExistingCustomization { path, detail }
