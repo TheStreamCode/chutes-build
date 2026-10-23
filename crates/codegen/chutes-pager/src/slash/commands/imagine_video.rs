@@ -1,7 +1,7 @@
 use agent_client_protocol as acp;
 use chutes_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
 use chutes_tools::implementations::chutes_build::{
-    IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction, imagine_video_usage_message,
+    IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction,
 };
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
@@ -14,23 +14,24 @@ impl SlashCommand for ImagineVideoCommand {
     slash_meta! {
         name: IMAGINE_VIDEO_COMMAND_NAME,
         description: "Generate a video from a text description",
-        usage: "/imagine-video <description>",
+        usage: "/imagine-video [model] <description>",
         takes_args: true,
-        args_required: true,
-        arg_placeholder: "description of the video to generate",
+        arg_placeholder: "description, optionally after a model id",
         required_tools: REQUIRED_TOOLS,
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
-        let prompt = args.trim();
-        if prompt.is_empty() {
-            return CommandResult::Message(imagine_video_usage_message().to_string());
-        }
-
+        let args = args.trim();
+        // Bare `/imagine-video` lists the live video models; a prompt generates
+        // with the model the user named or one the tool picks from the catalog.
         CommandResult::InjectSkill {
-            display_text: format!("/imagine-video {prompt}"),
+            display_text: if args.is_empty() {
+                "/imagine-video".to_owned()
+            } else {
+                format!("/imagine-video {args}")
+            },
             prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-                imagine_video_instruction(prompt),
+                imagine_video_instruction(args),
             ))],
             display_as_skill: false,
             scheduled_task_preview: None,
@@ -48,19 +49,33 @@ mod tests {
     }
 
     #[test]
-    fn empty_prompt_returns_usage() {
+    fn empty_prompt_lists_live_models() {
         let models = crate::acp::model_state::ModelState::default();
         let mut ctx = super::super::tests::make_ctx(&models);
-        let result = ImagineVideoCommand.run(&mut ctx, "");
-        assert!(matches!(result, CommandResult::Message(_)));
+        match ImagineVideoCommand.run(&mut ctx, "") {
+            CommandResult::InjectSkill {
+                display_text,
+                prompt_blocks,
+                ..
+            } => {
+                assert_eq!(display_text, "/imagine-video");
+                let text = format!("{:?}", prompt_blocks[0]);
+                assert!(text.contains("list_media_models"));
+            }
+            other => panic!("bare /imagine-video must list models, got {other:?}"),
+        }
     }
 
     #[test]
-    fn whitespace_prompt_returns_usage() {
+    fn whitespace_prompt_lists_live_models() {
         let models = crate::acp::model_state::ModelState::default();
         let mut ctx = super::super::tests::make_ctx(&models);
-        let result = ImagineVideoCommand.run(&mut ctx, "   ");
-        assert!(matches!(result, CommandResult::Message(_)));
+        match ImagineVideoCommand.run(&mut ctx, "   ") {
+            CommandResult::InjectSkill { prompt_blocks, .. } => {
+                assert!(format!("{:?}", prompt_blocks[0]).contains("list_media_models"));
+            }
+            other => panic!("whitespace must behave like empty, got {other:?}"),
+        }
     }
 
     #[test]

@@ -33,6 +33,28 @@ impl MediaKind {
     }
 }
 
+/// The public catalogue is several hundred records and generation commands may
+/// run back-to-back; caching it briefly keeps `/imagine` from refetching all
+/// pages on every call while still following models that come and go.
+const CATALOG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+static CATALOG_CACHE: std::sync::LazyLock<
+    tokio::sync::Mutex<Option<(std::time::Instant, serde_json::Value)>>,
+> = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+async fn shared_catalog(client: &ChutesMediaClient) -> Result<serde_json::Value, String> {
+    {
+        let guard = CATALOG_CACHE.lock().await;
+        if let Some((fetched_at, catalog)) = guard.as_ref()
+            && fetched_at.elapsed() < CATALOG_CACHE_TTL
+        {
+            return Ok(catalog.clone());
+        }
+    }
+    let catalog = client.list().await.map_err(|error| error.to_string())?;
+    *CATALOG_CACHE.lock().await = Some((std::time::Instant::now(), catalog.clone()));
+    Ok(catalog)
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ListMediaModelsInput {
     /// Optional media capability filter.
@@ -51,8 +73,10 @@ pub struct DescribeMediaModelInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct GenerateMediaInput {
-    /// Chute id, slug, or model name. A plain name is resolved against the
-    /// public catalog, so `list_media_models` is not required first.
+    /// Chute id, slug, or model name. Leave empty to let the tool pick a
+    /// currently available model of `kind` from the live public catalog; a
+    /// plain name is resolved against that catalog too.
+    #[serde(default)]
     pub model: String,
     /// Expected output family.
     pub kind: MediaKind,
@@ -124,9 +148,9 @@ impl chutes_tool_runtime::Tool for ListMediaModelsTool {
     ) -> Result<ToolOutput, chutes_tool_runtime::ToolError> {
         let credentials = super::resolve_credentials(&ctx)
             .map_err(|error| execution_error("list_media_models", error))?;
-        let catalog = ChutesMediaClient::from_credentials(credentials)
-            .map_err(|error| execution_error("list_media_models", error))?
-            .list()
+        let client = ChutesMediaClient::from_credentials(credentials)
+            .map_err(|error| execution_error("list_media_models", error))?;
+        let catalog = shared_catalog(&client)
             .await
             .map_err(|error| execution_error("list_media_models", error))?;
         let query = input
@@ -208,9 +232,9 @@ impl chutes_tool_runtime::Tool for DescribeMediaModelTool {
     ) -> Result<ToolOutput, chutes_tool_runtime::ToolError> {
         let credentials = super::resolve_credentials(&ctx)
             .map_err(|error| execution_error("describe_media_model", error))?;
-        let detail = ChutesMediaClient::from_credentials(credentials)
-            .map_err(|error| execution_error("describe_media_model", error))?
-            .describe(input.model.trim())
+        let client = ChutesMediaClient::from_credentials(credentials)
+            .map_err(|error| execution_error("describe_media_model", error))?;
+        let (detail, _identifier) = resolve_model_detail(&client, input.model.trim())
             .await
             .map_err(|error| execution_error("describe_media_model", error))?;
         pretty_text(compact_detail(&detail), "describe_media_model")
@@ -230,7 +254,7 @@ impl crate::types::tool_metadata::ToolMetadata for GenerateMediaTool {
     }
 
     fn description_template(&self) -> &str {
-        "Generate or edit image, video, music, or speech with a Chutes model. For speech-to-text, document extraction, or embeddings, prefer the transcribe_audio, extract_document, and embed_texts tools. Self-contained: `{model, kind, prompt}` is enough — the model name is resolved against the catalog, the cord is selected, and the prompt is placed into the field that cord declares. Add `params` only for non-default settings (size, steps, voice) or to pass a workspace file as an input asset. Call describe_media_model only when a call reports a schema mismatch or you need an exact field name. Outputs and a provenance sidecar are saved only inside the current workspace."
+        "Generate or edit image, video, music, or speech with a Chutes model. For speech-to-text, document extraction, or embeddings, prefer the transcribe_audio, extract_document, and embed_texts tools. `{kind, prompt}` is enough: when `model` is omitted the tool picks a currently available model of that kind from the live catalog, so no model name has to be guessed or hardcoded. When `model` is set it is resolved against the catalog (a chute id is the most direct form), the cord is selected, and the prompt is placed into the field that cord declares. Add `params` only for non-default settings (size, steps, voice) or to pass a workspace file as an input asset. Call describe_media_model only when a call reports a schema mismatch or you need an exact field name. Outputs and a provenance sidecar are saved only inside the current workspace."
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -435,17 +459,154 @@ fn catalog_records(value: &serde_json::Value) -> Vec<&serde_json::Value> {
         .unwrap_or_default()
 }
 
+/// Everything a kind classifier may look at for one catalog record: template,
+/// tagline, name/slug, a bounded readme slice (the listing carries it, and several
+/// media chutes have an empty tagline), and the cords.
+fn record_searchable(value: &serde_json::Value) -> String {
+    let mut text = String::new();
+    for key in ["standard_template", "template", "tagline", "name", "slug"] {
+        if let Some(part) = value.get(key).and_then(serde_json::Value::as_str) {
+            text.push_str(part);
+            text.push(' ');
+        }
+    }
+    if let Some(readme) = value.get("readme").and_then(serde_json::Value::as_str) {
+        text.extend(readme.chars().take(2000));
+        text.push(' ');
+    }
+    if let Some(cords) = value.get("cords") {
+        text.push_str(&cords.to_string());
+    }
+    text
+}
+
+/// The identifier `GET /chutes/{id}` accepts: the chute id. Slugs and names only
+/// address the public docs page; `describe` 404s on them.
+fn record_identifier(record: &serde_json::Value) -> Option<String> {
+    first_string(record, &["chute_id", "id", "slug", "name"])
+}
+
+/// Human-facing label used in notes and errors.
+fn record_label(record: &serde_json::Value) -> Option<String> {
+    first_string(record, &["slug", "name", "chute_id", "id"])
+}
+
+fn is_disabled(record: &serde_json::Value) -> bool {
+    record
+        .get("disabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Records that share a model family but are not generation endpoints: editors,
+/// OCR/classification helpers, multimodal chat models, and embeddings.
+fn is_non_generation_media(text: &str) -> bool {
+    let text = text.to_lowercase();
+    [
+        "edit",
+        "ocr",
+        "classifier",
+        "nsfw",
+        "docu",
+        "transcri",
+        "embedding",
+        "rerank",
+        "multimodal reasoning",
+        "tool call",
+        "tool-call",
+        "chat completion",
+        "language model",
+    ]
+    .iter()
+    .any(|term| text.contains(term))
+}
+
+/// Order candidates by how likely they are to serve now: hot first, then active
+/// instances, then invocation count. Deterministic for tests.
+fn record_score(record: &serde_json::Value) -> i64 {
+    let mut score = 0i64;
+    if record
+        .get("hot")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        score += 1_000_000;
+    }
+    let active = record
+        .get("instances")
+        .and_then(serde_json::Value::as_array)
+        .map(|instances| {
+            instances
+                .iter()
+                .filter(|instance| {
+                    instance
+                        .get("active")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    score += (active.min(1000) as i64) * 1_000;
+    let invocations = record
+        .get("invocation_count")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    score += invocations.min(1_000_000) / 100;
+    score
+}
+
+/// Labels of generation models for `kind`, best first, skipping `exclude` and any
+/// non-generation record.
+fn media_candidates(
+    catalog: &serde_json::Value,
+    kind: MediaKind,
+    exclude: Option<&str>,
+) -> Vec<String> {
+    let excluded = exclude.map(normalize_model_key);
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates: Vec<(i64, String)> = catalog_records(catalog)
+        .into_iter()
+        .filter(|record| !is_disabled(record))
+        .filter_map(|record| {
+            let label = record_label(record)?;
+            let key = normalize_model_key(&label);
+            if excluded.as_deref() == Some(key.as_str()) || !seen.insert(key) {
+                return None;
+            }
+            let searchable = record_searchable(record);
+            if is_non_generation_media(&searchable)
+                || infer_kind(&searchable).is_none_or(|found| found != kind.as_str())
+            {
+                return None;
+            }
+            Some((record_score(record), label))
+        })
+        .collect();
+    candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    candidates.into_iter().map(|(_, label)| label).collect()
+}
+
+/// The callable identifier for a catalog label: the chute id, else the label.
+fn catalog_identifier(catalog: &serde_json::Value, label: &str) -> Option<String> {
+    let wanted = normalize_model_key(label);
+    catalog_records(catalog)
+        .into_iter()
+        .find(|record| {
+            ["slug", "name", "chute_id", "id"].iter().any(|field| {
+                first_string(record, &[*field])
+                    .is_some_and(|value| normalize_model_key(&value) == wanted)
+            })
+        })
+        .and_then(record_identifier)
+}
+
 fn summarize_model(value: &serde_json::Value) -> Option<serde_json::Value> {
     let name = first_string(value, &["name", "slug", "chute_id", "id"])?;
     let slug = first_string(value, &["slug"]);
     let tagline = first_string(value, &["tagline"]);
     let template = first_string(value, &["standard_template", "template"]);
-    let searchable = format!(
-        "{} {} {}",
-        template.as_deref().unwrap_or_default(),
-        tagline.as_deref().unwrap_or_default(),
-        value.get("cords").unwrap_or(&serde_json::Value::Null)
-    );
+    let searchable = record_searchable(value);
     Some(serde_json::json!({
         "id": first_string(value, &["chute_id", "id"]),
         "name": name,
@@ -545,7 +706,7 @@ async fn resolve_model_detail(
     if let Ok(detail) = direct {
         return Ok((detail, model.to_owned()));
     }
-    let catalog = client.list().await.map_err(|error| {
+    let catalog = shared_catalog(client).await.map_err(|error| {
         format!("model `{model}` was not found and the catalog lookup failed: {error}")
     })?;
     let records = catalog_records(&catalog);
@@ -579,7 +740,7 @@ async fn resolve_model_detail(
             candidates.join(", ")
         ));
     };
-    let identifier = first_string(record, &["slug", "chute_id", "id", "name"])
+    let identifier = record_identifier(record)
         .ok_or_else(|| format!("catalog entry for `{model}` has no usable identifier"))?;
     let detail = client.describe(&identifier).await.map_err(|error| {
         format!("model `{model}` resolved to `{identifier}` but describe failed: {error}")
@@ -599,30 +760,65 @@ async fn resolve_with_fallback(
     model: &str,
     kind: MediaKind,
 ) -> Result<(serde_json::Value, String, Option<String>), String> {
+    let model = model.trim();
+    // An omitted model is the normal `/imagine` path: ask the live catalog which
+    // generation chutes are available right now instead of pinning a name that
+    // can disappear or be renamed.
+    if model.is_empty() {
+        let catalog = shared_catalog(client).await.map_err(|error| {
+            format!(
+                "no {} model was requested and the catalog lookup failed: {error}",
+                kind.as_str()
+            )
+        })?;
+        let Some(label) = media_candidates(&catalog, kind, None).into_iter().next() else {
+            return Err(format!(
+                "no {} model is currently available in the Chutes catalog; call list_media_models kind={} to browse alternatives",
+                kind.as_str(),
+                kind.as_str()
+            ));
+        };
+        let identifier = catalog_identifier(&catalog, &label).unwrap_or_else(|| label.clone());
+        let detail = client.describe(&identifier).await.map_err(|error| {
+            format!(
+                "auto-selected {} model `{label}` could not be described: {error}",
+                kind.as_str()
+            )
+        })?;
+        return Ok((
+            detail,
+            identifier,
+            Some(format!("auto-selected `{label}` from the live catalog")),
+        ));
+    }
     match resolve_model_detail(client, model).await {
         Ok((detail, id)) => Ok((detail, id, None)),
         Err(first_error) => {
-            let catalog = client.list().await.map_err(|error| {
+            let catalog = shared_catalog(client).await.map_err(|error| {
                 format!("{first_error} (catalog lookup for alternatives failed: {error})")
             })?;
             let mut tried = vec![model.to_owned()];
-            for candidate in equivalent_media_models(&catalog, model, kind)
-                .into_iter()
-                .take(2)
-            {
+            let mut candidates = equivalent_media_models(&catalog, model, kind);
+            if candidates.is_empty() {
+                candidates = media_candidates(&catalog, kind, Some(model));
+            }
+            for candidate in candidates.into_iter().take(2) {
                 tried.push(candidate.clone());
-                match client.describe(&candidate).await {
+                let identifier =
+                    catalog_identifier(&catalog, &candidate).unwrap_or_else(|| candidate.clone());
+                match client.describe(&identifier).await {
                     Ok(detail) => {
                         let note = format!(
-                            "model `{model}` was not found; using equivalent `{candidate}`"
+                            "model `{model}` was not found; using available {} model `{candidate}`",
+                            kind.as_str()
                         );
-                        return Ok((detail, candidate, Some(note)));
+                        return Ok((detail, identifier, Some(note)));
                     }
                     Err(_) => continue,
                 }
             }
             Err(format!(
-                "{first_error} No equivalent {} model could serve the request (tried: {}).                  Use list_media_models kind={} to browse alternatives.",
+                "{first_error} No available {} model could serve the request (tried: {}). Use list_media_models kind={} to browse alternatives.",
                 kind.as_str(),
                 tried.join(", "),
                 kind.as_str()
@@ -638,29 +834,7 @@ fn equivalent_media_models(
     exclude: &str,
     kind: MediaKind,
 ) -> Vec<String> {
-    let wanted = normalize_model_key(exclude);
-    catalog_records(catalog)
-        .into_iter()
-        .filter_map(|record| {
-            let searchable = format!(
-                "{} {} {}",
-                first_string(record, &["standard_template", "template"])
-                    .as_deref()
-                    .unwrap_or_default(),
-                first_string(record, &["tagline"])
-                    .as_deref()
-                    .unwrap_or_default(),
-                record.get("cords").unwrap_or(&serde_json::Value::Null)
-            );
-            if infer_kind(&searchable).is_some_and(|found| found == kind.as_str()) {
-                let id = first_string(record, &["slug", "name"])?;
-                if normalize_model_key(&id) != wanted {
-                    return Some(id);
-                }
-            }
-            None
-        })
-        .collect()
+    media_candidates(catalog, kind, Some(exclude))
 }
 
 /// Lowercase alphanumerics only, so "FLUX.1 schnell", "flux-1-schnell" and
@@ -1357,26 +1531,52 @@ fn default_content_type(kind: MediaKind) -> &'static str {
 
 fn infer_kind(text: &str) -> Option<&'static str> {
     let text = text.to_lowercase();
-    if text.contains("video") || text.contains("text2video") || text.contains("image2video") {
-        Some("video")
-    } else if ["tts", "text-to-speech", "speech", "voice", "speak"]
+    // Video first: video chutes describe themselves as "diffusion" and say
+    // "image" (image-to-video), so the image branch must not see them first.
+    [
+        "video",
+        "text2video",
+        "text-to-video",
+        "image2video",
+        "image-to-video",
+        "i2v",
+        "t2v",
+        "animate",
+        "wan2",
+        "ltx",
+        "cogvideo",
+        "hunyuanvideo",
+        "mp4",
+    ]
+    .iter()
+    .any(|term| text.contains(term))
+    .then_some("video")
+    .or_else(|| {
+        ["tts", "text-to-speech", "speech", "voice", "speak"]
+            .iter()
+            .any(|term| text.contains(term))
+            .then_some("speech")
+    })
+    .or_else(|| {
+        ["music", "song", "melody", "diffrhythm", "ace-step"]
+            .iter()
+            .any(|term| text.contains(term))
+            .then_some("music")
+    })
+    .or_else(|| {
+        [
+            "image",
+            "diffusion",
+            "flux",
+            "text2image",
+            "text-to-image",
+            "t2i",
+            "sdxl",
+        ]
         .iter()
         .any(|term| text.contains(term))
-    {
-        Some("speech")
-    } else if ["music", "song", "melody", "diffrhythm", "ace-step"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some("music")
-    } else if ["image", "diffusion", "flux", "text2image", "sdxl"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some("image")
-    } else {
-        None
-    }
+        .then_some("image")
+    })
 }
 
 fn first_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
@@ -2008,5 +2208,109 @@ mod tests {
             vec!["clip-video".to_owned()]
         );
         assert!(equivalent_media_models(&catalog, "new-image", MediaKind::Music).is_empty());
+    }
+
+    /// The account API's `describe` endpoint only accepts chute ids; slugs 404.
+    #[test]
+    fn catalog_identifier_prefers_chute_id_over_slug_and_name() {
+        let catalog = serde_json::json!([
+            {
+                "chute_id": "2cc39ac2-4e9f-50de-849f-e99e45729396",
+                "id": "ignored-id",
+                "slug": "vonkaiser-z-image-turbo",
+                "name": "z-image-turbo",
+            }
+        ]);
+        assert_eq!(
+            catalog_identifier(&catalog, "vonkaiser-z-image-turbo"),
+            Some("2cc39ac2-4e9f-50de-849f-e99e45729396".to_owned())
+        );
+        assert_eq!(
+            catalog_identifier(&catalog, "z-image-turbo"),
+            Some("2cc39ac2-4e9f-50de-849f-e99e45729396".to_owned()),
+            "matches on name too, but still resolves to the id"
+        );
+        assert_eq!(catalog_identifier(&catalog, "missing"), None);
+    }
+
+    /// Video chutes call themselves "diffusion" and mention images (i2v), so the
+    /// classifier must decide video first and never offer them for image requests.
+    #[test]
+    fn media_candidates_keep_kinds_apart() {
+        let catalog = serde_json::json!([
+            {
+                "chute_id": "video-id",
+                "slug": "vonkaiser-turbowani2v",
+                "tagline": "TurboDiffusion I2V: Wan2.2 image-to-video, 4-step distilled",
+            },
+            {
+                "chute_id": "video-id-2",
+                "slug": "vonkaiser-ltx-25-video",
+                "tagline": "video generation with synchronized audio",
+            },
+            {
+                "chute_id": "image-id",
+                "slug": "vonkaiser-z-image-turbo",
+                "tagline": "Z-Image Turbo: fast text-to-image generation",
+                "hot": true,
+            },
+            {
+                "chute_id": "edit-id",
+                "slug": "vonkaiser-qwen-image-edit-2511",
+                "tagline": "Qwen-Image-Edit image editing",
+            },
+            {
+                "chute_id": "ocr-id",
+                "slug": "vonkaiser-docuextract",
+                "tagline": "Document OCR and extraction from images",
+            },
+            {
+                "chute_id": "chat-id",
+                "slug": "chutes-nemotron-omni",
+                "tagline": "Multimodal reasoning: video, audio, image, and text",
+            },
+        ]);
+        assert_eq!(
+            media_candidates(&catalog, MediaKind::Image, None),
+            vec!["vonkaiser-z-image-turbo".to_owned()],
+            "editors, OCR and multimodal chat are not image generators"
+        );
+        let videos = media_candidates(&catalog, MediaKind::Video, None);
+        assert_eq!(
+            videos,
+            vec![
+                "vonkaiser-ltx-25-video".to_owned(),
+                "vonkaiser-turbowani2v".to_owned()
+            ],
+            "both video chutes stay video, never image"
+        );
+        assert!(
+            media_candidates(&catalog, MediaKind::Image, Some("vonkaiser-z-image-turbo"))
+                .is_empty()
+        );
+    }
+
+    /// The bare-command path: pick the available generation model, not the first record.
+    #[test]
+    fn media_candidates_prefer_hot_models() {
+        let catalog = serde_json::json!([
+            {
+                "chute_id": "cold-id",
+                "slug": "cold-image",
+                "tagline": "text-to-image generation",
+                "invocation_count": 10,
+            },
+            {
+                "chute_id": "hot-id",
+                "slug": "hot-image",
+                "tagline": "text-to-image generation",
+                "invocation_count": 10,
+                "hot": true,
+            },
+        ]);
+        assert_eq!(
+            media_candidates(&catalog, MediaKind::Image, None).first(),
+            Some(&"hot-image".to_owned())
+        );
     }
 }

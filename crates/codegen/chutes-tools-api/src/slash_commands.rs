@@ -73,39 +73,172 @@ pub const IMAGE_TO_VIDEO_TOOL_NAME: &str = "image_to_video";
 /// Advertised name of the /imagine-video command.
 pub const IMAGINE_VIDEO_COMMAND_NAME: &str = "imagine-video";
 
-/// Usage hint shown when `/imagine` is invoked with no arguments.
+/// Usage hint shown by `/imagine` when the model needs an explicit reminder.
 pub fn imagine_usage_message() -> &'static str {
-    "Usage: /imagine <description>\n\
-     Provide a text description to generate an image."
+    "Usage: /imagine [model] <description>\n\
+     `/imagine <description>` generates with an available catalog model.\n\
+     `/imagine <model> <description>` picks a specific model.\n\
+     `/imagine` alone lists the image models that are available right now."
 }
 
-/// Build the model instruction that `/imagine` expands into for `prompt`.
-/// Routes through the Chutes-native `generate_media` tool: the legacy
-/// `image_gen` tool targets the legacy Imagine API, which Chutes does not serve.
-pub fn imagine_instruction(prompt: &str) -> String {
+/// The model selection part of a media slash command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MediaRequest {
+    model: Option<String>,
+    prompt: Option<String>,
+}
+
+/// Parse `/imagine` / `/imagine-video` arguments.
+///
+/// Accepted forms:
+/// - empty: the caller lists the live catalog instead of generating;
+/// - `<prompt>`: `generate_media` picks an available model (no model name is
+///   guessed or hardcoded);
+/// - `<model> <prompt>`: a model id/slug followed by the prompt, as long as the
+///   first token looks like an id (`vendor-model-name`, two hyphens or more,
+///   `vendor/name`, or a UUID) — otherwise the whole text stays the prompt;
+/// - `--model <model> <prompt>` / `model=<model> <prompt>`: unambiguous forms.
+fn parse_media_request(args: &str) -> MediaRequest {
+    let args = args.trim();
+    if args.is_empty() {
+        return MediaRequest {
+            model: None,
+            prompt: None,
+        };
+    }
+    let mut rest = args;
+    let mut model = None;
+    for prefix in ["--model=", "model="] {
+        if let Some(value) = rest.strip_prefix(prefix) {
+            let (candidate, tail) = value.split_once(char::is_whitespace).unwrap_or((value, ""));
+            model = Some(candidate.trim().to_owned()).filter(|value| !value.is_empty());
+            rest = tail.trim();
+            break;
+        }
+    }
+    if model.is_none() {
+        for prefix in ["--model ", "model "] {
+            if let Some(value) = rest.strip_prefix(prefix) {
+                let (candidate, tail) =
+                    value.split_once(char::is_whitespace).unwrap_or((value, ""));
+                model = Some(candidate.trim().to_owned()).filter(|value| !value.is_empty());
+                rest = tail.trim();
+                break;
+            }
+        }
+    }
+    if model.is_none()
+        && let Some((first, tail)) = rest.split_once(char::is_whitespace)
+        && looks_like_media_model_id(first)
+        && !tail.trim().is_empty()
+    {
+        model = Some(first.to_owned());
+        rest = tail.trim();
+    }
+    let prompt = (!rest.is_empty()).then(|| rest.to_owned());
+    match (model, prompt) {
+        // `--model x` with no prompt: ask the caller to add one.
+        (Some(_), None) => MediaRequest {
+            model: None,
+            prompt: None,
+        },
+        other => MediaRequest {
+            model: other.0,
+            prompt: other.1,
+        },
+    }
+}
+
+/// A media model id looks like a catalog slug, a vendor-scoped name, or a chute id.
+fn looks_like_media_model_id(token: &str) -> bool {
+    let token = token.trim_matches(|c: char| c == '"' || c == '\'');
+    if token.is_empty() {
+        return false;
+    }
+    // `vonkaiser-ltx-25-video`, `z-image-turbo`: two or more hyphenated segments.
+    let hyphen_segments = token.split('-').count();
+    let uuid = token.len() == 36 && token.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    let vendor_scoped = token.contains('/');
+    let explicit_id = token.contains("--");
+    (hyphen_segments >= 3
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        || uuid
+        || vendor_scoped
+        || explicit_id
+}
+
+fn imagine_model_list_instruction(kind: &str) -> String {
+    let command = if kind == "image" {
+        "imagine"
+    } else {
+        "imagine-video"
+    };
     format!(
-        "Call the generate_media tool immediately with kind \"image\", passing the user's prompt below \
-         verbatim as `prompt` — do not rewrite, embellish, or expand it. \
-         Use model \"vonkaiser-z-image-turbo\" unless the user named another image model; \
-         if you need alternatives, call list_media_models with kind \"image\" first. \
-         generate_media substitutes an equivalent model automatically when the requested one is gone; \
-         report its final error verbatim instead of retrying blindly. \
-         After the tool completes, briefly acknowledge and mention \
-         where the image was saved.\n\n\
-         Prompt: {prompt}"
+        "Call list_media_models with kind \"{kind}\" and limit 20, then present the available {kind} models as a compact list: slug (or name), id, and a one-line reason to pick it. Do not generate anything yet. Close with the three forms the user can run: `/{command} <description>` lets the tool pick an available model automatically, `/{command} <model> <description>` chooses one of the listed models, and `/{command} --model <model> <description>` is the unambiguous form. Only list models that appear in the tool result; never invent one."
     )
 }
 
-/// Usage hint shown when `/imagine-video` is invoked with no arguments.
-pub fn imagine_video_usage_message() -> &'static str {
-    "Usage: /imagine-video <description>\n\
-     Provide a text description to generate a video."
+fn image_model_clause(model: &Option<String>) -> String {
+    match model {
+        Some(model) => format!(
+            "Pass model \"{model}\" as `model`; if that model is gone, generate_media substitutes an \
+             available image model automatically. "
+        ),
+        None => "Omit `model`: generate_media picks a currently available image model from the \
+                 live Chutes catalog, so do not guess or hardcode a model name. "
+            .to_owned(),
+    }
 }
 
-/// Build the model instruction that `/imagine-video` expands into for `prompt`.
-pub fn imagine_video_instruction(prompt: &str) -> String {
+/// Build the model instruction that `/imagine` expands into for its arguments.
+/// Routes through the Chutes-native `generate_media` tool: the legacy
+/// `image_gen` tool targets the legacy Imagine API, which Chutes does not serve.
+pub fn imagine_instruction(args: &str) -> String {
+    let request = parse_media_request(args);
+    let Some(prompt) = request.prompt else {
+        return imagine_model_list_instruction("image");
+    };
+    format!(
+        "Call the generate_media tool immediately with kind \"image\", passing the user's prompt below \
+         verbatim as `prompt` — do not rewrite, embellish, or expand it. {model_clause}\
+         If you need alternatives, call list_media_models with kind \"image\" first. \
+         Report generate_media's final error verbatim instead of retrying blindly. \
+         After the tool completes, briefly acknowledge and mention where the image was saved.\n\n\
+         Prompt: {prompt}",
+        model_clause = image_model_clause(&request.model),
+    )
+}
+
+/// Usage hint shown by `/imagine-video` when the model needs an explicit reminder.
+pub fn imagine_video_usage_message() -> &'static str {
+    "Usage: /imagine-video [model] <description>\n\
+     `/imagine-video <description>` generates with an available catalog model.\n\
+     `/imagine-video <model> <description>` picks a specific model.\n\
+     `/imagine-video` alone lists the video models that are available right now."
+}
+
+/// Build the model instruction that `/imagine-video` expands into for its arguments.
+pub fn imagine_video_instruction(args: &str) -> String {
+    let request = parse_media_request(args);
+    let Some(prompt) = request.prompt else {
+        return imagine_model_list_instruction("video");
+    };
+    let model_clause = match &request.model {
+        Some(model) => format!(
+            "Pass model \"{model}\" as `model`; if that model is gone, generate_media substitutes an \
+             available video model automatically."
+        ),
+        None => {
+            "Omit `model`: generate_media picks a currently available video model from the live \
+                 Chutes catalog, so do not guess or hardcode a model name."
+                .to_owned()
+        }
+    };
     format!(
         "{IMAGINE_VIDEO_SKILL}\n\n\
+         Model selection: {model_clause}\n\n\
          User prompt: {prompt}"
     )
 }
@@ -118,10 +251,9 @@ const IMAGINE_VIDEO_SKILL: &str = "\
 # Imagine Video
 
 Generate video with the `generate_media` tool (kind \"video\"). \
-Default to model \"vonkaiser-ltx-25-video\"; if you need alternatives, call \
-`list_media_models` with kind \"video\" first. `generate_media` substitutes \
-an equivalent model automatically when the requested one is gone; report its \
-final error verbatim instead of retrying blindly.
+If you need alternatives, call `list_media_models` with kind \"video\" first. \
+`generate_media` substitutes an available model automatically when the requested \
+one is gone; report its final error verbatim instead of retrying blindly.
 
 Some video models animate from a source image, others take a bare text \
 prompt — call `describe_media_model` on the model first when you are unsure \
@@ -208,7 +340,31 @@ mod tests {
         let text = imagine_instruction("a golden sunset");
         assert!(text.contains("a golden sunset"));
         assert!(text.contains("generate_media"));
+        assert!(text.contains("Omit `model`"));
         assert!(!text.contains("image_gen"));
+    }
+
+    #[test]
+    fn imagine_instruction_lists_models_when_empty() {
+        let text = imagine_instruction("");
+        assert!(text.contains("list_media_models"));
+        assert!(!text.contains("generate_media"));
+    }
+
+    #[test]
+    fn imagine_instruction_passes_a_named_model() {
+        let text = imagine_instruction("z-image-turbo a spaceship in space");
+        assert!(text.contains("z-image-turbo"));
+        assert!(text.contains("a spaceship in space"));
+        assert!(!text.contains("Omit `model`"));
+    }
+
+    #[test]
+    fn imagine_instruction_treats_a_hyphenated_prompt_prefix_as_prompt() {
+        // `8-bit` is not a catalog slug: one hyphen keeps the whole text a prompt.
+        let text = imagine_instruction("8-bit pixel art of a castle");
+        assert!(text.contains("8-bit pixel art of a castle"));
+        assert!(text.contains("Omit `model`"));
     }
 
     #[test]
@@ -217,7 +373,23 @@ mod tests {
         assert!(text.contains("a cat playing piano"));
         assert!(text.contains("generate_media"));
         assert!(text.contains("list_media_models"));
+        assert!(text.contains("Omit `model`"));
         assert!(!text.contains("image_to_video"));
+    }
+
+    #[test]
+    fn imagine_video_instruction_lists_models_when_empty() {
+        let text = imagine_video_instruction("");
+        assert!(text.contains("list_media_models"));
+        assert!(text.contains("/imagine-video <model> <description>"));
+    }
+
+    #[test]
+    fn imagine_video_instruction_passes_a_named_model() {
+        let text = imagine_video_instruction("ltx-25-video a cat playing piano");
+        assert!(text.contains("ltx-25-video"));
+        assert!(text.contains("a cat playing piano"));
+        assert!(!text.contains("Omit `model`"));
     }
 
     #[test]

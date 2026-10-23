@@ -18,6 +18,43 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::{ChutesCredentials, ChutesEndpoints};
 
+/// The account endpoint caps a page at 100 records; the public catalogue is
+/// several hundred chutes, so the client walks every page.
+const CATALOG_PAGE_SIZE: &str = "100";
+const MAX_CATALOG_PAGES: usize = 20;
+
+/// Merge paginated `/chutes/` responses into one `{items, total}` body,
+/// de-duplicated by chute id. Pure so the pagination contract is testable.
+fn combine_catalog_pages(pages: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut items = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut total = 0u64;
+    for page in pages {
+        total = page
+            .get("total")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(total)
+            .max(total);
+        let Some(page_items) = page.get("items").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for item in page_items {
+            let key = item
+                .get("chute_id")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| item.get("slug").and_then(serde_json::Value::as_str))
+                .or_else(|| item.get("name").and_then(serde_json::Value::as_str))
+                .unwrap_or_default()
+                .to_owned();
+            if seen.insert(key) {
+                items.push(item.clone());
+            }
+        }
+    }
+    total = total.max(items.len() as u64);
+    serde_json::json!({ "items": items, "total": total })
+}
+
 #[derive(Debug, Clone)]
 pub struct ChutesMediaClient {
     http: reqwest::Client,
@@ -53,14 +90,44 @@ impl ChutesMediaClient {
         })
     }
 
+    /// Every public chute, across all API pages.
+    ///
+    /// The account endpoint returns 25 records per page by default, and media
+    /// models are spread over the whole catalogue; a single-page listing silently
+    /// hides most of them (which made the old fixed model ids the only option).
     pub async fn list(&self) -> Result<serde_json::Value, MediaError> {
         let url = format!("{}/chutes/", self.endpoints.account);
-        self.send_json(
-            self.http
-                .get(url)
-                .query(&[("include_public", "true"), ("include_schemas", "false")]),
-        )
-        .await
+        let mut pages = Vec::new();
+        let mut seen_total = 0usize;
+        let mut total = None;
+        for page in 0..MAX_CATALOG_PAGES {
+            let page = page.to_string();
+            let body = self
+                .send_json(self.http.get(&url).query(&[
+                    ("include_public", "true"),
+                    ("include_schemas", "false"),
+                    ("limit", CATALOG_PAGE_SIZE),
+                    ("page", page.as_str()),
+                ]))
+                .await?;
+            seen_total += body
+                .get("items")
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, Vec::len);
+            total = body
+                .get("total")
+                .and_then(serde_json::Value::as_u64)
+                .or(total);
+            let empty = body
+                .get("items")
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(Vec::is_empty);
+            pages.push(body);
+            if empty || total.is_some_and(|total| seen_total as u64 >= total) {
+                break;
+            }
+        }
+        Ok(combine_catalog_pages(pages))
     }
 
     pub async fn describe(&self, model: &str) -> Result<serde_json::Value, MediaError> {
@@ -370,6 +437,30 @@ pub enum MediaError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_pages_merge_and_dedupe() {
+        let pages = vec![
+            serde_json::json!({
+                "total": 3,
+                "items": [
+                    {"chute_id": "a", "slug": "a"},
+                    {"chute_id": "b", "slug": "b"},
+                ]
+            }),
+            serde_json::json!({
+                "total": 3,
+                "items": [
+                    {"chute_id": "b", "slug": "b"},
+                    {"chute_id": "c", "slug": "c"},
+                ]
+            }),
+        ];
+        let merged = combine_catalog_pages(pages);
+        let items = merged["items"].as_array().expect("items array");
+        assert_eq!(items.len(), 3, "dedupe by chute id: {items:?}");
+        assert_eq!(merged["total"], serde_json::json!(3));
+    }
 
     #[test]
     fn invocation_credentials_are_restricted_to_chutes_https_hosts() {

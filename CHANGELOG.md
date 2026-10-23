@@ -15,6 +15,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/feedback <text>` keeps the report.** GitHub issue forms ignore a URL
   body prefill, so the command copies the message to the clipboard before
   opening the issue-form chooser.
+- **Media generation follows the live catalog.** `/imagine` and
+  `/imagine-video` no longer pin a model name: a bare command lists the
+  currently available image/video models, `<description>` lets the tool pick
+  an available model, and `<model> <description>` (or `--model`) selects one
+  explicitly. `generate_media` resolves catalog entries by Chutes chute id
+  (the account `describe` endpoint 404s on slugs), classifies video before
+  image so image-to-video chutes never serve image requests, and falls back
+  only to available generation models of the requested kind.
 - **Clearing the API key refreshes the model catalog.** The catalog credential
   refresh now keys off any credential change, so removing a key cannot leave
   the catalogue on the stale `ApiKey` identity.

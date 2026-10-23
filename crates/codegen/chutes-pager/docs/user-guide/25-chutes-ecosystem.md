@@ -62,14 +62,16 @@ new image, video, music, and speech chutes work with no client update.
 | PDF / document extraction | `extract_document` | [vonkaiser-docuextract](https://chutes.ai/docs/models/vonkaiser-docuextract) (LightOnOCR + NuExtract3) |
 | Speech-to-text | `transcribe_audio` | [vonkaiser-audiodojo](https://chutes.ai/docs/models/vonkaiser-audiodojo) |
 | Embeddings | `embed_texts` | `Qwen/Qwen3-Embedding-8B-TEE` ([docs](https://chutes.ai/docs/models/chutes-qwen-qwen3-embedding-8b-tee)) |
-| Image generation | `generate_media` | Live catalog, e.g. [vonkaiser-z-image-turbo](https://chutes.ai/docs/models/vonkaiser-z-image-turbo) |
+| Image generation | `generate_media` | Live catalog: `/imagine <prompt>` auto-selects an available model, `/imagine <model> <prompt>` picks one |
 | Image editing | `generate_media` | Live catalog, e.g. [vonkaiser-qwen-image-edit-2511](https://chutes.ai/docs/models/vonkaiser-qwen-image-edit-2511) |
-| Video generation | `generate_media` | Live catalog, e.g. [vonkaiser-ltx-25-video](https://chutes.ai/docs/models/vonkaiser-ltx-25-video) |
+| Video generation | `generate_media` | Live catalog: `/imagine-video <prompt>` auto-selects, `/imagine-video <model> <prompt>` picks one |
 | Music generation | `generate_media` | Live catalog, e.g. [vonkaiser-ace-step-15-music-generator](https://chutes.ai/docs/models/vonkaiser-ace-step-15-music-generator) |
 
-When a default chute is unavailable the tool reports the failure honestly,
-names the chute it tried, and — where an equivalent exists — falls back
-automatically and says which replacement answered.
+Media models are resolved against the live Chutes catalog on every call: a
+requested model that disappeared falls back to an available generation model
+of the same kind and the tool says which replacement answered. Model ids are
+resolved to Chutes chute ids internally, because the account API's `describe`
+lookup only accepts those.
 
 Generated files are saved inside the workspace and returned as typed media
 artifacts rather than path text. Supported terminals keep inline image/video

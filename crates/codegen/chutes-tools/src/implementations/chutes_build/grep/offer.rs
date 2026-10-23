@@ -33,6 +33,8 @@ use crate::implementations::chutes_build::grep::{OutputMode, grep_timeout};
 use crate::types::output::GrepSearchOutput;
 
 /// Where a grep call's output comes from.
+// WHY-ALLOW: same tokio-handle size note as `ResolvedSource`; transient per call.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum GrepSource {
     Rg(RgRunner),
     /// An offered job, with the `rg` command to spawn if it fails.
@@ -44,6 +46,10 @@ pub(crate) enum GrepSource {
 }
 
 /// A [`GrepSource`] after the offered job, if any, ran.
+// WHY-ALLOW: `RgRunner` carries tokio child handles, whose size grew with the tokio
+// 1.54 security update; this enum is built and matched once per grep call and never
+// stored, so boxing the runner would only move the allocation, not save anything.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ResolvedSource {
     /// `rg` answers, and is cut off with a timeout card at `deadline`.
     Rg {

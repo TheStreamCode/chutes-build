@@ -1,8 +1,6 @@
 use agent_client_protocol as acp;
 use chutes_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
-use chutes_tools::implementations::chutes_build::{
-    IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
-};
+use chutes_tools::implementations::chutes_build::{IMAGINE_COMMAND_NAME, imagine_instruction};
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
@@ -14,23 +12,25 @@ impl SlashCommand for ImagineCommand {
     slash_meta! {
         name: IMAGINE_COMMAND_NAME,
         description: "Generate an image from a text description",
-        usage: "/imagine <description>",
+        usage: "/imagine [model] <description>",
         takes_args: true,
-        args_required: true,
-        arg_placeholder: "description of the image to generate",
+        arg_placeholder: "description, optionally after a model id",
         required_tools: REQUIRED_TOOLS,
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
-        let prompt = args.trim();
-        if prompt.is_empty() {
-            return CommandResult::Message(imagine_usage_message().to_string());
-        }
-
+        let args = args.trim();
+        // Bare `/imagine` asks the model to list the live image models; any
+        // argument generates, either with a model the user named or with one
+        // the tool picks from the catalog.
         CommandResult::InjectSkill {
-            display_text: format!("/imagine {prompt}"),
+            display_text: if args.is_empty() {
+                "/imagine".to_owned()
+            } else {
+                format!("/imagine {args}")
+            },
             prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
-                imagine_instruction(prompt),
+                imagine_instruction(args),
             ))],
             display_as_skill: false,
             scheduled_task_preview: None,
@@ -48,19 +48,52 @@ mod tests {
     }
 
     #[test]
-    fn empty_prompt_returns_usage() {
+    fn empty_prompt_lists_live_models() {
         let models = crate::acp::model_state::ModelState::default();
         let mut ctx = super::super::tests::make_ctx(&models);
-        let result = ImagineCommand.run(&mut ctx, "");
-        assert!(matches!(result, CommandResult::Message(_)));
+        match ImagineCommand.run(&mut ctx, "") {
+            CommandResult::InjectSkill {
+                display_text,
+                prompt_blocks,
+                ..
+            } => {
+                assert_eq!(display_text, "/imagine");
+                let text = format!("{:?}", prompt_blocks[0]);
+                assert!(text.contains("list_media_models"));
+            }
+            other => panic!("bare /imagine must list models, got {other:?}"),
+        }
     }
 
     #[test]
-    fn whitespace_prompt_returns_usage() {
+    fn whitespace_prompt_lists_live_models() {
         let models = crate::acp::model_state::ModelState::default();
         let mut ctx = super::super::tests::make_ctx(&models);
-        let result = ImagineCommand.run(&mut ctx, "   ");
-        assert!(matches!(result, CommandResult::Message(_)));
+        match ImagineCommand.run(&mut ctx, "   ") {
+            CommandResult::InjectSkill { prompt_blocks, .. } => {
+                assert!(format!("{:?}", prompt_blocks[0]).contains("list_media_models"));
+            }
+            other => panic!("whitespace must behave like empty, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn named_model_and_prompt_reach_the_instruction() {
+        let models = crate::acp::model_state::ModelState::default();
+        let mut ctx = super::super::tests::make_ctx(&models);
+        match ImagineCommand.run(&mut ctx, "z-image-turbo a spaceship in space") {
+            CommandResult::InjectSkill {
+                display_text,
+                prompt_blocks,
+                ..
+            } => {
+                assert_eq!(display_text, "/imagine z-image-turbo a spaceship in space");
+                let text = format!("{:?}", prompt_blocks[0]);
+                assert!(text.contains("z-image-turbo"));
+                assert!(text.contains("a spaceship in space"));
+            }
+            other => panic!("expected inject_skill, got {other:?}"),
+        }
     }
 
     #[test]

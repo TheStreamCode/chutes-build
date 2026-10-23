@@ -241,20 +241,34 @@ Open the extensions modal on the Skills tab to view installed skills.
 
 ## Media Generation
 
-### `/imagine <description>`
+### `/imagine [model] <description>`
 
-Generate an image from a text description. It routes through the Chutes-native `generate_media` tool (default model `vonkaiser-z-image-turbo`, with automatic fallback to an equivalent model when unavailable).
+Generate an image through the Chutes-native `generate_media` tool. The model
+list changes over time, so no model is hardcoded: `/imagine <description>`
+picks a currently available image model from the live Chutes catalog, and
+`/imagine <model> <description>` uses the model you name (`--model <model>`
+is the unambiguous form). Bare `/imagine` lists the image models that are
+available right now.
 
 ```
 /imagine a golden sunset over a calm ocean with silhouetted palm trees
+/imagine z-image-turbo a golden sunset over a calm ocean
+/imagine
 ```
 
-### `/imagine-video <description>`
+### `/imagine-video [model] <description>`
 
-Generate a video from a text (or image) description. It plans shots, generates source images, and animates them with `generate_media` (default model `vonkaiser-ltx-25-video`, with automatic fallback to an equivalent model when unavailable).
+Generate a video from a text (or image) description. It plans shots,
+generates source images, and animates them with `generate_media`. As with
+`/imagine`, the model is chosen from the live catalog unless you name one:
+`/imagine-video <description>` auto-selects, `/imagine-video <model>
+<description>` (or `--model <model>`) uses your choice, and bare
+`/imagine-video` lists the video models available right now.
 
 ```
 /imagine-video a cat playing piano in a jazz club
+/imagine-video ltx-25-video a cat playing piano in a jazz club
+/imagine-video
 ```
 
 ---
