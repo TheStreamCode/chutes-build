@@ -4502,6 +4502,30 @@ fn render_footer_button_focused_with_prompt_shows_send_and_send_open_no_stop() {
     );
 }
 
+/// The submit chord the dashboard footer must advertise in multiline mode,
+/// and the one it must not.
+///
+/// Bare Enter inserts a newline there, so submit moves to Shift+Enter — or to
+/// Alt+Enter where the terminal drops the Shift modifier (SSH, old
+/// multiplexers, or an unclassified env brand, which is what the macOS CI
+/// runner looks like). `render_footer` picks between them from
+/// `terminal_context().prefer_alt_enter_newline()`, and the bar spells ALT as
+/// `Opt` on macOS, so hardcoding one spelling failed only on that runner.
+///
+/// Derive the labels from the same predicate and display path the footer uses
+/// instead of listing spellings. There is no `ActionRegistry` pin to reach for
+/// here: `Ctrl+M` is the registry action (it toggles multiline), while the
+/// submit chord itself is chosen in `render_footer` from the process terminal
+/// context, which has no test seam.
+fn multiline_submit_chords() -> (String, String) {
+    let (wanted, unwanted) = if crate::terminal::terminal_context().prefer_alt_enter_newline() {
+        (crate::key!(Enter, ALT), crate::key!(Enter, SHIFT))
+    } else {
+        (crate::key!(Enter, SHIFT), crate::key!(Enter, ALT))
+    };
+    (wanted.display(), unwanted.display())
+}
+
 /// Multiline compose swaps the submit chord in the footer, matching how Enter and Shift/Alt+Enter swap in the agent view's keybar.
 #[test]
 fn render_footer_multiline_mode_send_uses_shift_or_alt_enter() {
@@ -4522,9 +4546,16 @@ fn render_footer_multiline_mode_send_uses_shift_or_alt_enter() {
         None,
     );
     let content = buf_to_text(&buf);
+    let (submit, other) = multiline_submit_chords();
     assert!(
-        content.contains("Shift+Enter:send") || content.contains("Alt+Enter:send"),
-        "multiline footer must advertise Shift/Alt+Enter as send, got: {content:?}",
+        content.contains(&format!("{submit}:send")),
+        "multiline footer must advertise {submit}:send (the terminal-context submit chord), \
+         got: {content:?}",
+    );
+    assert!(
+        !content.contains(&format!("{other}:send")),
+        "multiline footer must advertise exactly one submit chord, not {other}:send too, \
+         got: {content:?}",
     );
     // Bare Enter:send would appear as "  Enter:send" (footer pad); the modified chords contain the substring "Enter:send" so avoid that
     assert!(
@@ -4558,9 +4589,16 @@ fn render_footer_multiline_empty_create_uses_shift_or_alt_enter() {
         None,
     );
     let content = buf_to_text(&buf);
+    let (submit, other) = multiline_submit_chords();
     assert!(
-        content.contains("Shift+Enter:create") || content.contains("Alt+Enter:create"),
-        "multiline empty footer must advertise Shift/Alt+Enter as create, got: {content:?}",
+        content.contains(&format!("{submit}:create")),
+        "multiline empty footer must advertise {submit}:create (the terminal-context submit \
+         chord), got: {content:?}",
+    );
+    assert!(
+        !content.contains(&format!("{other}:create")),
+        "multiline empty footer must advertise exactly one create chord, not {other}:create too, \
+         got: {content:?}",
     );
     assert!(
         !content.contains("  Enter:create"),
