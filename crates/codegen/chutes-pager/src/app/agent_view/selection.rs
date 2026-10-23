@@ -2789,7 +2789,16 @@ mod tests {
             range_id: 0,
             geometry: held.clone(),
         });
-        agent.selection_created_at = Some(Instant::now() - Duration::from_secs(3600));
+        // The old `Instant::now() - Duration::from_secs(3600)` panics on a process whose system
+        // uptime is under an hour ("overflow when subtracting duration from instant"), which the
+        // Windows CI runner hit. One tick past the highlight duration is all the test needs.
+        agent.selection_created_at = Some(
+            Instant::now()
+                .checked_sub(Duration::from_millis(
+                    DEFAULT_SELECTION_HIGHLIGHT_DURATION_MS + 1,
+                ))
+                .expect("process uptime exceeds the selection-highlight duration"),
+        );
 
         let geometry = btw_table_geometry(&agent);
         let header = geometry.row_lines(0);
