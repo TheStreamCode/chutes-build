@@ -372,8 +372,13 @@ impl chutes_tool_runtime::Tool for GenerateMediaTool {
                 "cost": media.cost,
                 "created_at": chrono::Utc::now().to_rfc3339(),
             });
-            if let Some(note) = fallback_note.as_deref() {
-                provenance["fallback_note"] = serde_json::Value::String(note.to_owned());
+            if let (Some(note), Some(object)) =
+                (fallback_note.as_deref(), provenance.as_object_mut())
+            {
+                object.insert(
+                    "fallback_note".to_owned(),
+                    serde_json::Value::String(note.to_owned()),
+                );
             }
             Some(
                 serde_json::to_vec_pretty(&provenance)
@@ -1299,7 +1304,10 @@ fn verify_media_content(kind: MediaKind, bytes: &[u8]) -> Result<Option<infer::T
 /// that doesn't require decoding the whole (possibly huge) response.
 fn looks_like_text_error_document(bytes: &[u8]) -> bool {
     let prefix_len = bytes.len().min(512);
-    let Ok(text) = std::str::from_utf8(&bytes[..prefix_len]) else {
+    let Some(prefix) = bytes.get(..prefix_len) else {
+        return false;
+    };
+    let Ok(text) = std::str::from_utf8(prefix) else {
         return false;
     };
     let trimmed = text.trim_start();

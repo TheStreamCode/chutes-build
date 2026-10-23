@@ -852,7 +852,9 @@ fn recent_events(log: &[serde_json::Value], limit: Option<usize>) -> serde_json:
     let start = log.len().saturating_sub(limit);
     serde_json::json!({
         "total": log.len(),
-        "entries": &log[start..],
+        // `start` is at most `log.len()`, so this cannot be out of range; the
+        // fallback keeps the slice free of a panicking index.
+        "entries": log.get(start..).unwrap_or_default(),
     })
 }
 

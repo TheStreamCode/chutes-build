@@ -96,6 +96,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the rebrand pass had renamed them and un-suppressed six reviewed synthetic
   fixtures. The web-search fixture whose fake prefix the rebrand rewrote is now
   allowlisted by exact literal in `.gitleaks.toml`.
+- The pre-existing red CI checks that blocked the release are green again:
+  three panicking slice/index sites in `chutes-tools` were made fallible,
+  `doctor`'s fix-request guard accepts Windows 8.3 short names (`RUNNER~1`)
+  while still rejecting `~`-prefixed components (plus a canonically-pathed
+  fixture), the dashboard footer tests derive the multiline submit chord from
+  the terminal context (macOS paints `Opt+Enter`), and `rustls-webpki` /
+  `webpki-roots` were updated for RUSTSEC-2026-0381 and RUSTSEC-2026-0382.
 
 ## [1.7.2] - 2026-10-19
 
