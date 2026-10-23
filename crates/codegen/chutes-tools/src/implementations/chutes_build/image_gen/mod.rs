@@ -45,7 +45,7 @@ pub use chutes_tools_api::slash_commands::{
     IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
 };
 
-/// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user calls `image_gen` or
+/// Prose returned to the model (as a normal, successful tool result) when a free / no-plan user calls `image_gen` or
 /// `image_edit`. The model relays it to the user. The deliberate `/imagine` slash command shows the richer
 /// paid-plan upsell modal instead; this covers the natural-language path.
 pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation isn't available on the current plan. Let the user know they can unlock image and video generation by upgrading their Chutes plan: https://chutes.ai/?_s=usage. Do not retry this tool.";
@@ -66,7 +66,7 @@ pub struct ImageGenClient {
     /// Imagine API emits an `auth_401_attribution` event with
     /// `consumer == "ImageGen"` for unified auth-failure telemetry.
     attribution_callback: Option<SharedAttributionCallback>,
-    /// When `true`, the user is on a tier the Imagine server zero-limits (free / X Basic).
+    /// When `true`, the user is on a tier the Imagine server zero-limits (free / no-plan).
     /// `image_gen` / `image_edit` short-circuit before any HTTP call and return the plan
     /// upsell prose instead. See [`ImageGenClient::is_tier_restricted`].
     tier_restricted: bool,
@@ -166,7 +166,7 @@ impl ImageGenClient {
         self
     }
 
-    /// Whether the current user's tier (free / X Basic) is zero-limited on
+    /// Whether the current user's tier (free / no-plan) is zero-limited on
     /// Imagine server-side. `image_gen` / `image_edit` use this to short-circuit
     /// with the plan upsell instead of issuing a doomed request.
     pub(crate) fn is_tier_restricted(&self) -> bool {
@@ -316,7 +316,7 @@ pub enum ImageGenConfig {
         /// the remote `image_gen_model_override` config flag. `image_edit` is unaffected.
         model_override: Option<String>,
         edit_model_override: Option<String>,
-        /// `true` when the user is on a tier the Imagine server zero-limits (free / X Basic). The tools stay advertised to the
+        /// `true` when the user is on a tier the Imagine server zero-limits (free / no-plan). The tools stay advertised to the
         /// model, but `image_gen` / `image_edit` short-circuit at call time with the plan upsell prose instead of a doomed
         /// request. Set by the host from the subscription tier; always `false` for team / API-key / workspace callers.
         tier_restricted: bool,
@@ -463,7 +463,7 @@ impl chutes_tool_runtime::Tool for ImageGenTool {
             res.require::<ImageGenClient>()?.clone()
         };
 
-        // Free / X Basic users are zero-limited on Imagine server-side; return
+        // Free / no-plan users are zero-limited on Imagine server-side; return
         // the upsell prose instead of a doomed request (the tool stays
         // advertised so the model can surface the nudge in-conversation).
         if client.is_tier_restricted() {
@@ -696,7 +696,7 @@ mod tests {
 
     #[tokio::test]
     async fn tier_restricted_short_circuits_with_upsell() {
-        // A free / X Basic user's image_gen call returns the plan upsell prose as a normal
+        // A free / no-plan user's image_gen call returns the plan upsell prose as a normal
         // result (no HTTP, no error card) so the model can relay it. Only the client is inserted —
         // the short-circuit returns before any other resource (e.g. SessionFolder) is required.
         let cfg = ImageGenConfig::Enabled {

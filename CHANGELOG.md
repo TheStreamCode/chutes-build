@@ -103,6 +103,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fixture), the dashboard footer tests derive the multiline submit chord from
   the terminal context (macOS paints `Opt+Enter`), and `rustls-webpki` /
   `webpki-roots` were updated for RUSTSEC-2026-0381 and RUSTSEC-2026-0382.
+- The last X Corp tier vocabulary left plan gating: `is_restricted_tier_name`
+  classifies only an absent/empty plan or an explicit "Free" (Chutes has no free
+  subscription tier), the surrounding comments speak the Chutes plans, the spec
+  names the shipped `PlanUpsell*`/`CreditLimitUpsell*` events instead of the
+  removed `SuperGrokUpsell*`, and the vendored mermaid manifest comments name the
+  crate they actually target. The spec also records the checked-in generated
+  bot-relay clients as upstream artifacts pending external regeneration.
 
 ## [1.7.2] - 2026-10-19
 

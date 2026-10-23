@@ -147,7 +147,7 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
         app.sync_billing_surface_to_agents();
         app.subscription_tier = Some(v);
         app.apply_tier_restrictions();
-        // Leaving API Key for free/X Basic without a voice field drops the forced-on voice
+        // Leaving API Key for free/no-plan without a voice field drops the forced-on voice
         // Paid tiers keep voice; remote settings may send voice_mode_enabled later.
         if was_api_key
             && !is_key

@@ -9,7 +9,7 @@ pub enum PlanUpsell {
     RateLimitError,
     /// Free-usage-exhausted paywall modal (free-tier 429 with the `subscription:free-usage-exhausted` well-known error code).
     FreeUsagePaywall,
-    /// Upsell modal shown when a tier-restricted slash command (`/usage`, `/imagine`, …) is invoked on the free / X Basic tiers.
+    /// Upsell modal shown when a tier-restricted slash command (`/usage`, `/imagine`, …) is invoked on the free / no-plan tiers.
     RestrictedCommand,
 }
 

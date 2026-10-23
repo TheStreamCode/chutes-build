@@ -2208,7 +2208,7 @@ fn assert_tier_restricted_commands_present(app: &AppView) {
     }
 }
 #[test]
-fn apply_auth_meta_restricts_usage_for_free_tier() {
+fn apply_auth_meta_restricts_usage_for_absent_tier() {
     let mut app = test_app();
     advertise_media_tools(&mut app);
     app.apply_auth_meta(&chutes_login::AuthMeta::default());
@@ -2220,11 +2220,11 @@ fn apply_auth_meta_restricts_usage_for_free_tier() {
     assert!(app.usage_visible);
 }
 #[test]
-fn apply_auth_meta_restricts_usage_for_x_basic_tier() {
+fn apply_auth_meta_restricts_usage_for_free_tier() {
     let mut app = test_app();
     advertise_media_tools(&mut app);
     let meta = chutes_login::AuthMeta {
-        subscription_tier: Some("X Basic".into()),
+        subscription_tier: Some("Free".into()),
         ..Default::default()
     };
     app.apply_auth_meta(&meta);
@@ -2267,8 +2267,6 @@ fn is_restricted_tier_classification() {
     assert!(is_restricted_tier(None));
     assert!(is_restricted_tier(Some("")));
     assert!(is_restricted_tier(Some("Free")));
-    assert!(is_restricted_tier(Some("X Basic")));
-    assert!(is_restricted_tier(Some("x_basic")));
     assert!(!is_restricted_tier(Some("Pro")));
     assert!(!is_restricted_tier(Some("Team")));
     assert!(!is_restricted_tier(Some("Enterprise")));

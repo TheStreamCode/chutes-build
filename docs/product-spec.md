@@ -48,12 +48,21 @@ identity, and MUST stay invisible in normal use. Three classes are allowed:
   key, both read-compat fallbacks behind the canonical endpoint names).
 - **Inbound values, matched and never emitted**: server-sent upsell copy
   (`grok.com/supergrok`, `chutes.ai/supergrok`), the legacy `grok.com` ACP
-  auth-method id, the `grok-agent-sdk` telemetry allowlist entry, and the
-  `modelFamily` values the catalog returns.
+  auth-method id, the `grok-agent-sdk` telemetry allowlist entry, the
+  `modelFamily` values the catalog returns, and the legacy signed
+  managed-configuration document types and nonce header
+  (`grok.managed_policy.v1`, `grok.managed_identity.v1`,
+  `x-grok-managed-config-nonce`) accepted from older deployments.
 
 Anything outside those classes is a release-blocking bug. The external OTLP
 taxonomy is `chutes_build.*` under scope `ai.chutes.build`; the internal-only
-`SuperGrokUpsell*` events have no external mapping and MUST NOT gain one.
+plan and credit-limit upsell events (`PlanUpsell*`, `CreditLimitUpsell*`) have no
+external mapping and MUST NOT gain one.
+
+The checked-in Kotlin and Swift bot-relay clients under
+`crates/common/chutes-tool-protocol/generated/` are upstream-generated artifacts,
+not shipped in the binary and not part of the product's identity; regenerate them
+with the external protocol codegen before using them against the Chutes wire.
 
 1.6. Legal, upsell, and key links MUST be live Chutes pages:
 `https://chutes.ai/terms`, `https://chutes.ai/privacy`,
@@ -224,9 +233,9 @@ Any behavior change MUST, in one commit:
 - Legacy Imagine clients (`image_gen`/`image_edit`/`video_gen`): default
   off per §4.6; they 404 on Chutes. Re-enable only against an
   xAI-compatible host.
-- `SuperGrokUpsell*` telemetry events: internal firehose only, no
-  external OTLP mapping; the internal pipeline itself is inert unless a
-  build-time URL is baked (§1.5).
+- Plan- and credit-limit-upsell telemetry (`PlanUpsell*`,
+  `CreditLimitUpsell*`): internal firehose only, no external OTLP mapping;
+  the internal pipeline itself is inert unless a build-time URL is baked (§1.5).
 - `FIRST_PARTY_FAMILY == "xai"` subagent-model classification: inert on
   Chutes (fails open to Selectable); do not retune without knowing the
   server's `modelFamily` values.

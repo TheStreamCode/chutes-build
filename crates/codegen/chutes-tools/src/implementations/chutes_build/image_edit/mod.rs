@@ -334,7 +334,7 @@ impl chutes_tool_runtime::Tool for ImageEditTool {
             res.require::<ImageGenClient>()?.clone()
         };
 
-        // Free / X Basic users are zero-limited on Imagine server-side; return
+        // Free / no-plan users are zero-limited on Imagine server-side; return
         // the upsell prose instead of a doomed request (shares `image_gen`'s
         // message and short-circuits before resolving any attachments).
         if client.is_tier_restricted() {

@@ -5081,7 +5081,7 @@ fn media_gen_ref_skips_uploaded_only_video() {
         "uploaded_url-only media must not claim a local open path"
     );
 }
-/// A tier-restricted (free / X Basic) imagine call short-circuits with the paid-plan upsell as `ToolOutput::Text` on a `Completed` status.
+/// A tier-restricted (free / no-plan) imagine call short-circuits with the paid-plan upsell as `ToolOutput::Text` on a `Completed` status.
 /// The media renderer has no file to open, so it must surface the upsell text in the card body (not a bare title).
 /// It must NOT mark the card as an error.
 #[test]

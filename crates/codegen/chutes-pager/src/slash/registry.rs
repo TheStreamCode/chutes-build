@@ -122,7 +122,7 @@ pub struct CommandRegistry {
     /// They stay resolvable for dispatch via [`Self::get_for_dispatch`]: a fully-typed invocation still executes.
     /// Registry-level analogue of the per-command `SlashCommand::visible()` gate (the `/gboom` mechanism) for state the command object cannot see.
     menu_hidden: HashSet<String>,
-    /// Commands denied for this user, e.g. `/usage` tier-restricted on the free / X Basic tiers. Kept separate from
+    /// Commands denied for this user, e.g. `/usage` tier-restricted on the free / no-plan tiers. Kept separate from
     /// `hidden` so the per-command `set_*_visible` setters can never un-hide a restricted command. The deny list always
     /// wins over every other visibility gate.
     restricted: HashSet<String>,

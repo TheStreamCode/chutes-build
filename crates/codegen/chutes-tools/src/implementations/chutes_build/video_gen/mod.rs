@@ -158,7 +158,7 @@ pub struct VideoGenClient {
     /// `"VideoGen.poll"` (poll request) for unified auth-failure telemetry.
     attribution_callback: Option<SharedAttributionCallback>,
     /// When `true`, the user is on a tier the Imagine server zero-limits
-    /// (free / X Basic). The video tools short-circuit before any HTTP call
+    /// (free / no-plan). The video tools short-circuit before any HTTP call
     /// and return the plan upsell prose. See [`VideoGenClient::is_tier_restricted`].
     tier_restricted: bool,
     /// See [`VideoGenConfig::Enabled`]'s `zdr_restricted`.
@@ -285,7 +285,7 @@ impl VideoGenClient {
         self
     }
 
-    /// Whether the current user's tier (free / X Basic) is zero-limited on
+    /// Whether the current user's tier (free / no-plan) is zero-limited on
     /// Imagine server-side. The video tools use this to short-circuit with the
     /// plan upsell instead of issuing a doomed request.
     pub(crate) fn is_tier_restricted(&self) -> bool {
@@ -748,7 +748,7 @@ pub enum VideoGenConfig {
         base_url: String,
         extra_headers: indexmap::IndexMap<String, String>,
         zdr_video_output_s3: Option<Box<ZdrVideoOutputS3Config>>,
-        /// `true` when the user is on a tier the Imagine server zero-limits (free / X Basic). The video tools stay advertised
+        /// `true` when the user is on a tier the Imagine server zero-limits (free / no-plan). The video tools stay advertised
         /// but short-circuit at call time with the plan upsell prose. Set by the host from the subscription tier; always
         /// `false` for team / API-key / workspace.
         tier_restricted: bool,
@@ -765,7 +765,7 @@ impl VideoGenConfig {
     }
 }
 
-/// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user
+/// Prose returned to the model (as a normal, successful tool result) when a free / no-plan user
 /// calls a video tool. The model relays it to the user; the deliberate `/imagine-video` slash
 /// command shows the plan upsell modal instead.
 pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Video generation isn't available on the current plan. Let the user know they can unlock image and video generation by upgrading their Chutes plan: https://chutes.ai/?_s=usage. Do not retry this tool.";
@@ -1237,7 +1237,7 @@ impl chutes_tool_runtime::Tool for ImageToVideoTool {
 
         let (client, session_folder) = acquire_video_client(&ctx).await?;
 
-        // Free / X Basic users are zero-limited on Imagine server-side; return
+        // Free / no-plan users are zero-limited on Imagine server-side; return
         // the upsell prose instead of a doomed request.
         if client.is_tier_restricted() {
             return Ok(ToolOutput::Text(TIER_RESTRICTED_UPSELL.into()));
@@ -1405,7 +1405,7 @@ impl chutes_tool_runtime::Tool for ReferenceToVideoTool {
 
         let (client, session_folder) = acquire_video_client(&ctx).await?;
 
-        // Free / X Basic users are zero-limited on Imagine server-side; return
+        // Free / no-plan users are zero-limited on Imagine server-side; return
         // the upsell prose instead of a doomed request.
         if client.is_tier_restricted() {
             return Ok(ToolOutput::Text(TIER_RESTRICTED_UPSELL.into()));

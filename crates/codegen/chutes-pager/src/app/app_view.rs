@@ -447,13 +447,13 @@ fn parse_esc_ttl(raw: Option<String>) -> Duration {
         .map(|ms| Duration::from_millis(ms.min(ESC_DOUBLE_PRESS_TEST_MS)))
         .unwrap_or(PendingAction::ESC_DOUBLE_PRESS_TTL)
 }
-/// Slash commands unavailable on the free and X Basic subscription tiers.
+/// Slash commands unavailable on the free and no-plan subscription tiers.
 /// To restrict another command for these tiers, add its canonical name (no leading `/`) here.
 /// Matching covers aliases automatically via [`crate::slash::registry::CommandRegistry::set_restricted_commands`].
 pub(crate) const TIER_RESTRICTED_COMMANDS: &[&str] =
     &["usage", "imagine", "imagine-video", "voice"];
 /// Whether a subscription-tier display name is a tier with restricted commands: the free tier and the basic tier.
-/// Free covers no subscription (`None`) or an explicit "Free"; the basic tier covers display name "X Basic" with JWT claim fallback "x_basic".
+/// Restricted means no paid plan: absence (`None`), an empty display name, or an explicit "Free".
 /// The pager's *cosmetic* slash-command gate treats an absent tier (`None`) as restricted (it recovers live on the next settings update).
 fn is_restricted_tier(tier: Option<&str>) -> bool {
     match tier {
@@ -602,7 +602,7 @@ pub struct AppView {
     pub has_external_auth_provider: bool,
     /// `AuthMeta::backend_billed`: the agent's backend handles billing itself.
     pub backend_billed: bool,
-    /// Slash commands denied for the current subscription tier ([`TIER_RESTRICTED_COMMANDS`] on the free / X Basic tier, empty otherwise).
+    /// Slash commands denied for the current subscription tier ([`TIER_RESTRICTED_COMMANDS`] on the free / no-plan tier, empty otherwise).
     /// Recomputed by [`Self::apply_tier_restrictions`] and fanned out to every slash registry (welcome prompt, agents, dashboard).
     /// Deny wins over all other visibility gates.
     pub tier_restricted_commands: Vec<String>,
@@ -1697,7 +1697,7 @@ impl AppView {
     pub(super) fn consumer_account(&self) -> bool {
         !self.backend_billed && !self.is_api_key_auth && !self.has_external_auth_provider
     }
-    /// Whether voice mode is withheld for the current subscription tier (free / X Basic personal accounts).
+    /// Whether voice mode is withheld for the current subscription tier (free / no-plan personal accounts).
     /// Derived from the computed [`Self::tier_restricted_commands`] deny list so it stays in lockstep with the slash-command gate.
     /// Used to gate the Ctrl+Space / F8 voice keybinding, which bypasses the slash registry entirely (see [`crate::app::dispatch::voice`]).
     pub fn is_voice_tier_restricted(&self) -> bool {
