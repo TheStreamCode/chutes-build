@@ -15,6 +15,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/feedback <text>` keeps the report.** GitHub issue forms ignore a URL
   body prefill, so the command copies the message to the clipboard before
   opening the issue-form chooser.
+- **Web search and `deep-research` work again.** The Chutes router serves Chat
+  Completions, not the OpenAI Responses API, so the old client hit
+  `POST /v1/responses` and a 404 HTML page. With a Chutes base URL the
+  `web_search` tool now queries the direct public search provider
+  (DuckDuckGo's HTML endpoint), sends no Chutes credential to it, returns
+  titles/URLs/snippets with the configured domain filters applied, and leaves
+  model-hosted search intact for custom Responses-capable endpoints.
 - **A build without a feedback backend no longer advertises `send_feedback`.**
   The tool is gated on the telemetry capability the Chutes distribution withholds,
   so its schema no longer costs ~1.2k prompt tokens on every turn while every call

@@ -157,6 +157,14 @@ stay local unless a documented feature explicitly needs a provider request.
 
 ## 4. Ecosystem capabilities
 
+4.0. Web search MUST work without a Responses-API endpoint: the Chutes
+router serves Chat Completions only, so the `web_search` tool and the
+`deep-research` workflow MUST use the direct public search provider
+(`https://html.duckduckgo.com/html/`) in that configuration. The search
+request MUST NOT carry a Chutes credential and MUST NOT contact the model.
+A custom endpoint that implements the Responses API MAY keep the
+model-hosted search path.
+
 4.1. Chutes-native capabilities (chat, image, video, music, TTS, STT,
 OCR/PDF extraction, embeddings, image edit, usage) MUST be agent-callable
 tools, so the agent uses them without user plumbing.

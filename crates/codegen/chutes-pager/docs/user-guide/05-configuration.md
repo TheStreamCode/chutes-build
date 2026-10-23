@@ -244,6 +244,12 @@ allowed_domains = ["docs.chutes.ai", "arxiv.org"]
 
 `allow_local` is off by default (SSRF fail-closed). Turn it on (or set `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: TOML > env > default off.
 
+With the default Chutes endpoint, `web_search` and `deep-research` query a
+direct public provider (DuckDuckGo's HTML endpoint) because the router serves
+no Responses API; the search request never carries the Chutes credential and
+does not contact the model. A custom `[models] web_search` endpoint that
+implements the Responses API keeps the model-hosted search path.
+
 `[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**; if you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model — the model's own per-call `allowed_domains` is ignored whenever you have set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you have configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes don't apply mid-session.
 
 `[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.toml`**. Precedence: requirements → env (`CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself; `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval); changes apply to newly started sessions.

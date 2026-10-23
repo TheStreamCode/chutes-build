@@ -3,6 +3,15 @@ use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::types::SharedApiKeyProvider;
 use async_openai::types::responses as rs;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use scraper::{Html, Selector};
+
+/// Chutes serves chat completions, not the OpenAI-compatible Responses API the
+/// upstream web-search client spoke (`POST /responses` 404s). In this build a
+/// search is answered by a direct DuckDuckGo HTML request instead: no Chutes
+/// credential is involved, and the model is not contacted at all.
+const DIRECT_SEARCH_ENDPOINT: &str = "https://html.duckduckgo.com/html/";
+const DIRECT_SEARCH_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+     Chrome/124.0 Safari/537.36";
 /// A minimal, purpose-built HTTP client for calling the Responses API
 /// with web search capability.
 #[derive(Clone)]
@@ -19,6 +28,9 @@ pub struct WebSearchClient {
     /// `allowed_domains`. Mutually exclusive with `default_allowed_domains`.
     default_excluded_domains: Option<Vec<String>>,
     api_key_provider: Option<SharedApiKeyProvider>,
+    /// True when `base_url` is a Chutes host: that endpoint serves no Responses
+    /// API, so searches go through the direct provider instead.
+    direct: bool,
     /// Optional 401-attribution hook. Callers can wire this so a 401
     /// from the Responses API emits an `auth_401_attribution` event
     /// with `consumer == "WebSearch"`.
@@ -47,37 +59,48 @@ impl WebSearchClient {
                 "Cannot create WebSearchClient from disabled config".to_string(),
             ));
         };
+        let direct = is_chutes_host(base_url);
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|e| {
-                chutes_tool_runtime::ToolError::execution(
-                    chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
-                    format!("Invalid API key for header: {e}"),
-                )
-            })?,
-        );
-        for (key, value) in extra_headers {
-            let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
-                chutes_tool_runtime::ToolError::execution(
-                    chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
-                    format!("Invalid header name '{key}': {e}"),
-                )
-            })?;
-            let header_value = HeaderValue::from_str(value).map_err(|e| {
-                chutes_tool_runtime::ToolError::execution(
-                    chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
-                    format!("Invalid header value for '{key}': {e}"),
-                )
-            })?;
-            headers.insert(header_name, header_value);
+        // The direct provider request must never carry a Chutes credential, and
+        // the Responses path is the only one that needs these headers.
+        if !direct {
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|e| {
+                    chutes_tool_runtime::ToolError::execution(
+                        chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
+                        format!("Invalid API key for header: {e}"),
+                    )
+                })?,
+            );
+            for (key, value) in extra_headers {
+                let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
+                    chutes_tool_runtime::ToolError::execution(
+                        chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
+                        format!("Invalid header name '{key}': {e}"),
+                    )
+                })?;
+                let header_value = HeaderValue::from_str(value).map_err(|e| {
+                    chutes_tool_runtime::ToolError::execution(
+                        chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
+                        format!("Invalid header value for '{key}': {e}"),
+                    )
+                })?;
+                headers.insert(header_name, header_value);
+            }
         }
         let _ = alpha_test_key;
+        // Direct mode carries only the content-type header, so its fingerprint
+        // can never collide with a credential-bearing Responses client.
         let key = crate::util::shared_http::cache_key("web_search", &headers);
-        let http = crate::util::shared_http::cached_client(key, || {
-            chutes_extra_ca::build_reqwest_client(|builder| {
-                builder.default_headers(headers.clone())
+        let http = crate::util::shared_http::cached_client(key, move || {
+            chutes_extra_ca::build_reqwest_client(move |builder| {
+                if direct {
+                    builder.user_agent(DIRECT_SEARCH_USER_AGENT)
+                } else {
+                    builder.default_headers(headers.clone())
+                }
             })
         })
         .map_err(|e| {
@@ -93,6 +116,7 @@ impl WebSearchClient {
             default_allowed_domains: allowed_domains.clone(),
             default_excluded_domains: excluded_domains.clone(),
             api_key_provider,
+            direct,
             attribution_callback: None,
         })
     }
@@ -193,6 +217,16 @@ impl WebSearchClient {
         query: &str,
         allowed_domains: Option<Vec<String>>,
     ) -> Result<(String, Vec<String>), chutes_tool_runtime::ToolError> {
+        if self.direct {
+            let (content, pairs) = self.search_direct(query, allowed_domains).await?;
+            let mut citations: Vec<String> = Vec::new();
+            for (_, url) in pairs {
+                if !citations.contains(&url) {
+                    citations.push(url);
+                }
+            }
+            return Ok((content, citations));
+        }
         let (allowed, excluded) = self.resolve_filters(allowed_domains);
         let request = self.build_request_json(query, allowed, excluded)?;
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
@@ -258,6 +292,9 @@ impl WebSearchClient {
         query: &str,
         allowed_domains: Option<Vec<String>>,
     ) -> Result<(String, Vec<(String, String)>), chutes_tool_runtime::ToolError> {
+        if self.direct {
+            return self.search_direct(query, allowed_domains).await;
+        }
         let (allowed, excluded) = self.resolve_filters(allowed_domains);
         let request = self.build_request_json(query, allowed, excluded)?;
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
@@ -315,7 +352,173 @@ impl WebSearchClient {
         let pairs = extract_citation_pairs(&response_obj);
         Ok((content, pairs))
     }
+    /// Search through the direct provider (DuckDuckGo's HTML endpoint). Returns
+    /// `(content, (title, url) pairs)` so both callers share one request.
+    async fn search_direct(
+        &self,
+        query: &str,
+        allowed_domains: Option<Vec<String>>,
+    ) -> Result<(String, Vec<(String, String)>), chutes_tool_runtime::ToolError> {
+        let (allowed, excluded) = self.resolve_filters(allowed_domains);
+        let mut query = query.to_owned();
+        if let Some(domains) = allowed.filter(|domains| !domains.is_empty()) {
+            let sites = domains
+                .iter()
+                .map(|domain| format!("site:{domain}"))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            query = format!("{query} ({sites})");
+        }
+        let response = self
+            .http
+            .post(DIRECT_SEARCH_ENDPOINT)
+            .header(ACCEPT, "text/html,application/xhtml+xml")
+            .form(&[("q", query.as_str())])
+            .send()
+            .await
+            .map_err(|error| {
+                chutes_tool_runtime::ToolError::execution(
+                    chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
+                    format!("web search request failed: {error}"),
+                )
+            })?;
+        let status = response.status();
+        let html = response.text().await.map_err(|error| {
+            chutes_tool_runtime::ToolError::execution(
+                chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
+                format!("web search response could not be read: {error}"),
+            )
+        })?;
+        if !status.is_success() {
+            let body: String = html.chars().take(300).collect();
+            return Err(chutes_tool_runtime::ToolError::execution(
+                chutes_tool_protocol::ToolId::new("web_search").expect("valid"),
+                format!("web search provider returned {status}: {body}"),
+            ));
+        }
+        let results = parse_direct_results(&html, excluded.as_deref());
+        if results.is_empty() {
+            return Ok(("No search results found.".to_owned(), Vec::new()));
+        }
+        let mut content = String::new();
+        let mut pairs = Vec::new();
+        for (index, result) in results.iter().take(8).enumerate() {
+            content.push_str(&format!(
+                "{}. {}\n{}\n{}\n\n",
+                index + 1,
+                result.title,
+                result.url,
+                result.snippet
+            ));
+            pairs.push((result.title.clone(), result.url.clone()));
+        }
+        Ok((content.trim_end().to_owned(), pairs))
+    }
 }
+
+const ACCEPT: &str = "accept";
+
+/// One parsed search hit.
+struct DirectSearchResult {
+    title: String,
+    url: String,
+    snippet: String,
+}
+
+/// Parse the provider's HTML result list. Kept pure so the markup contract is
+/// testable without a network call.
+fn parse_direct_results(html: &str, excluded: Option<&[String]>) -> Vec<DirectSearchResult> {
+    let document = Html::parse_document(html);
+    let Ok(result_selector) = Selector::parse("div.result, div.web-result") else {
+        return Vec::new();
+    };
+    let Ok(link_selector) = Selector::parse("a.result__a") else {
+        return Vec::new();
+    };
+    let Ok(snippet_selector) = Selector::parse(".result__snippet") else {
+        return Vec::new();
+    };
+    let mut results = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for node in document.select(&result_selector) {
+        let Some(link) = node.select(&link_selector).next() else {
+            continue;
+        };
+        let title = link.text().collect::<String>().trim().to_owned();
+        let Some(url) = link.value().attr("href").and_then(direct_result_url) else {
+            continue;
+        };
+        if is_excluded_url(&url, excluded)
+            || url.contains("duckduckgo.com")
+            || !seen.insert(url.clone())
+        {
+            continue;
+        }
+        let snippet = node
+            .select(&snippet_selector)
+            .next()
+            .map(|node| node.text().collect::<String>())
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        results.push(DirectSearchResult {
+            title: if title.is_empty() { url.clone() } else { title },
+            url,
+            snippet,
+        });
+    }
+    results
+}
+
+fn direct_result_url(href: &str) -> Option<String> {
+    let href = href.trim();
+    if href.starts_with("https://") || href.starts_with("http://") {
+        return Some(href.to_owned());
+    }
+    if href.is_empty() || href.starts_with('#') {
+        return None;
+    }
+    let joined = if href.starts_with("//") {
+        format!("https:{href}")
+    } else {
+        format!("https://html.duckduckgo.com{href}")
+    };
+    let parsed = url::Url::parse(&joined).ok()?;
+    if let Some((_, target)) = parsed.query_pairs().find(|(key, _)| key == "uddg") {
+        return Some(target.into_owned());
+    }
+    if parsed
+        .host_str()
+        .is_some_and(|host| host.ends_with("duckduckgo.com"))
+    {
+        return None;
+    }
+    Some(parsed.to_string())
+}
+
+fn is_excluded_url(url: &str, excluded: Option<&[String]>) -> bool {
+    let Some(excluded) = excluded else {
+        return false;
+    };
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    excluded
+        .iter()
+        .any(|domain| host == domain || host.ends_with(&format!(".{domain}")))
+}
+
+fn is_chutes_host(base_url: &str) -> bool {
+    url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
+        .is_some_and(|host| host == "chutes.ai" || host.ends_with(".chutes.ai"))
+}
+
 /// Extract citation URLs from the Response output items.
 /// The async-openai crate doesn't provide a helper for this, and the `url` field
 /// in `UrlCitationBody` is private, so we serialize to JSON to extract it.
@@ -893,5 +1096,78 @@ mod tests {
         }));
         let citations = extract_citations(&response);
         assert!(citations.is_empty());
+    }
+
+    #[test]
+    fn chutes_hosts_use_the_direct_provider() {
+        assert!(is_chutes_host("https://llm.chutes.ai/v1"));
+        assert!(is_chutes_host("https://api.chutes.ai"));
+        assert!(!is_chutes_host("https://api.example.com/v1"));
+        assert!(!is_chutes_host(""));
+    }
+
+    #[test]
+    fn direct_results_parse_title_url_and_snippet() {
+        let html = r#"
+            <html><body>
+            <div class="result results_links web-result">
+              <h2 class="result__title"><a rel="nofollow" class="result__a" href="https://docs.rs/tokio">Tokio docs</a></h2>
+              <a class="result__snippet">An asynchronous runtime for Rust.</a>
+            </div>
+            <div class="result results_links web-result">
+              <h2 class="result__title">
+                <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fblocked.example%2Fpage">Blocked</a>
+              </h2>
+              <a class="result__snippet">Never shown.</a>
+            </div>
+            </body></html>
+        "#;
+        let results = parse_direct_results(html, Some(&["blocked.example".to_owned()]));
+        assert_eq!(results.len(), 1, "excluded domains are dropped");
+        assert_eq!(results[0].title, "Tokio docs");
+        assert_eq!(results[0].url, "https://docs.rs/tokio");
+        assert_eq!(results[0].snippet, "An asynchronous runtime for Rust.");
+    }
+
+    #[test]
+    fn direct_result_url_decodes_duckduckgo_redirects() {
+        assert_eq!(
+            direct_result_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%3Fb%3D1"),
+            Some("https://example.com/a?b=1".to_owned())
+        );
+        assert_eq!(
+            direct_result_url("https://example.com/page"),
+            Some("https://example.com/page".to_owned())
+        );
+        assert_eq!(direct_result_url("/relative"), None);
+    }
+
+    /// Live network smoke test for the direct provider, ignored for ordinary runs.
+    #[tokio::test]
+    #[ignore = "network: live DuckDuckGo smoke test; run with --ignored"]
+    async fn direct_search_returns_live_results() {
+        let config = WebSearchConfig::Enabled {
+            api_key: "unused".to_string(),
+            base_url: "https://llm.chutes.ai/v1".to_string(),
+            model: "model-router".to_string(),
+            extra_headers: IndexMap::new(),
+            alpha_test_key: None,
+            allowed_domains: None,
+            excluded_domains: None,
+        };
+        let client = WebSearchClient::new(&config, None).expect("client builds");
+        assert!(
+            client.direct,
+            "a Chutes base URL must select the direct provider"
+        );
+        let (content, citations) = client
+            .search("tokio async runtime", None)
+            .await
+            .expect("live search succeeds");
+        assert!(
+            !citations.is_empty(),
+            "expected live results, got: {content}"
+        );
+        assert!(content.contains("tokio") || content.contains("Tokio"));
     }
 }

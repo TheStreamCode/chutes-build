@@ -68,7 +68,7 @@ explicit hosted feature:
 | `api.chutes.ai` | Chutes account and media APIs | account requests, media parameters and user-selected media assets; Chutes API credential |
 | `chutes.ai/docs`, `chutes.ai/news` | mandatory primary-source verification for Chutes topics | requested official page URLs; no Chutes API credential |
 | `context7.com` | current library documentation | library names and documentation queries; known secrets are rejected and an optional Context7 key is sent only to the official HTTPS service |
-| DuckDuckGo or Brave Search | web search | search query; Brave receives only its dedicated key |
+| `html.duckduckgo.com` | web search | search query; no Chutes API credential |
 | User-selected web pages | web fetch/browser automation | normal HTTP/browser traffic required by the requested action |
 | User-configured MCP servers/plugins | external tools | data required by the selected tool and its own configuration |
 

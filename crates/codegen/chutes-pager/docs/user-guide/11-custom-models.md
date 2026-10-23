@@ -383,6 +383,11 @@ When you set `models_base_url`, Chutes Build authenticates the model-list reques
 
 ## Web Search Model
 
+The default Chutes endpoint serves Chat Completions only, so with the default
+configuration `web_search` (and `deep-research`) call the direct public search
+provider instead of a model; this section then has no effect. It applies when
+you point web search at a custom endpoint that implements the Responses API.
+
 The `web_search` tool uses a separate model. Configure it with:
 
 ```toml
