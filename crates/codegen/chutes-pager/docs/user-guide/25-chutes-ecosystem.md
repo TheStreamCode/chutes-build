@@ -14,6 +14,40 @@ Fallback is limited to transient/model-unavailable failures before streaming
 begins. Authentication and invalid-request errors do not silently change models.
 Every fallback attempt recalculates reasoning controls for its own model family.
 
+## Platform API
+
+Two hosts cover the platform. `https://llm.chutes.ai/v1` is the
+OpenAI-compatible inference plane: chat completions, streaming SSE, tool calls,
+JSON/structured outputs, vision, and the public model catalog at
+`GET /v1/models` (no auth). `https://api.chutes.ai` is everything else: account,
+quota and usage, API keys, model aliases, media/chute APIs, and TEE evidence.
+Both accept the same `Authorization: Bearer cpk_...` key; `X-API-Key` is ignored
+on the inference plane. Treat `GET /v1/models` as the source of truth for model
+ids and capabilities: it publishes `context_length`, `max_output_length`,
+`supported_features`, `supported_sampling_parameters`, `input_modalities`,
+`pricing` (with the cheaper `input_cache_read` rate), and
+`confidential_compute` (filter on the boolean, not the `-TEE` name).
+
+The `model` field accepts more than one concrete id. A comma-separated list is a
+sequential failover pool; `:latency` picks the member with the fastest first
+token and `:throughput` the highest tokens per second. Saved dashboard pools
+expose `default`, `default:latency`, and `default:throughput` aliases, and the
+aliases API manages them. A single concrete id bypasses routing. `Auto (Chutes
+Router)` uses this native routing and falls back to a live `:latency` pool, so
+it is the default choice for interactive work.
+
+Live TTFT and throughput are not in `/v1/models`; they are published by
+`GET https://api.chutes.ai/invocations/stats/llm`. Chat billing is per million
+tokens, with cached prompt reads billed at the cheaper cache rate. Media chutes
+run on their own hosts and bill per compute-second; their gateway has a public
+timeout of about ten minutes, and a 504 response is an HTML error page rather
+than media, so always check the status and content type.
+
+TEE models run inside hardware enclaves and expose attestation evidence through
+`GET https://api.chutes.ai/chutes/{chute_id}/evidence`; do not claim verified
+attestation unless the quote was actually checked. Official docs and news remain
+the authority for current behavior, quotas, and pricing.
+
 ## Reasoning modes
 
 Use `/model` to choose a route. When the selected model has configurable

@@ -2276,7 +2276,9 @@ fn main() {
         release: env!("VERSION_WITH_COMMIT"),
         disabled: chutes_shell::agent::config::is_error_reporting_disabled_sync(),
     });
-    chutes_pager::docs::extract_user_guide_docs(&chutes_shell::util::chutes_home::chutes_home());
+    let chutes_home = chutes_shell::util::chutes_home::chutes_home();
+    chutes_pager::docs::extract_user_guide_docs(&chutes_home);
+    chutes_pager::bundled_skills::extract_bundled_skills(&chutes_home);
     chutes_crash_handler::install_terminal_restore_only();
     if chutes_shell::util::config::load_crash_handler_enabled_sync() {
         let crash_dir = crash_dir_for(&args);

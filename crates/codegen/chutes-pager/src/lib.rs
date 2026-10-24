@@ -15,6 +15,7 @@ pub mod actions;
 pub mod agent_runtime;
 pub mod app;
 pub mod best_effort_stderr;
+pub mod bundled_skills;
 pub mod client_identity;
 pub mod completions_cmd;
 mod config_toml_edit;

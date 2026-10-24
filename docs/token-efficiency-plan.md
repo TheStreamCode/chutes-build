@@ -70,6 +70,18 @@ every turn; the default catalog drops 12,784 / 30 tools -> 11,573 / 29 tools
 (-1,211 tokens, -9.5%) and the budget ceiling follows to 11,700. Distributions
 that do serve feedback keep the tool unchanged.
 
+Workstream 1 platform-knowledge increment (2026-10-24): the fixed prompt gains
+a compact `<chutes_platform>` map (both host planes, the single API key, the
+catalog as the source of truth, saved and inline `:latency`/`:throughput`
+routing) plus one work_policy rule telling the model to batch independent tool
+calls, which the dispatch layer already runs in parallel. The standard primary
+render re-baselines from 2,161 to 2,286 estimated tokens (ceiling 2,300), and
+the same block points at the new bundled `chutes-platform` skill, taking it to
+2,311 (ceiling 2,325). The full platform/API detail ships as that skill, loaded
+on demand and shadowable by user or repository skills, so this is the complete
+fixed-cost increase, paid back on any turn that avoids a tool round trip or an
+unnecessary web search.
+
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped
 schema loading, content-hash context reuse, structured conversation deltas, and

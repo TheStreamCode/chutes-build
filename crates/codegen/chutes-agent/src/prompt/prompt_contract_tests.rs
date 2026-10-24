@@ -190,13 +190,20 @@ fn standard_primary_fixed_prompt_stays_under_the_token_ceiling() {
     // re-derive and RAISE it only when a change genuinely needs the room
     // (e.g. the Phase 2 ecosystem-tool sections), and shrink it when
     // workstream 1/2 remove fixed tokens.
+    // Platform-knowledge re-baseline (2026-10-24): the sources paragraph became a
+    // compact `<chutes_platform>` map (both host planes, one API key, catalog as
+    // truth, saved/inline :latency/:throughput routing, guide pointer) and
+    // work_policy gained the independent-tool-call batching rule, taking the
+    // standard render to 2,286; pointing the same block at the bundled
+    // `chutes-platform` skill takes it to 2,311, with the full platform detail
+    // loaded on demand from that skill. The ceiling follows to 2,325.
     let renderer = default_renderer();
     let base = render_non_interactive(&renderer, false);
     let tokens = chutes_token_estimation::estimate_tokens(&base);
     assert!(
-        tokens <= 2175,
+        tokens <= 2325,
         "fixed system prompt grew to {tokens} estimated tokens \
-         (ceiling 2175, baseline 2161) — deduplicate or justify the growth"
+         (ceiling 2325, baseline 2311) — deduplicate or justify the growth"
     );
 }
 
@@ -210,14 +217,26 @@ fn render_non_interactive(renderer: &TemplateRenderer, is_non_interactive: bool)
 }
 
 #[test]
-fn base_prompt_renders_the_chutes_sources_block() {
+fn base_prompt_renders_the_chutes_platform_block() {
     // Pin the fork additions against rebase loss: the 1.0.45 rebase
-    // silently dropped `official_chutes_sources` (upstream has no such
+    // silently dropped the Chutes sources section (upstream has no such
     // section) and reverted the identity line to "released by xAI".
     let rendered = render_non_interactive(&default_renderer(), false);
     assert!(
-        rendered.contains("<official_chutes_sources>"),
-        "base prompt lost the Chutes sources block"
+        rendered.contains("<chutes_platform>"),
+        "base prompt lost the Chutes platform block"
+    );
+    assert!(
+        rendered.contains("llm.chutes.ai/v1") && rendered.contains("api.chutes.ai"),
+        "base prompt lost the platform host map"
+    );
+    assert!(
+        rendered.contains("default:latency") && rendered.contains("default:throughput"),
+        "base prompt lost the routing strategies"
+    );
+    assert!(
+        rendered.contains("chutes-platform"),
+        "base prompt lost the bundled skill pointer"
     );
     assert!(
         rendered.contains("optimized for the Chutes ecosystem"),

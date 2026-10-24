@@ -6,6 +6,20 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [2.0.3] - 2026-10-24
 
+### Added
+
+- **Chutes platform knowledge is available on demand.** The fixed prompt now
+  carries a compact map of the two Chutes hosts, API-key auth, the live model
+  catalog as the source of truth, and saved/inline `:latency`/`:throughput`
+  routing, and points at a new bundled `chutes-platform` skill for the full
+  platform reference: chat/vision/tool features, media chutes, OCR/PDF,
+  embeddings, quotas and billing, TEE attestation, error handling, and the
+  CLI mapping. The skill ships in the binary, is listed by the `skill` tool,
+  and can be shadowed by a user or repository skill.
+- **Independent tool calls batch in one response.** The prompt now tells the
+  model to issue non-dependent calls together, which the parallel dispatch
+  path already runs concurrently, cutting a round trip on multi-tool work.
+
 ### Removed
 
 - **The dormant legacy Imagine media tools are gone.** `image_gen`,
