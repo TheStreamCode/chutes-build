@@ -12,8 +12,11 @@ use scraper::{Html, Selector};
 const DIRECT_SEARCH_ENDPOINT: &str = "https://html.duckduckgo.com/html/";
 const DIRECT_SEARCH_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
      Chrome/124.0 Safari/537.36";
-/// A minimal, purpose-built HTTP client for calling the Responses API
-/// with web search capability.
+/// A minimal, purpose-built HTTP client for web search.
+///
+/// Model-hosted search speaks the Responses API; a Chutes base URL instead
+/// queries the direct public provider, since the Chutes router serves no
+/// Responses endpoint.
 #[derive(Clone)]
 pub struct WebSearchClient {
     http: reqwest::Client,

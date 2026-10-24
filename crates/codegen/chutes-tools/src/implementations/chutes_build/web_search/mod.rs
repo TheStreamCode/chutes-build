@@ -1,8 +1,10 @@
 //! `web_search` tool — new architecture (`Tool` trait).
 //!
-//! Calls the Responses API with web search capability. Reads the
-//! pre-constructed `WebSearchClient` from Resources (inserted by
-//! `with_backend()` when the config is `Enabled`).
+//! Reads the pre-constructed `WebSearchClient` from Resources (inserted by
+//! `with_backend()` when the config is `Enabled`). With a Chutes base URL the
+//! client queries the direct public search provider, because the router serves
+//! no Responses API; a custom Responses-capable endpoint keeps the model-hosted
+//! search path. See `client.rs` for the split.
 
 use crate::implementations::web_search::client::WebSearchClient;
 use crate::types::output::WebSearchOutput;
