@@ -61,14 +61,8 @@ pub fn loop_schedule_instruction(args: &str) -> String {
     )
 }
 
-/// Canonical name of the image generation tool; gates `/imagine`.
-pub const IMAGE_GEN_TOOL_NAME: &str = "image_gen";
-
 /// Advertised name of the /imagine command.
 pub const IMAGINE_COMMAND_NAME: &str = "imagine";
-
-/// Canonical name of the image-to-video tool; gates `/imagine-video`.
-pub const IMAGE_TO_VIDEO_TOOL_NAME: &str = "image_to_video";
 
 /// Advertised name of the /imagine-video command.
 pub const IMAGINE_VIDEO_COMMAND_NAME: &str = "imagine-video";

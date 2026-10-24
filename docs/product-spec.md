@@ -190,14 +190,12 @@ speed, never `0`.
 4.6. Media generation MUST route through the Chutes-native `generate_media`
 tool (live-catalog resolution with equivalent-model fallback per §4.3).
 `/imagine` and `/imagine-video` MUST gate on `generate_media` and steer
-the model to it — never to the legacy `image_gen`/`image_edit`/
-`image_to_video`/`reference_to_video` tools, which target the xAI
-Imagine API that Chutes does not serve. The legacy tools MUST default
-off (re-enable only via `CHUTES_BUILD_IMAGE_GEN=1`,
-`CHUTES_BUILD_IMAGE_EDIT=1`, `CHUTES_BUILD_VIDEO_GEN=1`, `[features]`,
-or remote flags, for xAI-compatible hosts). Media batch caps are per
-tool name: legacy image tools share the image budget, and
-`generate_media` takes the image budget (8) by name for all its calls.
+the model to it. The legacy `image_gen`/`image_edit`/`image_to_video`/
+`reference_to_video` tools targeted the xAI Imagine API that Chutes does
+not serve and were deleted in 2.0.3 (see §7); no legacy media tool,
+client, or upstream Imagine model id may be reintroduced. Media batch
+caps are per tool name, and `generate_media` takes the image budget (8)
+by name for all its calls.
 
 ## 5. Docs and naming truth
 
@@ -246,9 +244,6 @@ Any behavior change MUST, in one commit:
   that cannot recognise a tier resolves false (fail-closed upsell gating).
 - `auth_provider_command`, `CHUTES_BUILD_OAUTH2_CLIENT_ID`, enterprise OIDC
   config keys: parsed but never honored while §2.2 holds.
-- Legacy Imagine clients (`image_gen`/`image_edit`/`video_gen`): default
-  off per §4.6; they 404 on Chutes. Re-enable only against an
-  xAI-compatible host.
 - Plan- and credit-limit-upsell telemetry (`PlanUpsell*`,
   `CreditLimitUpsell*`): internal firehose only, no external OTLP mapping;
   the internal pipeline itself is inert unless a build-time URL is baked (§1.5).
@@ -282,6 +277,18 @@ These went away with the rebrand; do not revive them without a spec change:
 - The xAI tier vocabulary (`Basic`, `Premium`, `Heavy`, `Lite`, `SuperGrok`)
   and the `X-XAI-Token-Auth` wire header.
 
+### Removed in 2.0.3
+
+- Legacy Imagine tools, clients and model ids. `image_gen`, `image_edit`,
+  `image_to_video`, and `reference_to_video` targeted the xAI Imagine API,
+  which Chutes does not serve; the tools, their `ImageGenClient`/`VideoGenClient`
+  HTTP clients, their config plumbing, and the upstream Imagine model ids and
+  the legacy video storage prefix are deleted. `/imagine` and `/imagine-video`
+  remain and use the Chutes-native `generate_media` tool (§4.6). Their config
+  keys (`features.image_gen`, `features.video_gen`, the model overrides,
+  `zdr_video_output_s3`, and the `imagine_tools_disabled` remote setting) are
+  still parsed so existing configuration files load, but they are inert.
+
 ## 8. Spec → test map
 
 | Clause | Pin test |
@@ -302,7 +309,7 @@ These went away with the rebrand; do not revive them without a spec change:
 | 1.5 OTLP taxonomy | `chutes-telemetry` `external::tests::*` + `external_otlp*` e2e (scope `ai.chutes.build`, `chutes_build.*` events) |
 | 1.6 legal links | `chutes-pager` privacy-banner/banner-URL tests pin `chutes.ai/terms` + `chutes.ai/privacy`; billing upsell pins `_s=usage` |
 | 2.3/2.4 key entry | `chutes-pager` `api_key_entry::*`, `api_key_accepted::*`, `api_key_rejected::*`, `welcome_entry::*`, `welcome_pending::*`, `dispatch::tests::auth::*`, `api_key_entry_auth_complete_finishes_and_resets_entry_flags`, `api_key_entry_auth_failed_rolls_back_to_pending`; `chutes-shell` `set_api_key_is_memory_only_without_account_login` |
-| 4.6 media routing | `chutes-tools-api` `imagine_instruction_carries_prompt_verbatim`, `imagine_video_instruction_carries_prompt_and_workflow`; `chutes-pager` `requires_generate_media_tool` ×2; `chutes-shell` `resolve_image_gen_gates`, `resolve_video_gen_gates`, `imagine_tools_disabled_gates_image_edit`; `chutes-tools` `generate_media_takes_image_budget_by_name` |
+| 4.6 media routing | `chutes-tools-api` `imagine_instruction_carries_prompt_verbatim`, `imagine_video_instruction_carries_prompt_and_workflow`; `chutes-pager` `requires_generate_media_tool` ×2; `chutes-agent` `legacy_imagine_tools_are_not_advertised`; `chutes-tools` `generate_media_takes_image_budget_by_name` |
 | 1.3 CLI name | `chutes-pager` `cli_command_name_is_chutes_build`, `cli_help_output_header`, `zsh_completions_drop_prompt_slot_and_dispatch_on_line_1` |
 | 1.5 agent profiles | `chutes-pager` `effects::tests::{all_flags_meta, plan_only_meta, plan_with_ask_user_uses_plan_profile, plan_with_subagents_meta, runtime_default_flags_produce_plan_meta, ask_user_alone_meta, agent_profile_names_are_valid_builtins, agent_profile_definitions_have_correct_names}`; `chutes-agent` `test_builtin_agent_name_strum_round_trip` |
 | 1.5 local-data compat | `chutes-login` `legacy_grok_com_config_table_parses_into_login_config`, `login_config_table_wins_over_legacy_alias`, `requirements_force_login_team_reads_legacy_table_tiers`, `expand_auth_alias_folds_auth_over_legacy_table`; `chutes-shell` `legacy_grok_com_config_table_is_read_as_login_config_alias`; `chutes-workspace` permission client-type alias tests; `chutes-fast-worktree` `refs/grok/*` read test |

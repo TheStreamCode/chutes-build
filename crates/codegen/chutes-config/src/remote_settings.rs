@@ -641,20 +641,20 @@ pub struct RemoteSettings {
     /// Remote fallback for `[features] subagent_model_inheritance`; absent or null means off.
     #[serde(default)]
     pub subagent_model_inheritance_enabled: Option<bool>,
-    /// Gates `image_gen` and `/imagine`. `None` falls through env, `[features]`, then the default (on).
+    /// Inert: the legacy `image_gen` tool was removed in 2.0.3. Kept so remote
+    /// settings payloads with the key still deserialize. `/imagine` uses `generate_media`.
     #[serde(default)]
     pub image_gen_enabled: Option<bool>,
-    /// Remote settings flag: optional Imagine model override for `image_gen`.
-    /// When present and non-empty, `image_gen` uses this model slug instead of the default.
-    /// The slugs are Chutes-catalog model ids (e.g. `grok-imagine-image`), not brand copy —
-    /// they are server contract values and must not be renamed.
-    /// Absent or empty uses the default model.
+    /// Inert: the legacy `image_gen` tool and its Imagine model ids were
+    /// removed in 2.0.3. Kept for payload compatibility only.
     #[serde(default)]
     pub image_gen_model_override: Option<String>,
-    /// Optional Imagine model override for `image_edit`. Absent or empty uses the default.
+    /// Inert: the legacy `image_edit` tool was removed in 2.0.3.
+    /// Kept for payload compatibility only.
     #[serde(default)]
     pub image_edit_model_override: Option<String>,
-    /// Gates the video tools and `/imagine-video`. `None` falls through env, `[features]`, then the default (on).
+    /// Inert: the legacy video tools were removed in 2.0.3.
+    /// Kept for payload compatibility only; `/imagine-video` uses `generate_media`.
     #[serde(default)]
     pub video_gen_enabled: Option<bool>,
     /// When `Some(true)`, enable the process-wide image normalize cache, which shares decode, integrity-check, and re-encode work across SessionActors.
@@ -895,10 +895,8 @@ pub struct RemoteSettings {
     pub compaction_verbatim_input: Option<bool>,
     #[serde(default)]
     pub compaction_tool_choice: Option<String>,
-    /// Remote settings denylist of optional imagine tools to disable (e.g. `["image_edit"]`).
-    /// When a tool is listed it is removed from the toolset and local env/config can't re-enable it.
-    /// Absent or not listed means each tool keeps its own default.
-    /// See `Config::resolve_image_edit`.
+    /// Inert: the legacy Imagine tools were removed in 2.0.3. Kept so remote
+    /// settings payloads with the key still deserialize.
     #[serde(default)]
     pub imagine_tools_disabled: Option<Vec<String>>,
     /// Remote settings gate for the `chutes-build workspace` CLI command (Computer Hub workspace exposure).

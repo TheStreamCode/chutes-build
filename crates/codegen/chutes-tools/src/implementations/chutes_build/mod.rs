@@ -17,14 +17,11 @@ pub mod deploy_app;
 pub mod enter_plan_mode;
 pub mod exit_plan_mode;
 pub mod grep;
-pub mod image_edit;
-pub mod image_gen;
 #[path = "init_or_update_app_stub.rs"]
 pub mod init_or_update_app;
 pub mod kill_task;
 pub mod list_dir;
 pub mod lsp;
-pub mod media_bearer;
 pub mod monitor;
 pub mod read_file;
 pub mod scheduler;
@@ -36,7 +33,6 @@ pub mod task;
 pub mod task_output;
 pub mod todo;
 pub mod update_goal;
-pub mod video_gen;
 pub mod web_fetch;
 pub mod web_search;
 pub mod workflow;
@@ -47,11 +43,6 @@ pub use deploy_app::DEPLOY_APP_TOOL_NAME;
 pub use enter_plan_mode::EnterPlanModeTool;
 pub use exit_plan_mode::ExitPlanModeTool;
 pub use grep::GrepTool;
-pub use image_edit::{IMAGE_EDIT_TOOL_NAME, ImageEditTool};
-pub use image_gen::{
-    IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, ImageGenTool, imagine_instruction,
-    imagine_usage_message,
-};
 pub use init_or_update_app::INIT_OR_UPDATE_APP_TOOL_NAME;
 pub use kill_task::{KillTaskTool, KillTerminalCommandTool};
 pub use list_dir::ListDirTool;
@@ -72,10 +63,12 @@ pub use task::{TaskTool, is_task_tool_id};
 pub use task_output::{GetTerminalCommandOutputTool, TaskOutputTool, WaitTasksTool};
 pub use todo::TodoWriteTool;
 pub use update_goal::{UPDATE_GOAL_TOOL_NAME, UpdateGoalTool};
-pub use video_gen::{
-    IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, ImageToVideoTool,
-    REFERENCE_TO_VIDEO_TOOL_NAME, ReferenceToVideoTool, imagine_video_instruction,
-    imagine_video_usage_message,
+// `/imagine` and `/imagine-video` stay: they expand into the Chutes-native
+// `generate_media` tool. The legacy Imagine tool implementations that used to
+// re-export these constants were removed in 2.0.3.
+pub use chutes_tools_api::slash_commands::{
+    IMAGINE_COMMAND_NAME, IMAGINE_VIDEO_COMMAND_NAME, imagine_instruction, imagine_usage_message,
+    imagine_video_instruction, imagine_video_usage_message,
 };
 pub use web_fetch::{WebFetchClient, WebFetchConfig, WebFetchParams, WebFetchTool};
 pub use web_search::WebSearchTool;

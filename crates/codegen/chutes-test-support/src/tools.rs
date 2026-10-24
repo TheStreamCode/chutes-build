@@ -37,10 +37,6 @@ pub enum Tool {
     ExitPlanMode,
     WebFetch,
     WebSearch,
-    ImageGen,
-    /// Makes a video from reference images or voices.
-    /// The daemon worker's toolset has no video tool.
-    ReferenceToVideo,
     Question,
     Todo,
     SearchTool,
@@ -87,8 +83,6 @@ impl fmt::Display for Tool {
             | Tool::ExitPlanMode
             | Tool::WebFetch
             | Tool::WebSearch
-            | Tool::ImageGen
-            | Tool::ReferenceToVideo
             | Tool::Question
             | Tool::Todo
             | Tool::SearchTool
@@ -174,8 +168,6 @@ const NAMED_TOOLS: &[Tool] = &[
     Tool::ExitPlanMode,
     Tool::WebFetch,
     Tool::WebSearch,
-    Tool::ImageGen,
-    Tool::ReferenceToVideo,
     Tool::Question,
     Tool::Todo,
     Tool::SearchTool,
@@ -225,8 +217,6 @@ impl Tool {
             Tool::ExitPlanMode => ChutesBuildRow::new("exit_plan_mode"),
             Tool::WebFetch => ChutesBuildRow::new("web_fetch"),
             Tool::WebSearch => ChutesBuildRow::new("web_search"),
-            Tool::ImageGen => ChutesBuildRow::new("image_gen"),
-            Tool::ReferenceToVideo => ChutesBuildRow::new("reference_to_video"),
             Tool::Question => ChutesBuildRow::new("ask_user_question").with_shape(describe_options),
             Tool::Todo => ChutesBuildRow::new("todo_write").with_shape(default_todos_to_pending),
             Tool::SearchTool => ChutesBuildRow::new("search_tool"),

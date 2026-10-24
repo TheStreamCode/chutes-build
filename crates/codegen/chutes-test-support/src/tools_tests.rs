@@ -27,7 +27,7 @@ fn pick_uses_chutes_build_name_else_none_when_unoffered() {
 }
 #[test]
 fn every_kind_with_a_chutes_build_name_resolves_under_it() {
-    let cases: [(Tool, &str); 29] = [
+    let cases: [(Tool, &str); 27] = [
         (Tool::Shell, "run_terminal_command"),
         (Tool::Read, "read_file"),
         (Tool::Edit, "search_replace"),
@@ -43,8 +43,6 @@ fn every_kind_with_a_chutes_build_name_resolves_under_it() {
         (Tool::ExitPlanMode, "exit_plan_mode"),
         (Tool::WebFetch, "web_fetch"),
         (Tool::WebSearch, "web_search"),
-        (Tool::ImageGen, "image_gen"),
-        (Tool::ReferenceToVideo, "reference_to_video"),
         (Tool::Question, "ask_user_question"),
         (Tool::Todo, "todo_write"),
         (Tool::SearchTool, "search_tool"),

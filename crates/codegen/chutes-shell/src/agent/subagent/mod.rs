@@ -249,8 +249,6 @@ pub(crate) struct SubagentSpawnContext {
     pub memory_mode: crate::config::MemoryMode,
     pub web_search_sampling_config: Option<chutes_sampler::SamplerConfig>,
     pub web_fetch_config: chutes_tools::implementations::chutes_build::web_fetch::WebFetchConfig,
-    pub image_gen_config: chutes_tools::implementations::chutes_build::image_gen::ImageGenConfig,
-    pub video_gen_config: chutes_tools::implementations::chutes_build::video_gen::VideoGenConfig,
     pub app_builder_deployer_config:
         chutes_tools::implementations::chutes_build::app_builder::AppBuilderDeployerConfig,
     pub write_file_enabled: bool,

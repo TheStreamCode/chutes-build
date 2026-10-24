@@ -134,10 +134,6 @@ pub const WRITING_TOOL_WIRE_NAMES: &[(&str, ToolKind)] = &[
     ("todowrite", ToolKind::Plan),
     ("workflow", ToolKind::Workflow),
     ("send_feedback", ToolKind::Feedback),
-    ("image_gen", ToolKind::ImageGen),
-    ("image_edit", ToolKind::ImageGen),
-    ("image_to_video", ToolKind::ImageToVideo),
-    ("reference_to_video", ToolKind::ReferenceToVideo),
     ("ask_user_question", ToolKind::AskUser),
 ];
 /// [`ToolKind`] of a wire name in [`WRITING_TOOL_WIRE_NAMES`]. Keyed by wire name because that is
@@ -264,10 +260,6 @@ mod tests {
         covered(crate::implementations::chutes_build::BashTool);
         covered(crate::implementations::chutes_build::TodoWriteTool);
         covered(crate::implementations::chutes_build::WorkflowTool);
-        covered(crate::implementations::chutes_build::ImageGenTool);
-        covered(crate::implementations::chutes_build::ImageEditTool);
-        covered(crate::implementations::chutes_build::ImageToVideoTool);
-        covered(crate::implementations::chutes_build::ReferenceToVideoTool);
         covered(crate::implementations::chutes_build::AskUserQuestionTool);
         covered(crate::implementations::opencode::OpenCodeWriteTool);
         covered(crate::implementations::opencode::OpenCodeEditTool);

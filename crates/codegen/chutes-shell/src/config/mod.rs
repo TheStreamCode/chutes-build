@@ -638,20 +638,18 @@ pub struct MediaGenToolsConfig {
 }
 /// Tool behavior configuration (`[tools]` in config.toml).
 /// Controls cross-cutting tool behavior such as `.gitignore` filtering.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored files.
     /// When `false` (default), each tool picks its own default.
     pub respect_gitignore: bool,
-    /// Restrict tools whose API requires server-side artifact storage (currently just the video tools).
-    /// Without a valid `[tools.zdr_video_output_s3]` bucket they stay advertised but return setup guidance at call time.
-    /// Intended for ZDR-bound teams via `~/.chutes-build/managed_config.toml`. Defaults to `false`.
+    /// Inert: retained so `[tools.disable_zdr_incompatible_tools]` keeps parsing.
+    /// The legacy video tools were removed in 2.0.3.
     pub disable_zdr_incompatible_tools: bool,
-    /// Optional S3 bucket config for ZDR video output. When present (and valid), video tools presign an upload URL and pass it to the API.
-    /// The generated video then lands in a team-owned bucket instead of being downloaded locally. Only effective when `disable_zdr_incompatible_tools` is `true`. Populated from `[tools.zdr_video_output_s3]` in config.
-    pub zdr_video_output_s3:
-        Option<chutes_tools::implementations::chutes_build::video_gen::ZdrVideoOutputS3Config>,
+    /// Inert: `[tools.zdr_video_output_s3]` is still accepted so existing configuration
+    /// files load, but no tool consumes it. The legacy video tools were removed in 2.0.3.
+    pub zdr_video_output_s3: Option<toml::Value>,
     pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
@@ -672,29 +670,7 @@ impl ToolsConfig {
                 .and_then(|t| t.get("disable_zdr_incompatible_tools"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            zdr_video_output_s3: tools
-                .and_then(|t| t.get("zdr_video_output_s3"))
-                .and_then(|s3_val| match s3_val
-                    .clone()
-                    .try_into::<
-                        chutes_tools::implementations::chutes_build::video_gen::ZdrVideoOutputS3Config,
-                    >()
-                {
-                    Ok(cfg) if cfg.is_valid() => Some(cfg),
-                    Ok(_) => {
-                        tracing::warn!(
-                                "tools.zdr_video_output_s3 is present but incomplete; ignoring ZDR video output config"
-                            );
-                        None
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                                error = %e,
-                                "tools.zdr_video_output_s3 failed to parse; ignoring ZDR video output config"
-                            );
-                        None
-                    }
-                }),
+            zdr_video_output_s3: tools.and_then(|t| t.get("zdr_video_output_s3")).cloned(),
             media_gen: MediaGenToolsConfig {
                 max_parallel_image_gen_calls: tools
                     .and_then(|t| t.get("media_gen"))

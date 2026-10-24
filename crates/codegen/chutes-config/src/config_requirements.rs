@@ -39,10 +39,12 @@ impl ToolFeature {
     pub fn tool_names(self) -> &'static [&'static str] {
         match self {
             ToolFeature::AskUserQuestion => &["ask_user_question"],
-            ToolFeature::ImageEdit => &["image_edit"],
-            ToolFeature::ImageGen => &["image_gen"],
+            // The legacy Imagine media tools were removed in 2.0.3. The feature
+            // keys are still parsed for configuration compatibility, but they no
+            // longer gate any tool; `/imagine` and `/imagine-video` use the
+            // Chutes-native `generate_media` tool.
+            ToolFeature::ImageEdit | ToolFeature::ImageGen | ToolFeature::VideoGen => &[],
             ToolFeature::LspTools => &["lsp"],
-            ToolFeature::VideoGen => &["image_to_video", "reference_to_video"],
             ToolFeature::WebFetch => &["web_fetch"],
             ToolFeature::WriteFile => &["write"],
         }

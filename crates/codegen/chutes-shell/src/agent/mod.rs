@@ -10,7 +10,6 @@ pub mod feedback_client;
 pub mod folder_trust;
 pub(crate) mod handlers;
 pub mod init;
-pub mod media_tool_config;
 pub mod model_providers;
 pub mod mvp_agent;
 pub(crate) mod otel_gate;

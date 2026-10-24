@@ -2309,10 +2309,12 @@ fn zdr_incompatible_tools_env_overrides_toml_false() {
         },
     );
 }
+/// `[tools.zdr_video_output_s3]` stays parseable but is inert: the legacy video
+/// tools that consumed it were removed in 2.0.3.
 #[test]
-fn zdr_video_output_s3_deserializes_from_tools_block() {
+fn zdr_video_output_s3_is_parsed_but_inert() {
     let config: toml::Value = toml::from_str(
-            r#"
+        r#"
             [tools]
             disable_zdr_incompatible_tools = true
 
@@ -2325,55 +2327,17 @@ fn zdr_video_output_s3_deserializes_from_tools_block() {
             access_key_id = "AKIA..."
             secret_access_key = "secret"
             "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
     let tc = ToolsConfig::resolve(&config);
-    let s3 = tc.zdr_video_output_s3.expect("zdr_video_output_s3 should deserialize");
-    assert_eq!(s3.bucket, "team-videos");
-    assert!(s3.is_valid());
-}
-#[test]
-fn incomplete_zdr_video_output_s3_is_ignored() {
-    without_chutes_respect_gitignore(|| {
-        let config: toml::Value = toml::from_str(
-                r#"
-                [tools]
-                disable_zdr_incompatible_tools = true
-
-                [tools.zdr_video_output_s3]
-                bucket = "team-videos"
-                "#,
-            )
-            .unwrap();
-        let tc = ToolsConfig::resolve(&config);
-        assert!(tc.zdr_video_output_s3.is_none());
-        assert!(
-                tc.disable_zdr_incompatible_tools,
-                "incomplete zdr_video_output_s3 must not drop disable_zdr_incompatible_tools"
-            );
-    });
-}
-#[test]
-fn malformed_zdr_video_output_s3_preserves_zdr_flag() {
-    without_chutes_respect_gitignore(|| {
-        let config: toml::Value = toml::from_str(
-                r#"
-                [tools]
-                disable_zdr_incompatible_tools = true
-                respect_gitignore = true
-
-                [tools.zdr_video_output_s3]
-                bucket = "team-videos"
-                endpoint = "https://s3.example.com"
-                region = "us-east-1"
-                "#,
-            )
-            .unwrap();
-        let tc = ToolsConfig::resolve(&config);
-        assert!(tc.zdr_video_output_s3.is_none());
-        assert!(tc.disable_zdr_incompatible_tools);
-        assert!(tc.respect_gitignore);
-    });
+    let s3 = tc
+        .zdr_video_output_s3
+        .expect("zdr_video_output_s3 must still parse");
+    assert_eq!(
+        s3.get("bucket").and_then(|v| v.as_str()),
+        Some("team-videos")
+    );
+    assert!(tc.disable_zdr_incompatible_tools);
 }
 #[test]
 fn media_gen_caps_resolve_env_over_toml_over_remote_over_default() {

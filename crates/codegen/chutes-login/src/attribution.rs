@@ -105,7 +105,7 @@ impl ShellAttribution {
         })
     }
 
-    /// Tool-side counterpart of [`Self::new`]: returns `Arc<dyn chutes_tools::Auth401AttributionCallback>` for the `with_attribution_callback(...)` builder on each tool HTTP client (`ImageGenClient`, `VideoGenClient`, `WebSearchClient`).
+    /// Tool-side counterpart of [`Self::new`]: returns `Arc<dyn chutes_tools::Auth401AttributionCallback>` for the `with_attribution_callback(...)` builder on each tool HTTP client (`WebSearchClient`).
     /// The two callbacks share the same underlying impl and emit the same `auth_401_attribution` event format.
     /// Only the trait signature differs (`SamplingConsumer` vs. `ToolConsumer`).
     pub fn new_tool_callback(
@@ -132,9 +132,8 @@ impl Auth401AttributionCallback for ShellAttribution {
     }
 }
 
-/// Tool-side hook: each tool client (image_gen, video_gen, web_search) in `chutes-tools` emits a 401 attribution event through this trait when its HTTP request returns UNAUTHORIZED.
-/// Same shape as the sampler-side impl above; routes to the same pair of sinks. `ToolConsumer::VideoGenStart` and `VideoGenPoll` collapse to the same [`ConsumerKind::VideoGen`] with different op strings.
-/// The gate query can then break down video-gen 401s by phase.
+/// Tool-side hook: each tool client (`web_search`) in `chutes-tools` emits a 401 attribution event through this trait when its HTTP request returns UNAUTHORIZED.
+/// Same shape as the sampler-side impl above; routes to the same pair of sinks.
 impl ToolAuth401AttributionCallback for ShellAttribution {
     fn record_401(&self, consumer: ToolConsumer, sent_bearer_suffix: Option<&str>) {
         let (kind, op) = match consumer {
@@ -169,11 +168,13 @@ pub enum ConsumerKind {
     /// Idle-resume model-metadata refresh in `session/acp_session.rs::maybe_refresh_model_metadata_on_resume`.
     /// No per-op discriminator; the consumer string is just `"IdleResumeModelRefresh"`.
     IdleResumeModelRefresh,
-    /// `chutes_tools::ToolConsumer::ImageGen`, the Imagine API (`POST /images/generations`).
+    /// `chutes_tools::ToolConsumer::ImageGen`, the legacy Imagine API.
+    /// Retained for historical telemetry: the emitting client was removed in 2.0.3.
     /// No per-op discriminator; consumer string is just `"ImageGen"`.
     ImageGen,
-    /// `chutes_tools::ToolConsumer::VideoGenStart` and `VideoGenPoll`, the Video Generation API.
-    /// The op string is `"start"` (`POST /videos/generations`) or `"poll"` (`GET /videos/{request_id}`).
+    /// `chutes_tools::ToolConsumer::VideoGenStart` and `VideoGenPoll`, the legacy video API.
+    /// Retained for historical telemetry: the emitting client was removed in 2.0.3.
+    /// The op string is `"start"` or `"poll"`.
     VideoGen,
     /// `chutes_tools::ToolConsumer::WebSearch`, web search via `POST /responses` with a `WebSearch` tool.
     /// No per-op discriminator; consumer string is just `"WebSearch"`.

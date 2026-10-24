@@ -500,14 +500,6 @@ mod tests {
     }
 
     #[test]
-    fn image_edit_kind_is_image_gen_for_cap() {
-        // Cap wiring depends on image_edit reporting ToolKind::ImageGen.
-        use crate::implementations::chutes_build::image_edit::ImageEditTool;
-        use crate::types::tool_metadata::ToolMetadata;
-        assert_eq!(ToolMetadata::kind(&ImageEditTool), ToolKind::ImageGen);
-    }
-
-    #[test]
     fn every_tool_kind_has_an_explicit_budget_arm() {
         // Pins VARIANT_COUNT so a new ToolKind fails this test until
         // max_calls_per_batch is updated (exhaustive match also fails compile).

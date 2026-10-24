@@ -210,9 +210,9 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.feedback` | `boolean` | `pin` | `user` | Capability-pinned off: the withheld Telemetry capability keeps the in-app feedback uploader disabled, so nothing uploads and `/feedback` opens the GitHub issue form. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_ENABLED`. |
 | `features.feedback_trace_card` | `boolean` | `pin` | `user` | Capability-pinned off: remote trace upload is compiled out, so no consent card is shown. Parsed for compatibility. Also `CHUTES_BUILD_FEEDBACK_TRACE_CARD`. |
 | `features.file_acceleration` | `boolean` | `pin` | `user` | Hand local sessions' file systems to a file accelerator when the build installs one. Default false. Also `CHUTES_BUILD_FILE_ACCELERATION`. |
-| `features.image_edit_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_edit. `/imagine` uses the native `generate_media` tool instead. |
-| `features.image_gen` | `boolean` | `pin` | `user` | Enable the legacy image_gen tool (legacy Imagine API; off by default — `/imagine` uses `generate_media`). Also `CHUTES_BUILD_IMAGE_GEN`. |
-| `features.image_gen_model_override` | `string` | `yes` | `user` | Legacy Imagine model id for image_gen. Empty defers to the remotely configured default. |
+| `features.image_edit_model_override` | `string` | `yes` | `user` | Inert: parsed for compatibility only. The legacy `image_edit` tool was removed in 2.0.3; `/imagine` uses the native `generate_media` tool. |
+| `features.image_gen` | `boolean` | `pin` | `user` | Inert: parsed for compatibility only. The legacy `image_gen` tool was removed in 2.0.3; `/imagine` uses `generate_media`. Also `CHUTES_BUILD_IMAGE_GEN`. |
+| `features.image_gen_model_override` | `string` | `yes` | `user` | Inert: parsed for compatibility only. The legacy `image_gen` tool and its upstream model ids were removed in 2.0.3. |
 | `features.lsp_tools` | `boolean` | `pin` | `user` | Enable or disable `lsp_tools`. Default false. Also `CHUTES_BUILD_LSP_TOOLS`. |
 | `features.managed_config` | `boolean` | `yes` | `user` | Fetch managed_config.toml and requirements.toml from the deployment. |
 | `features.mcp_auto_restart` | `boolean` | `yes` | `user` | Auto-restart stdio MCP servers after transport failure. Also CHUTES_BUILD_MCP_AUTO_RESTART. |
@@ -232,11 +232,11 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.title_refresh` | `boolean` | `pin` | `user` | Early-session auto-title refresh. Pin this in requirements to beat CHUTES_BUILD_TITLE_REFRESH. |
 | `features.turn_summary` | `boolean` | `pin` | `user` | Enable or disable `turn_summary`. Default true. Also `CHUTES_BUILD_TURN_SUMMARY`. |
 | `features.two_pass_compaction` | `boolean` | `pin` | `user` | Enable or disable `two_pass_compaction`. Default true. Also `CHUTES_BUILD_TWO_PASS_COMPACTION`. |
-| `features.video_gen` | `boolean` | `pin` | `user` | Enable the legacy video tools (legacy Imagine API; off by default — `/imagine-video` uses `generate_media`). Also `CHUTES_BUILD_VIDEO_GEN`. |
+| `features.video_gen` | `boolean` | `pin` | `user` | Inert: parsed for compatibility only. The legacy video tools were removed in 2.0.3; `/imagine-video` uses `generate_media`. Also `CHUTES_BUILD_VIDEO_GEN`. |
 | `features.voice_mode` | `boolean` | `pin` | `user` | Enable or disable `voice_mode`. Default true. Also `CHUTES_BUILD_VOICE_MODE`. |
 | `features.web_fetch` | `boolean` | `pin` | `user` | Enable or disable `web_fetch`. Default false. Also `CHUTES_BUILD_WEB_FETCH`. |
 | `features.write_file` | `boolean` | `pin` | `user` | Enable or disable `write_file`. Default true. Also `CHUTES_BUILD_WRITE_FILE`. |
-| `features.zdr_access_enabled` | `boolean` | `pin` | `user` | Advertise ZDR-incompatible tools when the team is on Zero Data Retention. Also `CHUTES_BUILD_ZDR_ACCESS_ENABLED`. |
+| `features.zdr_access_enabled` | `boolean` | `pin` | `user` | Inert: parsed for compatibility only. It used to advertise the legacy video tools under Zero Data Retention; those were removed in 2.0.3. Also `CHUTES_BUILD_ZDR_ACCESS_ENABLED`. |
 
 ### `feedback`
 
@@ -589,11 +589,11 @@ withheld and the external OTEL stream is deadened (see
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `tools.disable_zdr_incompatible_tools` | `boolean` | `yes` | `user` | Restrict tools that need hosted output storage under ZDR. Also CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS. |
-| `tools.media_gen.max_parallel_image_gen_calls` | `integer` | `yes` | `user` | Cap parallel `generate_media` / image_gen / image_edit calls in one model step (default 8). Also CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS. |
-| `tools.media_gen.max_parallel_video_gen_calls` | `integer` | `yes` | `user` | Cap parallel video_gen calls in one model step (default 4). Also CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS. |
+| `tools.disable_zdr_incompatible_tools` | `boolean` | `yes` | `user` | Inert: parsed for compatibility only. It restricted the legacy video tools, which were removed in 2.0.3. Also CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS. |
+| `tools.media_gen.max_parallel_image_gen_calls` | `integer` | `yes` | `user` | Cap parallel `generate_media` calls in one model step (default 8). Also CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS. |
+| `tools.media_gen.max_parallel_video_gen_calls` | `integer` | `yes` | `user` | Inert: parsed for compatibility only; it capped the removed legacy video tools. Also CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS. |
 | `tools.respect_gitignore` | `boolean` | `pin` | `user` | When true, search and read tools skip gitignored files. Also CHUTES_BUILD_RESPECT_GITIGNORE. |
-| `tools.zdr_video_output_s3` | `table` | `yes` | `user` | Team S3 bucket for ZDR video output. See ZDR Video Storage. |
+| `tools.zdr_video_output_s3` | `table` | `yes` | `user` | Inert: parsed for compatibility only. The legacy video tools that consumed this bucket were removed in 2.0.3. |
 
 ### `toolset`
 
@@ -717,7 +717,7 @@ These keys exist only in `requirements.toml`:
 | Key | Type / Values | Default | Details |
 | --- | --- | --- | --- |
 | `fail_closed` | `boolean` | `false` | Refuse to start when signed requirements or version_overrides cannot be applied; default false. |
-| `features.image_edit` | `boolean` | — | Pin image_edit availability. Requirements only; a user-file entry is unrecognized and unset leaves the remotely configured default. |
+| `features.image_edit` | `boolean` | — | Inert: parsed for compatibility only. The legacy `image_edit` tool was removed in 2.0.3. |
 | `ui.disable_bypass_permissions_mode` | `boolean` | — | Lock always-approve off. The lock is enforced only from a requirements layer; true in user or managed files is ignored. |
 
 Policy pins such as `allow_managed_hooks_only` (see [Hooks](10-hooks.md#allow-only-managed-hooks)) and the MCP and marketplace lists (see [Plugins](09-plugins.md#restrict-which-mcp-servers-can-run)) are accepted in `requirements.toml` and `managed_config.toml` alike and only ever tighten.

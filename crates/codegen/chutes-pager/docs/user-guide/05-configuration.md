@@ -106,16 +106,17 @@ load_envrc = true                      # load .envrc environment variables
 [tools]
 respect_gitignore = false              # default: false; set true to make every tool skip gitignored files
 
-# Optional caps on parallel media generation in a single model step.
+# Optional cap on parallel media generation in a single model step.
 # Per tool name. First 2×-or-more burst: discard that step and retry once.
 # Any other over-cap (including a second 2× burst) keeps the first K.
-# Defaults: image 8, video 4. The native `generate_media` tool shares the
-# image budget (8) for all its calls.
-# Env vars CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS / CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS
-# override these values (see environment-variables doc).
+# Default: image 8. The native `generate_media` tool takes the image budget
+# (8) for all its calls. The video cap is inert: the legacy video tools were
+# removed in 2.0.3.
+# Env var CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS overrides this value
+# (see environment-variables doc).
 # [tools.media_gen]
 # max_parallel_image_gen_calls = 8
-# max_parallel_video_gen_calls = 4
+# max_parallel_video_gen_calls = 4   # inert, parsed for compatibility
 ```
 
 ### Default agent

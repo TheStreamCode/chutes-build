@@ -8,8 +8,6 @@ use crate::hub_ids::WORKSPACE_RPC_TOOL_ID;
 use crate::session::tool_config::resolve_session_toolset;
 use chutes_computer_hub_sdk::{AuthCredential, SharedAuthProvider};
 use chutes_tool_protocol::SessionId;
-use chutes_tools::implementations::chutes_build::image_gen::ImageGenClient;
-use chutes_tools::implementations::chutes_build::video_gen::VideoGenClient;
 use chutes_tools::implementations::web_search::WebSearchConfig;
 use chutes_tools::implementations::web_search::client::WebSearchClient;
 use chutes_tools::registry::types::{FinalizedToolset, ToolServerConfig};
@@ -19,12 +17,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 /// The tools a hub-only host must not offer: each one calls the API with the server's own credential.
-const API_BACKED_TOOLS: &[&str] = &[
-    "web_search",
-    "image_gen",
-    "image_to_video",
-    "reference_to_video",
-];
+const API_BACKED_TOOLS: &[&str] = &["web_search"];
 const API_BASE_URL: &str = "https://api.invalid/v1";
 static TRUNCATION_INSTALL_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// Tool ids without their namespace, in catalog order.
@@ -113,8 +106,6 @@ async fn only_a_sandbox_session_carries_the_credential() {
             factory.build_terminal_backend().backend().clone(),
         );
         assert_eq!(expected, ctx.auth_provider.is_some(), "{host:?}");
-        assert_eq!(expected, ctx.image_gen_config.has_credentials(), "{host:?}");
-        assert_eq!(expected, ctx.video_gen_config.is_enabled(), "{host:?}");
         assert_eq!(
             expected,
             matches!(ctx.web_search_config, WebSearchConfig::Enabled { .. }),
@@ -127,8 +118,6 @@ async fn only_a_sandbox_session_carries_the_credential() {
             resources.contains::<SharedAuthProvider>(),
             "{host:?}"
         );
-        assert_eq!(expected, resources.contains::<ImageGenClient>(), "{host:?}");
-        assert_eq!(expected, resources.contains::<VideoGenClient>(), "{host:?}");
         assert_eq!(
             expected,
             resources.contains::<WebSearchClient>(),

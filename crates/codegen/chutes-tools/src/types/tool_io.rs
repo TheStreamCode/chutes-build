@@ -15,8 +15,6 @@ use crate::implementations::chutes_build::ask_user_question::AskUserQuestionInpu
 use crate::implementations::chutes_build::enter_plan_mode::EnterPlanModeInput;
 use crate::implementations::chutes_build::exit_plan_mode::ExitPlanModeInput;
 use crate::implementations::chutes_build::grep::GrepSearchInput;
-use crate::implementations::chutes_build::image_edit::ImageEditInput;
-use crate::implementations::chutes_build::image_gen::ImageGenInput;
 use crate::implementations::chutes_build::list_dir::ListDirInput;
 use crate::implementations::chutes_build::read_file::ReadFileInput;
 use crate::implementations::chutes_build::search_replace::SearchReplaceInput;
@@ -24,7 +22,6 @@ use crate::implementations::chutes_build::send_feedback::SendFeedbackInput;
 use crate::implementations::chutes_build::send_subagent_message::SendSubagentMessageInput;
 use crate::implementations::chutes_build::todo::TodoWriteInput;
 use crate::implementations::chutes_build::update_goal::UpdateGoalInput;
-use crate::implementations::chutes_build::video_gen::{ImageToVideoInput, ReferenceToVideoInput};
 use crate::implementations::chutes_build::web_fetch::WebFetchInput;
 use crate::implementations::chutes_build::web_search::WebSearchInput;
 use crate::implementations::codex::apply_patch::tool::ApplyPatchInput;
@@ -67,10 +64,6 @@ pub enum ToolInput {
     KillTask(KillTaskToolInput),
     Task(TaskToolInput),
     WebSearch(WebSearchInput),
-    ImageGen(ImageGenInput),
-    ImageEdit(ImageEditInput),
-    ImageToVideo(ImageToVideoInput),
-    ReferenceToVideo(ReferenceToVideoInput),
     WebFetch(WebFetchInput),
     Write(WriteInput),
     ApplyPatch(ApplyPatchInput),

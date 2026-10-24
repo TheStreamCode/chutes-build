@@ -987,17 +987,14 @@ pub struct Config {
     /// Resolved by [`crate::config::ToolsConfig::resolve`].
     #[serde(skip)]
     pub respect_gitignore: bool,
-    /// When `true` (and no valid `zdr_video_output_s3` bucket is set), `MvpAgent::prepare_video_gen_config` marks the video tools zdr-restricted.
-    /// They stay advertised but short-circuit at call time with setup guidance.
-    /// Resolved by [`crate::config::ToolsConfig::resolve`].
+    /// Inert: the legacy video-gen tools that consumed this were removed in 2.0.3.
+    /// The key is still parsed so existing config files keep loading.
     #[serde(skip)]
     pub disable_zdr_incompatible_tools: bool,
-    /// S3 config for ZDR video output (presigned upload to team bucket).
-    /// Only used when `disable_zdr_incompatible_tools` is `true` and the config is valid.
-    /// Resolved by [`crate::config::ToolsConfig::resolve`].
+    /// Inert: parsed from `[tools.zdr_video_output_s3]` for backward compatibility only.
+    /// The legacy video tools were removed in 2.0.3; `/imagine-video` uses `generate_media`.
     #[serde(skip)]
-    pub zdr_video_output_s3:
-        Option<chutes_tools::implementations::chutes_build::video_gen::ZdrVideoOutputS3Config>,
+    pub zdr_video_output_s3: Option<toml::Value>,
     /// Whether to enrich path-not-found errors with CWD reminders, "dropped repo folder" correction, and similar-name suggestions. Default `false`. Enabled via remote settings.
     /// Serialized to `config.json` on GCS so traces can distinguish which sessions had path-not-found hints active.
     #[serde(default)]
@@ -2100,102 +2097,6 @@ impl Config {
             .feature_flag(ff)
             .default(self.is_feature_enabled(Feature::TurnSummary))
             .resolve()
-    }
-    /// Legacy `image_gen` (`/imagine` uses the Chutes-native `generate_media` instead). Default off:
-    /// this client targets the legacy Imagine API, which Chutes does not serve.
-    /// `imagine_tools_disabled` is a remote force-off (env/config cannot re-enable).
-    /// Otherwise: requirement > env > `[features]` > remote > default.
-    pub(crate) fn resolve_image_gen(&self) -> Resolved<bool> {
-        use chutes_tools::implementations::chutes_build::IMAGE_GEN_TOOL_NAME;
-        if let Some(pinned) = self.requirements.image_gen.pinned() {
-            return Resolved::new(pinned, ConfigSource::Requirement);
-        }
-        if self
-            .remote_settings
-            .as_ref()
-            .is_some_and(|s| s.imagine_tool_disabled(IMAGE_GEN_TOOL_NAME))
-        {
-            return Resolved::new(false, ConfigSource::Remote);
-        }
-        BoolFlag::env("CHUTES_BUILD_IMAGE_GEN")
-            .config(self.features.image_gen)
-            .feature_flag(
-                self.remote_settings
-                    .as_ref()
-                    .and_then(|s| s.image_gen_enabled),
-            )
-            .default(false)
-            .resolve()
-    }
-    /// Legacy `image_edit` tool gate (the Chutes-native path edits via `generate_media` with input assets).
-    /// Same denylist / requirement pattern as [`Self::resolve_image_gen`]; no `[features]` key (defaults off).
-    pub(crate) fn resolve_image_edit(&self) -> Resolved<bool> {
-        use chutes_tools::implementations::chutes_build::IMAGE_EDIT_TOOL_NAME;
-        if let Some(pinned) = self.requirements.image_edit.pinned() {
-            return Resolved::new(pinned, ConfigSource::Requirement);
-        }
-        if self
-            .remote_settings
-            .as_ref()
-            .is_some_and(|s| s.imagine_tool_disabled(IMAGE_EDIT_TOOL_NAME))
-        {
-            return Resolved::new(false, ConfigSource::Remote);
-        }
-        BoolFlag::env("CHUTES_BUILD_IMAGE_EDIT")
-            .default(false)
-            .resolve()
-    }
-    /// Legacy `image_to_video` / `reference_to_video` (`/imagine-video` uses `generate_media`). Default off:
-    /// these clients target the legacy Imagine API, which Chutes does not serve.
-    /// Registered as a pair; denylisting either tool name (or `video_gen`) disables both.
-    /// Otherwise same precedence as [`Self::resolve_image_gen`].
-    pub(crate) fn resolve_video_gen(&self) -> Resolved<bool> {
-        use chutes_tools::implementations::chutes_build::{
-            IMAGE_TO_VIDEO_TOOL_NAME, REFERENCE_TO_VIDEO_TOOL_NAME,
-        };
-        if let Some(pinned) = self.requirements.video_gen.pinned() {
-            return Resolved::new(pinned, ConfigSource::Requirement);
-        }
-        if self.remote_settings.as_ref().is_some_and(|s| {
-            s.imagine_tool_disabled(IMAGE_TO_VIDEO_TOOL_NAME)
-                || s.imagine_tool_disabled(REFERENCE_TO_VIDEO_TOOL_NAME)
-                || s.imagine_tool_disabled("video_gen")
-        }) {
-            return Resolved::new(false, ConfigSource::Remote);
-        }
-        BoolFlag::env("CHUTES_BUILD_VIDEO_GEN")
-            .config(self.features.video_gen)
-            .feature_flag(
-                self.remote_settings
-                    .as_ref()
-                    .and_then(|s| s.video_gen_enabled),
-            )
-            .default(false)
-            .resolve()
-    }
-    /// Precedence: env `CHUTES_BUILD_IMAGE_GEN_MODEL_OVERRIDE` > `[features] image_gen_model_override` config > remote settings `image_gen_model_override`.
-    /// `None` falls back to the default model (`CHUTES_IMAGINE_MODEL` in `chutes-tools`).
-    pub(crate) fn resolve_image_gen_model_override(&self) -> Option<String> {
-        resolve_string_flag(
-            None,
-            "CHUTES_BUILD_IMAGE_GEN_MODEL_OVERRIDE",
-            self.features.image_gen_model_override.as_deref(),
-            self.remote_settings
-                .as_ref()
-                .and_then(|s| s.image_gen_model_override.as_deref()),
-        )
-        .map(|r| r.value)
-    }
-    pub(crate) fn resolve_image_edit_model_override(&self) -> Option<String> {
-        resolve_string_flag(
-            None,
-            "CHUTES_BUILD_IMAGE_EDIT_MODEL_OVERRIDE",
-            self.features.image_edit_model_override.as_deref(),
-            self.remote_settings
-                .as_ref()
-                .and_then(|s| s.image_edit_model_override.as_deref()),
-        )
-        .map(|r| r.value)
     }
     /// Goal mode (`/goal`) master switch. Default ON.
     /// Deployments that can't reach cli-chat-proxy `/v1/settings` never receive the remote settings `goal_enabled` flag.
@@ -4219,16 +4120,17 @@ pub struct Features {
     /// Early-session auto-title refresh. `None` defers to `resolve_title_refresh`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_refresh: Option<bool>,
-    /// `image_gen` / `/imagine`. `None` defers to env / remote / default (`true`).
+    /// Inert: parsed for backward compatibility. The legacy `image_gen` tool was
+    /// removed in 2.0.3; `/imagine` uses the Chutes-native `generate_media` tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_gen: Option<bool>,
-    /// Video tools / `/imagine-video`. `None` defers to env / remote / default (`true`).
+    /// Inert: parsed for backward compatibility (legacy video tools removed in 2.0.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_gen: Option<bool>,
-    /// `image_gen` Imagine model override.
-    /// `None`/empty defers to remote settings (`image_gen_model_override`) / env / default (`CHUTES_IMAGINE_MODEL` in `chutes-tools`).
+    /// Inert: parsed for backward compatibility; no tool reads this override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_gen_model_override: Option<String>,
+    /// Inert: parsed for backward compatibility; no tool reads this override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_edit_model_override: Option<String>,
     /// `summary` | `transcript` | `segments` (default).

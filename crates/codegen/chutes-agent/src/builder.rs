@@ -64,8 +64,6 @@ pub struct AgentBuilder {
     backend_search: bool,
     web_fetch_config: chutes_tools::implementations::chutes_build::web_fetch::WebFetchConfig,
     lsp: Option<std::sync::Arc<dyn chutes_tools::implementations::lsp::LspBackend>>,
-    image_gen_config: chutes_tools::implementations::chutes_build::image_gen::ImageGenConfig,
-    video_gen_config: chutes_tools::implementations::chutes_build::video_gen::VideoGenConfig,
     app_builder_deployer_config:
         chutes_tools::implementations::chutes_build::app_builder::AppBuilderDeployerConfig,
     write_file_enabled: bool,
@@ -319,8 +317,6 @@ impl AgentBuilder {
             backend_search: false,
             web_fetch_config: Default::default(),
             lsp: None,
-            image_gen_config: Default::default(),
-            video_gen_config: Default::default(),
             app_builder_deployer_config: Default::default(),
             write_file_enabled: true,
             active_agent_messages_enabled: false,
@@ -539,20 +535,6 @@ impl AgentBuilder {
         self.lsp = Some(handle);
         self
     }
-    pub fn with_image_gen_config(
-        mut self,
-        config: chutes_tools::implementations::chutes_build::image_gen::ImageGenConfig,
-    ) -> Self {
-        self.image_gen_config = config;
-        self
-    }
-    pub fn with_video_gen_config(
-        mut self,
-        config: chutes_tools::implementations::chutes_build::video_gen::VideoGenConfig,
-    ) -> Self {
-        self.video_gen_config = config;
-        self
-    }
     pub fn with_app_builder_deployer_config(
         mut self,
         config: chutes_tools::implementations::chutes_build::app_builder::AppBuilderDeployerConfig,
@@ -567,7 +549,7 @@ impl AgentBuilder {
         self.api_key_provider = Some(provider);
         self
     }
-    /// A 401 from `image_gen` / `video_gen` / `web_search` emits `auth_401_attribution` with a per-consumer tag. Pass the
+    /// A 401 from `web_search` emits `auth_401_attribution` with a per-consumer tag. Pass the
     /// same `ShellAttribution` wired into the sampler so all 401s share one `AuthManager` and land in the same dataset.
     pub fn with_attribution_callback(
         mut self,
@@ -810,24 +792,6 @@ impl AgentBuilder {
                 tool_config
                     .tools
                     .push((&chutes_tools::implementations::chutes_build::LspTool).into());
-            }
-            if self.image_gen_config.image_gen_enabled() {
-                tool_config
-                    .tools
-                    .push((&chutes_tools::implementations::chutes_build::ImageGenTool).into());
-            }
-            if self.image_gen_config.image_edit_enabled() {
-                tool_config
-                    .tools
-                    .push((&chutes_tools::implementations::chutes_build::ImageEditTool).into());
-            }
-            if self.video_gen_config.is_enabled() {
-                tool_config
-                    .tools
-                    .push((&chutes_tools::implementations::chutes_build::ImageToVideoTool).into());
-                tool_config.tools.push(
-                    (&chutes_tools::implementations::chutes_build::ReferenceToVideoTool).into(),
-                );
             }
             let has_write_tool = tool_config
                 .tools
@@ -1178,8 +1142,6 @@ impl AgentBuilder {
                 web_search_config: self.web_search_config,
                 web_fetch_config: self.web_fetch_config,
                 lsp: self.lsp,
-                image_gen_config: self.image_gen_config,
-                video_gen_config: self.video_gen_config,
                 app_builder_deployer_config: self.app_builder_deployer_config,
                 api_key_provider: self.api_key_provider,
                 auth_provider: None,

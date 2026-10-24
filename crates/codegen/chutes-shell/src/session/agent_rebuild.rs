@@ -40,12 +40,10 @@ use chutes_agent::{Agent, AgentBuilder, CompactionPolicy, ReminderPolicy};
 use chutes_tools::computer::types::{AsyncFileSystem, TerminalBackend};
 use chutes_tools::implementations::chutes_build::app_builder::AppBuilderDeployerConfig;
 use chutes_tools::implementations::chutes_build::ask_user_question::types::UserQuestionRequest;
-use chutes_tools::implementations::chutes_build::image_gen::ImageGenConfig;
 use chutes_tools::implementations::chutes_build::monitor::types::MonitorEventBuffer;
 use chutes_tools::implementations::chutes_build::task::types::{
     AgentMessageSender, SubagentCapabilityModeExt, SubagentEvent, TaskModelValidator,
 };
-use chutes_tools::implementations::chutes_build::video_gen::VideoGenConfig;
 use chutes_tools::implementations::chutes_build::web_fetch::WebFetchConfig;
 use chutes_tools::implementations::lsp::LspBackend;
 use chutes_tools::implementations::web_search::WebSearchConfig;
@@ -116,8 +114,6 @@ pub(crate) struct AgentRebuildSpec {
     pub web_search_domains: Option<chutes_sampling_types::WebSearchOptions>,
     pub backend_search: bool,
     pub web_fetch_config: WebFetchConfig,
-    pub image_gen_config: ImageGenConfig,
-    pub video_gen_config: VideoGenConfig,
     pub app_builder_deployer_config: AppBuilderDeployerConfig,
     pub media_gen_batch_limits: chutes_tools::media_gen_limits::MediaGenBatchLimits,
     pub write_file_enabled: bool,
@@ -227,8 +223,6 @@ impl AgentRebuildSpec {
             web_search_domains,
             backend_search,
             web_fetch_config,
-            image_gen_config,
-            video_gen_config,
             app_builder_deployer_config,
             media_gen_batch_limits: _,
             write_file_enabled,
@@ -320,8 +314,6 @@ impl AgentRebuildSpec {
         .with_state_path(bridge_state_path.clone())
         .with_web_search_config(web_search_config.clone())
         .with_backend_search(*backend_search)
-        .with_image_gen_config(image_gen_config.clone())
-        .with_video_gen_config(video_gen_config.clone())
         .with_app_builder_deployer_config(app_builder_deployer_config.clone())
         .with_web_fetch_config(web_fetch_config.clone())
         .with_write_file_enabled(*write_file_enabled)
@@ -514,8 +506,6 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
         web_search_domains: None,
         backend_search: false,
         web_fetch_config: WebFetchConfig::Disabled,
-        image_gen_config: ImageGenConfig::default(),
-        video_gen_config: VideoGenConfig::default(),
         app_builder_deployer_config: AppBuilderDeployerConfig::default(),
         media_gen_batch_limits: chutes_tools::media_gen_limits::MediaGenBatchLimits::default(),
         write_file_enabled: true,

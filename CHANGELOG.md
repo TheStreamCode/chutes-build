@@ -4,6 +4,22 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **The dormant legacy Imagine media tools are gone.** `image_gen`,
+  `image_edit`, `image_to_video`, and `reference_to_video` targeted the xAI
+  Imagine API, which Chutes does not serve; `ImageGenTool`, `ImageEditTool`,
+  `ImageToVideoTool`, `ReferenceToVideoTool`, `ImageGenClient`,
+  `VideoGenClient`, their config plumbing, and the upstream Imagine model ids
+  and legacy video storage prefix are deleted. `/imagine` and
+  `/imagine-video` are unchanged and use the Chutes-native `generate_media`
+  tool. The related configuration keys (`features.image_gen`,
+  `features.video_gen`, the model overrides, `zdr_video_output_s3`, and the
+  `imagine_tools_disabled` remote setting) are still parsed so existing
+  configuration files keep loading, but they are inert.
+
 ## [2.0.2] - 2026-10-23
 
 ### Fixed

@@ -161,14 +161,7 @@ pub fn workspace_chutes_build_toolset() -> ToolServerConfig {
 /// Fully qualified ids of the workspace tools that call the Chutes Build API with the workspace server's own credential.
 /// A server whose credential only serves the hub cannot run them, so it neither advertises nor serves them.
 pub fn api_backed_tool_ids() -> Vec<String> {
-    #[allow(unused_mut)]
-    let mut ids = vec![
-        ToolConfig::from(&chutes_build::WebSearchTool).id,
-        ToolConfig::from(&chutes_build::ImageGenTool).id,
-        ToolConfig::from(&chutes_build::ImageToVideoTool).id,
-        ToolConfig::from(&chutes_build::ReferenceToVideoTool).id,
-    ];
-    ids
+    vec![ToolConfig::from(&chutes_build::WebSearchTool).id]
 }
 /// Toolset for the `chutes-computer` (workspace/sandbox) preset.
 fn chutes_computer_toolset() -> ToolServerConfig {
@@ -1746,8 +1739,8 @@ mod tests {
         }
     }
 
-    /// The legacy Imagine tools call an endpoint Chutes has no equivalent for, and
-    /// their own tier message says so. `generate_media` replaces them.
+    /// The legacy Imagine tools were removed in 2.0.3; `generate_media` replaces
+    /// them. No preset may advertise the removed ids.
     #[test]
     fn legacy_imagine_tools_are_not_advertised() {
         for preset in ["chutes-build", "chutes-build-plan", "chutes-computer"] {
