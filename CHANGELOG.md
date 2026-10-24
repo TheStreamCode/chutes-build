@@ -8,6 +8,21 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The tool catalog is 11.5% lighter.** `browser`, `extract_document`,
+  `generate_media`, and `scheduler_create` now export a compact model-facing
+  schema: nested `description` and `examples` fields are dropped while every
+  parameter name, type, enum, required entry, and union member survives.
+  Dispatch keeps validating against the canonical schema, so behavior is
+  unchanged. The default catalog drops from 11,573 to 10,239 estimated tokens
+  across 29 tools.
+- **Latency benchmark.** `scripts/bench_chutes.py` measures TTFT, inter-token
+  latency, and total stream time against the same Chutes streaming contract
+  the CLI uses, for a model id or a routing string such as `default:latency`.
+  `docs/performance.md` explains how to compare routing strategies, read the
+  result, and account for prompt caching.
+
+### Added
+
 - **Chutes platform knowledge is available on demand.** The fixed prompt now
   carries a compact map of the two Chutes hosts, API-key auth, the live model
   catalog as the source of truth, and saved/inline `:latency`/`:throughput`

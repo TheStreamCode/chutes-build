@@ -98,6 +98,16 @@ pub trait ToolMetadata: Send + Sync {
         None
     }
 
+    /// Whether the model-facing definition may drop nested parameter descriptions.
+    ///
+    /// Dispatch always validates against the canonical `input_schema`; this only
+    /// trims the exported copy for tools whose schema prose dominates the catalog.
+    /// The tool-level description and every parameter name, type, enum, required
+    /// entry, and union member survive compaction.
+    fn compact_input_schema(&self) -> bool {
+        false
+    }
+
     /// Build the tool definition for a given contract version. Default: renders `description_template()` via the
     /// `TemplateRenderer` and remaps schema parameter names. Override for tools that need params-aware descriptions or
     /// schemas (e.g., BashTool removes `is_background` when disabled).
@@ -120,7 +130,27 @@ pub trait ToolMetadata: Send + Sync {
         } else {
             crate::util::remap::remap_schema_properties(input_schema, param_map)
         };
+        let remapped_schema = if self.compact_input_schema() {
+            compact_tool_schema(&remapped_schema)
+        } else {
+            remapped_schema
+        };
         ToolDefinition::function(client_name, Some(&description), remapped_schema)
+    }
+}
+
+/// Drop nested schema prose from a model-facing copy: `description` and
+/// `examples` keys disappear recursively, while parameter names, types, enums,
+/// `required` lists, and union members survive unchanged.
+pub(crate) fn compact_tool_schema(schema: &serde_json::Value) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .filter(|(key, _)| key.as_str() != "description" && key.as_str() != "examples")
+            .map(|(key, value)| (key.clone(), compact_tool_schema(value)))
+            .collect(),
+        serde_json::Value::Array(items) => items.iter().map(compact_tool_schema).collect(),
+        other => other.clone(),
     }
 }
 
@@ -206,4 +236,65 @@ pub fn invoking_param_names(
         .get::<crate::types::resources::InvokingToolParamNames>()
         .map(|arc| (*arc).clone())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compact_tool_schema;
+
+    #[test]
+    fn compact_schema_drops_prose_and_keeps_structure() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "description": "top-level prose",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "file to read",
+                    "examples": ["src/main.rs"]
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["image", "video"],
+                    "description": "generation kind"
+                },
+                "options": {
+                    "type": "object",
+                    "properties": {
+                        "steps": { "type": "integer", "description": "sampling steps" }
+                    }
+                }
+            },
+            "required": ["path", "kind"],
+            "oneOf": [{ "description": "variant prose", "required": ["path"] }]
+        });
+        let compact = compact_tool_schema(&schema);
+        let text = serde_json::to_string(&compact).expect("serializes");
+        assert!(
+            !text.contains("prose"),
+            "nested descriptions were kept: {text}"
+        );
+        assert!(
+            !text.contains("file to read"),
+            "property descriptions were kept: {text}"
+        );
+        assert!(!text.contains("examples"), "examples were kept: {text}");
+        assert_eq!(
+            compact.pointer("/properties/kind/enum"),
+            Some(&serde_json::json!(["image", "video"]))
+        );
+        assert_eq!(
+            compact.pointer("/required"),
+            Some(&serde_json::json!(["path", "kind"]))
+        );
+        assert_eq!(
+            compact.pointer("/oneOf/0/required"),
+            Some(&serde_json::json!(["path"]))
+        );
+        assert!(
+            compact
+                .pointer("/properties/options/properties/steps/type")
+                .is_some()
+        );
+    }
 }

@@ -67,6 +67,10 @@ pub struct ExtractDocumentInput {
 pub struct ExtractDocumentTool;
 
 impl crate::types::tool_metadata::ToolMetadata for ExtractDocumentTool {
+    fn compact_input_schema(&self) -> bool {
+        true
+    }
+
     fn kind(&self) -> ToolKind {
         ToolKind::Read
     }

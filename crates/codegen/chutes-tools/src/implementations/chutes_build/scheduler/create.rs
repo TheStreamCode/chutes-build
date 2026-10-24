@@ -84,6 +84,10 @@ impl chutes_tool_runtime::ToolOutput for SchedulerCreateOutput {}
 pub struct SchedulerCreateTool;
 
 impl crate::types::tool_metadata::ToolMetadata for SchedulerCreateTool {
+    fn compact_input_schema(&self) -> bool {
+        true
+    }
+
     fn kind(&self) -> ToolKind {
         ToolKind::Other
     }

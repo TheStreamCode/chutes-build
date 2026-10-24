@@ -70,6 +70,15 @@ every turn; the default catalog drops 12,784 / 30 tools -> 11,573 / 29 tools
 (-1,211 tokens, -9.5%) and the budget ceiling follows to 11,700. Distributions
 that do serve feedback keep the tool unchanged.
 
+Workstream 2 increment (2026-10-24, 2.0.3): compact schema export is re-ported
+onto the current `ToolConfig` contract for the four heaviest prose schemas.
+`browser`, `extract_document`, `generate_media`, and `scheduler_create` drop
+nested `description`/`examples` keys from the model-facing definition while
+dispatch still validates the canonical `input_schema`; parameter names, types,
+enums, `required`, and union members are untouched. The default catalog drops
+from 11,573 to 10,239 estimated tokens across 29 tools (-11.5%, -1,334 tokens
+per turn) and the budget ceiling follows to 10,300.
+
 Workstream 1 platform-knowledge increment (2026-10-24): the fixed prompt gains
 a compact `<chutes_platform>` map (both host planes, the single API key, the
 catalog as the source of truth, saved and inline `:latency`/`:throughput`

@@ -245,6 +245,10 @@ impl chutes_tool_runtime::Tool for DescribeMediaModelTool {
 pub struct GenerateMediaTool;
 
 impl crate::types::tool_metadata::ToolMetadata for GenerateMediaTool {
+    fn compact_input_schema(&self) -> bool {
+        true
+    }
+
     fn kind(&self) -> ToolKind {
         ToolKind::Other
     }

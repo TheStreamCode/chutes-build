@@ -2387,10 +2387,14 @@ mod tests {
         println!("{:>6}  TOTAL ({} tools)", total, rows.len());
         // 2.0.2 gates `send_feedback` on the telemetry capability, so the Chutes
         // build advertises 29 tools / 11,573 estimated tokens (was 30 / 12,784).
+        // 2.0.3 re-ports compact schema export for browser, extract_document,
+        // generate_media, and scheduler_create: nested descriptions/examples are
+        // dropped from the model-facing copy while dispatch still validates the
+        // canonical schema, dropping the catalog to 10,239 estimated tokens.
         assert!(
-            total <= 11_700,
+            total <= 10_300,
             "tool catalog grew to {total} estimated tokens across {} tools \
-             (ceiling 11700, baseline 11573) — deduplicate or justify the growth",
+             (ceiling 10300, baseline 10239) — deduplicate or justify the growth",
             rows.len()
         );
     }

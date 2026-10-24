@@ -589,6 +589,10 @@ impl crate::types::tool_metadata::ToolMetadata for BrowserTool {
     fn requires_expr(&self) -> Expr<ToolRequirement> {
         Expr::True
     }
+
+    fn compact_input_schema(&self) -> bool {
+        true
+    }
 }
 
 impl chutes_tool_runtime::Tool for BrowserTool {
