@@ -42,6 +42,9 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained as a standalone crate (merged into zbus 6), not vulnerable. Transitive through zbus 5.14 (ashpd, dark-light theme detection); only a zbus 5→6 migration closes it." },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained as a standalone crate (merged into zbus 6), not vulnerable. Transitive through zbus 5.14 (ashpd, dark-light theme detection); only a zbus 5→6 migration closes it." },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained as a standalone crate (provided by zbus 6), not vulnerable. Transitive through zbus 5.14 (ashpd, dark-light theme detection); only a zbus 5→6 migration closes it." },
+    # Arrived with the live advisory DB on 2026-10-24. Patched in crypto-bigint
+    # >=0.7.6, which the p256 0.13 / elliptic-curve 0.13 line cannot use.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 is reached only through the jsonwebtoken optional p256 feature, used here for OIDC ID-token signature verification with public keys and public JWKs. Production call sites are decode and decode_header only; the jsonwebtoken encode call sites are tests and use symmetric or RSA test keys, not p256. The advisory covers constant-time operations on secret integers, and this tree does not feed secrets through p256. The patched >=0.7.6 line is incompatible with the p256 0.13 elliptic-curve 0.13 dependency; revisit when p256 0.14 or jsonwebtoken drops p256." },
 ]
 
 [licenses]

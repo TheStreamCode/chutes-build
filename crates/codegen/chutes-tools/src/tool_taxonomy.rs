@@ -134,6 +134,12 @@ pub const WRITING_TOOL_WIRE_NAMES: &[(&str, ToolKind)] = &[
     ("todowrite", ToolKind::Plan),
     ("workflow", ToolKind::Workflow),
     ("send_feedback", ToolKind::Feedback),
+    // Removed in 2.0.3, kept for historical session replay: old transcripts still
+    // carry these wire names and must keep their writing-phase labels.
+    ("image_gen", ToolKind::ImageGen),
+    ("image_edit", ToolKind::ImageGen),
+    ("image_to_video", ToolKind::ImageToVideo),
+    ("reference_to_video", ToolKind::ReferenceToVideo),
     ("ask_user_question", ToolKind::AskUser),
 ];
 /// [`ToolKind`] of a wire name in [`WRITING_TOOL_WIRE_NAMES`]. Keyed by wire name because that is

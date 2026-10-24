@@ -49,7 +49,7 @@ def render(name: str, blob: list[int]) -> str:
     if current:
         lines.append(", ".join(current))
     body = "\n".join(lines)
-    return f"#[rustfmt::skip]\npub(crate) const {name}: &[u8] = &[{body}];\n"
+    return f"#[rustfmt::skip]\npub(crate) const {name}: &[u8] = &[{body}];"
 
 
 def main() -> None:
