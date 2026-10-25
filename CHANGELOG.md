@@ -23,9 +23,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   default silently fell back to the first listed model. Chutes Build now rebuilds
   Auto from the visible chat models as a latency-routed inline pool
   (`modelA,modelB,...:latency`), because the saved `default` alias needs a
-  dashboard pool that API-key-only accounts do not have. `models` and the picker
-  show `model-router` / Chutes Auto again, and a concrete model still bypasses
-  routing.
+  dashboard pool that API-key-only accounts do not have. The pool includes every
+  visible chat model that explicitly advertises tool support in
+  `supported_features` and has at least a 32k context, so Auto cannot route an
+  agent turn to a model that cannot call the harness tools. Entries that omit the
+  feature list are excluded rather than assumed capable.
+  `models` and the picker show `model-router` / Chutes Auto again, and a concrete
+  model still bypasses routing.
 
 ### Fixed
 

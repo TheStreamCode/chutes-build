@@ -7909,6 +7909,43 @@ fn resolve_model_list_keeps_prefetch_only_entries_and_prunes_defaults() {
     assert_eq!(auto.info.model, "secret-xyz:latency");
 }
 #[test]
+fn live_auto_pool_keeps_only_tool_capable_large_context_models() {
+    let cfg = Config::default();
+    let dm = crate::models::default_model();
+    let mut p = IndexMap::new();
+    for index in 0..6 {
+        let key = format!("tools-{index}");
+        let mut entry = prefetch_model_entry(&key, 200_000, ApiBackend::default());
+        entry.info.supports_tools = true;
+        p.insert(key, entry);
+    }
+    let mut no_tools = prefetch_model_entry("no-tools", 200_000, ApiBackend::default());
+    no_tools.info.supports_tools = false;
+    p.insert("no-tools".to_string(), no_tools);
+    let mut small = prefetch_model_entry("small-context", 16_000, ApiBackend::default());
+    small.info.supports_tools = true;
+    p.insert("small-context".to_string(), small);
+
+    let resolved = resolve_model_list(&cfg, Some(p));
+    let auto = resolved.get(dm).expect("live Auto entry is present");
+    let members: Vec<&str> = auto
+        .info
+        .model
+        .trim_end_matches(":latency")
+        .split(',')
+        .collect();
+    assert_eq!(
+        members,
+        vec![
+            "tools-0", "tools-1", "tools-2", "tools-3", "tools-4", "tools-5"
+        ],
+        "Auto keeps every tool-capable model with enough context, not the first four"
+    );
+    assert!(!auto.info.model.contains("no-tools"));
+    assert!(!auto.info.model.contains("small-context"));
+}
+
+#[test]
 fn resolve_model_list_prefetch_replaces_bundled_entirely() {
     let cfg = Config::default();
     let dm = crate::models::default_model();

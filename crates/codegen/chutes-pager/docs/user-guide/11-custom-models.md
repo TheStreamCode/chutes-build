@@ -10,8 +10,11 @@ By default, Chutes Build uses models hosted by Chutes, and new sessions start wi
 
 `model-router` is Chutes Auto: a live latency-routed inline pool composed from the
 visible chat models in the current catalog (`modelA,modelB,...:latency`). It needs
-no dashboard pool, so API-key-only accounts get it too. Selecting a concrete model
-bypasses routing.
+no dashboard pool, so API-key-only accounts get it too. Only models that advertise
+tool support in `supported_features` and have at least a 32k context join the pool,
+so the router cannot send an agent turn to a model that cannot call the harness
+tools. Entries without a feature list are excluded rather than assumed capable.
+Selecting a concrete model bypasses routing.
 
 List all available models:
 

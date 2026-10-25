@@ -650,6 +650,18 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| meta.and_then(|m| get_string(m, "agent_type")))
         .unwrap_or_else(crate::agent::config::default_agent_type);
 
+    let supports_tools = obj
+        .get("supported_features")
+        .or_else(|| obj.get("supportedFeatures"))
+        .or_else(|| meta.and_then(|m| m.get("supported_features")))
+        .and_then(|value| value.as_array())
+        .map(|features| {
+            features
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|feature| feature.eq_ignore_ascii_case("tools"))
+        });
+
     let api_backend = get_string(obj, "apiBackend")
         .or_else(|| get_string(obj, "api_backend"))
         .and_then(|s| match s.as_str() {
@@ -732,6 +744,7 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| meta.and_then(|m| m.get("hidden")))
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        supports_tools,
         supported_in_api: obj
             .get("supportedInApi")
             .or_else(|| obj.get("supported_in_api"))

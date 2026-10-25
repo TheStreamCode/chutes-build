@@ -1029,3 +1029,39 @@ async fn auth_headers_do_not_collide_with_json() {
         assert_eq!(count, 1, "duplicate header {name}");
     }
 }
+
+#[test]
+fn parse_reads_supported_features_for_tool_support() {
+    let with_tools = serde_json::json!({
+        "model": "tools-model",
+        "context_window": 100_000,
+        "supported_features": ["tools", "reasoning"]
+    });
+    assert_eq!(
+        parse_remote_model_value(&with_tools, "https://default.url")
+            .expect("parses")
+            .supports_tools,
+        Some(true)
+    );
+    let without_tools = serde_json::json!({
+        "model": "vision-model",
+        "context_window": 100_000,
+        "supported_features": ["vision"]
+    });
+    assert_eq!(
+        parse_remote_model_value(&without_tools, "https://default.url")
+            .expect("parses")
+            .supports_tools,
+        Some(false)
+    );
+    let unknown = serde_json::json!({
+        "model": "unknown-model",
+        "context_window": 100_000
+    });
+    assert_eq!(
+        parse_remote_model_value(&unknown, "https://default.url")
+            .expect("parses")
+            .supports_tools,
+        None
+    );
+}

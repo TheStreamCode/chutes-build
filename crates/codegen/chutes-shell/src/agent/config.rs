@@ -2784,9 +2784,10 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
         .filter(|entry| entry.info.visible_for_auth(false))
         .filter(|entry| entry.info.api_backend == ApiBackend::ChatCompletions)
         .filter(|entry| !entry.info.hidden)
+        .filter(|entry| entry.info.supports_tools)
+        .filter(|entry| entry.info.context_window.get() >= 32_000)
         .filter(|entry| entry.info.model != chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
         .filter(|entry| !entry.info.model.contains(','))
-        .take(4)
         .collect();
     let first = *candidates.first()?;
     let ids: Vec<&str> = candidates
@@ -2804,7 +2805,7 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
     entry.info.model = pool;
     entry.info.name = Some("Chutes Auto".to_owned());
     entry.info.description =
-        Some("Automatic latency-routed pool across the available Chutes chat models".to_owned());
+        Some("Automatic latency-routed pool across tool-capable Chutes chat models".to_owned());
     entry.info.context_window = first.info.context_window;
     entry.info.context_windows = first.info.context_windows.clone();
     entry.info.api_backend = ApiBackend::ChatCompletions;
@@ -3260,6 +3261,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 use_concise: false,
                 hidden: m.hidden,
                 supported_in_api: m.supported_in_api,
+                supports_tools: None,
                 reasoning_effort: m.reasoning_effort,
                 supports_reasoning_effort: m.supports_reasoning_effort,
                 reasoning_efforts: m.reasoning_efforts,
@@ -3386,6 +3388,10 @@ pub struct ModelEntryConfig {
     /// When false, only OAuth users see this in the picker.
     #[serde(default = "default_true")]
     pub supported_in_api: bool,
+    /// `supported_features` from the live catalog: `Some(true)` only when the
+    /// list names `tools`. Absent/unknown keeps the compatible default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_tools: Option<bool>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub supports_backend_search: bool,
     /// Per-model config for the `x-compactions-remaining` header; `None` disables it.
@@ -3450,6 +3456,7 @@ impl Default for ModelEntryConfig {
             subagent_rate_limit_max_attempts: None,
             hidden: false,
             supported_in_api: true,
+            supports_tools: None,
             supports_backend_search: false,
             compactions_remaining: None,
             compaction_at_tokens: None,
@@ -3740,6 +3747,9 @@ pub struct ModelInfo {
     /// When false, only OAuth users see this in the picker.
     #[serde(default = "default_true")]
     pub supported_in_api: bool,
+    /// The catalog advertises tool/function-calling support for this model.
+    #[serde(default = "default_true")]
+    pub supports_tools: bool,
     pub reasoning_effort: Option<ReasoningEffort>,
     /// When true, the UI shows effort controls for this model.
     pub supports_reasoning_effort: bool,
@@ -3782,6 +3792,7 @@ impl ModelInfo {
     pub fn fallback(slug: &str) -> Self {
         ModelInfo {
             user_selectable: true,
+            supports_tools: true,
             id: None,
             model: slug.to_owned(),
             model_family: None,
@@ -3855,6 +3866,7 @@ impl ModelInfo {
             subagent_rate_limit_max_attempts: entry.subagent_rate_limit_max_attempts,
             hidden: entry.hidden,
             supported_in_api: entry.supported_in_api,
+            supports_tools: entry.supports_tools.unwrap_or(false),
             reasoning_effort: entry.reasoning_effort,
             supports_reasoning_effort: entry.supports_reasoning_effort,
             reasoning_efforts: entry.reasoning_efforts.clone(),
@@ -4539,6 +4551,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
         let entry = ModelEntry {
             info: ModelInfo {
                 user_selectable: false,
+                supports_tools: true,
                 id: None,
                 model_family: None,
                 model: catalog_entry
@@ -4768,6 +4781,7 @@ fn resolve_hidden_default_web_search_sampling_config(
 ) -> SamplerConfig {
     let entry = ModelEntry {
         info: ModelInfo {
+            supports_tools: true,
             id: None,
             model_family: None,
             model: model_id.to_owned(),
