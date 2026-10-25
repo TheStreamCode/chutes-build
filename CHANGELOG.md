@@ -4,6 +4,20 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **External-provider 402s no longer masquerade as the weekly limit.** New
+  non-TEE catalog entries such as `deepseek-ai/DeepSeek-V4-Pro-0813` and
+  `Qwen/Qwen3.8-Max-0902` run on external providers and require a positive PAYG
+  balance; Chutes answers `402 A positive balance is required for external
+  provider execution`. The pager treated every 402 as a credit-limit denial and
+  opened "You hit your weekly limit" even when the subscription window was
+  nearly empty. Now that specific 402 is shown with the provider's message, and
+  non-TEE models carry a `PAYG` warning notice in the model picker. The
+  subscription/weekly quota is not involved.
+
 ## [2.0.4] - 2026-10-25
 
 ### Added

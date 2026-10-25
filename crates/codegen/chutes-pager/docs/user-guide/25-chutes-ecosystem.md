@@ -43,6 +43,14 @@ run on their own hosts and bill per compute-second; their gateway has a public
 timeout of about ten minutes, and a 504 response is an HTML error page rather
 than media, so always check the status and content type.
 
+Some catalog entries have `confidential_compute: false`: they run on an external
+provider and require a positive PAYG balance, separately from the subscription
+quota. When that balance is not positive Chutes returns
+`402 A positive balance is required for external provider execution`. This is a
+PAYG funding condition, not the weekly or monthly subscription limit; top up the
+PAYG balance at https://chutes.ai/?_s=usage or use a TEE model. The picker marks
+those entries with a `PAYG` notice.
+
 TEE models run inside hardware enclaves and expose attestation evidence through
 `GET https://api.chutes.ai/chutes/{chute_id}/evidence`; do not claim verified
 attestation unless the quote was actually checked. Official docs and news remain

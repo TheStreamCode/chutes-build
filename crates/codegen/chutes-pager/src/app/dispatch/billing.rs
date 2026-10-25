@@ -58,7 +58,19 @@ pub(super) fn credit_limit_upsell_mode(
 /// Whether an API or retry error is a credit-limit or spend-block denial.
 /// 402 Payment Required always means a credit or spend block here (Build pool and IC spend blocks); no message filter.
 /// 403 counts only when the body contains "run out of credits" (legacy IC spend wording); other 403s (content-safety, ZDR, …) are excluded.
+/// A 402 raised because an external-provider model needs a positive PAYG
+/// balance. That is a separate balance from the subscription quota, so it must
+/// not open the "weekly limit" upsell: the server message explains the fix.
+fn is_external_provider_balance_error(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("external provider")
+        && (m.contains("positive balance") || m.contains("balance is required"))
+}
+
 pub(crate) fn is_credit_limit_error(http_status: Option<u16>, message: &str) -> bool {
+    if is_external_provider_balance_error(message) {
+        return false;
+    }
     let m = message.to_ascii_lowercase();
     let legacy = m.contains("run out of credits");
     match http_status {

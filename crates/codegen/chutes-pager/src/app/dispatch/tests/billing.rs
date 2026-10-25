@@ -554,6 +554,16 @@ fn is_credit_limit_error_matches_legacy_403_and_pool_402() {
         None,
         "status 403: run out of credits"
     ));
+    // External-provider models need a positive PAYG balance; a 402 there is
+    // not the subscription/weekly limit and must show the server message.
+    assert!(!is_credit_limit_error(
+        Some(402),
+        "A positive balance is required for external provider execution."
+    ));
+    assert!(!is_credit_limit_error(
+        None,
+        "API error (status 402 Payment Required): A positive balance is required for external provider execution."
+    ));
     assert!(!is_credit_limit_error(Some(403), "content safety blocked"));
     assert!(!is_credit_limit_error(Some(500), "internal server error"));
     // Pool phrases alone without 402/403 status do not match.

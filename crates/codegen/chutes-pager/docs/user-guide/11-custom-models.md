@@ -8,6 +8,11 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 
 By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Set `CHUTES_API_KEY`, then start a session.
 
+Models with `confidential_compute: false` run on an external provider. They need
+a positive PAYG balance and do not draw on the subscription weekly quota; without
+that balance Chutes returns a `402` external-provider error. TEE models do not
+have this requirement.
+
 `model-router` is Chutes Auto: a live latency-routed inline pool composed from the
 visible chat models in the current catalog (`modelA,modelB,...:latency`). It needs
 no dashboard pool, so API-key-only accounts get it too. Only models that advertise

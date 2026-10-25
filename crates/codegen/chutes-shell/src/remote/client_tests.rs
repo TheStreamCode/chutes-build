@@ -1065,3 +1065,27 @@ fn parse_reads_supported_features_for_tool_support() {
         None
     );
 }
+
+#[test]
+fn parse_marks_non_tee_models_as_external_provider() {
+    let external = serde_json::json!({
+        "model": "external-model",
+        "context_window": 100_000,
+        "confidential_compute": false
+    });
+    let entry = parse_remote_model_value(&external, "https://default.url").expect("parses");
+    let notice = entry.notice.expect("external provider notice");
+    assert_eq!(notice.label.as_deref(), Some("PAYG"));
+    assert!(notice.text.contains("positive PAYG balance"));
+
+    let tee = serde_json::json!({
+        "model": "tee-model",
+        "context_window": 100_000,
+        "confidential_compute": true
+    });
+    let tee_entry = parse_remote_model_value(&tee, "https://default.url").expect("parses");
+    assert!(
+        tee_entry.notice.is_none(),
+        "TEE models carry no PAYG notice"
+    );
+}

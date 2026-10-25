@@ -1,7 +1,7 @@
 use crate::session::export::{ExportedMessage, ExportedMetadata, ExportedSession};
 use chutes_login::backend::{ActiveAuthBackend, AuthBackend};
 use chutes_login::{ChutesAuth, LoginConfig};
-use chutes_sampling_types::{MODEL_NOTICE_META_KEY, ModelNotice};
+use chutes_sampling_types::{MODEL_NOTICE_META_KEY, ModelNotice, ModelNoticeSeverity};
 use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
@@ -662,6 +662,29 @@ pub(crate) fn parse_remote_model_value(
                 .any(|feature| feature.eq_ignore_ascii_case("tools"))
         });
 
+    let confidential_compute = obj
+        .get("confidential_compute")
+        .or_else(|| obj.get("confidentialCompute"))
+        .or_else(|| meta.and_then(|m| m.get("confidential_compute")))
+        .and_then(|value| value.as_bool());
+    let notice = obj
+        .get(MODEL_NOTICE_META_KEY)
+        .or_else(|| meta.and_then(|m| m.get(MODEL_NOTICE_META_KEY)))
+        .and_then(ModelNotice::from_value)
+        .or_else(|| {
+            // A non-TEE entry runs on an external provider and needs PAYG credit,
+            // which the subscription/weekly quota does not cover.
+            (confidential_compute == Some(false)).then(|| {
+                ModelNotice {
+                    severity: ModelNoticeSeverity::Warning,
+                    text: "External provider: requires a positive PAYG balance to run.".to_owned(),
+                    label: Some("PAYG".to_owned()),
+                }
+                .normalized()
+                .expect("non-empty notice")
+            })
+        });
+
     let api_backend = get_string(obj, "apiBackend")
         .or_else(|| get_string(obj, "api_backend"))
         .and_then(|s| match s.as_str() {
@@ -695,10 +718,7 @@ pub(crate) fn parse_remote_model_value(
         base_url,
         name,
         description: get_string(obj, "description"),
-        notice: obj
-            .get(MODEL_NOTICE_META_KEY)
-            .or_else(|| meta.and_then(|m| m.get(MODEL_NOTICE_META_KEY)))
-            .and_then(ModelNotice::from_value),
+        notice,
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
             .and_then(|v| u32::try_from(v).ok()),
