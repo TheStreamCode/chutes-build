@@ -192,14 +192,18 @@ impl chutes_tool_runtime::Tool for ExtractDocumentTool {
             .map_err(|error| execution_error("extract_document", error))?;
         let client = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("extract_document", error))?;
-        let detail = client.describe(slug).await.map_err(|error| {
-            execution_error(
-                "extract_document",
-                format!(
-                    "document chute `{slug}` is not reachable ({error}); use list_media_models with a document query to find an equivalent OCR chute"
-                ),
-            )
-        })?;
+        // The account API's describe lookup takes the chute id, not the public
+        // slug: resolve through the live catalog first, as generate_media does.
+        let (detail, resolved) = super::media::resolve_model_detail(&client, slug)
+            .await
+            .map_err(|error| {
+                execution_error(
+                    "extract_document",
+                    format!(
+                        "document chute `{slug}` is not reachable ({error}); use list_media_models with a document query to find an equivalent OCR chute"
+                    ),
+                )
+            })?;
         let base_url = super::media::invoke_base_url(&detail).ok_or_else(|| {
             execution_error(
                 "extract_document",
@@ -254,6 +258,12 @@ impl chutes_tool_runtime::Tool for ExtractDocumentTool {
             "model".to_owned(),
             serde_json::Value::String(slug.to_owned()),
         );
+        if resolved != slug {
+            output.insert(
+                "resolved_chute_id".to_owned(),
+                serde_json::Value::String(resolved),
+            );
+        }
         if let Some(path) = source_path {
             output.insert("path".to_owned(), serde_json::Value::String(path));
         }

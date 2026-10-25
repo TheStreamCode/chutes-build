@@ -4,6 +4,26 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`ocr_page` is advertised again.** The tool was registered but never added to
+  the ecosystem toolsets, so models could not call it even though the guide
+  documented it. Every toolset that offers `extract_document` now offers it too.
+- **Document, embedding, and speech tools resolve public slugs to chute ids.**
+  `extract_document`, `embed_texts`, and `transcribe_audio` passed the catalog
+  slug to the account describe API, which only accepts the chute id, so they
+  failed with "Chute not found" even when the model was live. They now resolve
+  through the live catalog first, like `generate_media`.
+- **Media calls place the prompt inside v2 `args` wrappers.** Cords whose schema
+  requires a single `args`/`input_args` object without resolvable nested
+  properties now receive `{args: {prompt}}` instead of failing with "nothing to
+  send". Published schemas that reference missing definitions no longer block
+  the call: local validation is best-effort and the server stays authoritative.
+- **The tool catalog budget reflects the restored `ocr_page` schema** (30 tools,
+  10,517 estimated tokens, ceiling 10,600).
+
 ## [2.0.3] - 2026-10-24
 
 ### Added

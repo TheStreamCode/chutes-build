@@ -141,14 +141,17 @@ impl chutes_tool_runtime::Tool for TranscribeAudioTool {
             .map_err(|error| execution_error("transcribe_audio", error))?;
         let client = ChutesMediaClient::from_credentials(credentials)
             .map_err(|error| execution_error("transcribe_audio", error))?;
-        let detail = client.describe(slug).await.map_err(|error| {
-            execution_error(
-                "transcribe_audio",
-                format!(
-                    "STT chute `{slug}` is not reachable ({error}); use list_media_models with a speech query to find an equivalent transcription chute"
-                ),
-            )
-        })?;
+        // The account API describes chutes by chute id, not public slug.
+        let (detail, _) = super::media::resolve_model_detail(&client, slug)
+            .await
+            .map_err(|error| {
+                execution_error(
+                    "transcribe_audio",
+                    format!(
+                        "STT chute `{slug}` is not reachable ({error}); use list_media_models with a speech query to find an equivalent transcription chute"
+                    ),
+                )
+            })?;
         let base_url = super::media::invoke_base_url(&detail).ok_or_else(|| {
             execution_error(
                 "transcribe_audio",

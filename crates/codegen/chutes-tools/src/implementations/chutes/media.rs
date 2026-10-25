@@ -699,7 +699,7 @@ const PROMPT_FIELDS: &[&str] = &[
 /// 404s and the caller has to run `list_media_models` first. On failure this
 /// searches the catalog once and retries with the record's own slug/id;
 /// returns the identifier that resolved, for warmup and provenance.
-async fn resolve_model_detail(
+pub(crate) async fn resolve_model_detail(
     client: &ChutesMediaClient,
     model: &str,
 ) -> Result<(serde_json::Value, String), String> {
@@ -864,6 +864,19 @@ fn apply_prompt(
     prompt: &str,
 ) {
     let Some((container, field)) = prompt_target(schema) else {
+        // A v2 chute can publish `{"properties":{"args":{"type":"any"}}}` without
+        // the nested properties (or with `$ref`s we cannot resolve). The prompt
+        // still belongs inside that single wrapper object.
+        if let Some(wrapper) = single_prompt_wrapper(schema) {
+            let entry = params
+                .entry(wrapper)
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            if let Some(map) = entry.as_object_mut() {
+                map.entry("prompt")
+                    .or_insert_with(|| serde_json::Value::String(prompt.to_owned()));
+            }
+            return;
+        }
         if schema.is_none() {
             params
                 .entry("prompt")
@@ -900,6 +913,33 @@ fn prompt_target(schema: &Option<serde_json::Value>) -> Option<(Option<String>, 
         let nested = value.get("properties")?.as_object()?;
         first_prompt_field(nested).map(|field| (Some(key.clone()), field))
     })
+}
+
+/// The single object-shaped wrapper a schema requires when its nested properties
+/// are unavailable (`args`, `input_args`, ...), so a prompt can still be placed.
+fn single_prompt_wrapper(schema: &Option<serde_json::Value>) -> Option<String> {
+    let schema = schema.as_ref()?;
+    let properties = schema.get("properties")?.as_object()?;
+    if properties.len() != 1 {
+        return None;
+    }
+    let (name, spec) = properties.iter().next()?;
+    let is_objectish = spec
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|ty| ty == "object" || ty == "any" || ty == "null");
+    if !is_objectish {
+        return None;
+    }
+    let normalized = name.to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "args" | "input_args" | "input" | "payload"
+    ) {
+        Some(name.clone())
+    } else {
+        None
+    }
 }
 
 fn first_prompt_field(properties: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
@@ -1018,8 +1058,17 @@ fn validate_schema_fields(
     };
     let mut closed = published.clone();
     close_object_schemas(&mut closed, !allow_unknown);
-    let validator = jsonschema::validator_for(&closed)
-        .map_err(|error| format!("cord input_schema is not a valid JSON Schema: {error}"))?;
+    let validator = match jsonschema::validator_for(&closed) {
+        Ok(validator) => validator,
+        Err(error) => {
+            // The published schema can reference definitions it does not ship
+            // (some v2 chutes omit `/definitions/...`). Local validation is a
+            // best-effort pre-check; the server remains the authority, so a
+            // malformed schema must not block an otherwise valid call.
+            tracing::warn!(%error, "cord input_schema is not a valid JSON Schema; skipping local validation");
+            return Ok(());
+        }
+    };
     let instance = serde_json::Value::Object(params.clone());
     let errors: Vec<String> = validator
         .iter_errors(&instance)
@@ -1727,6 +1776,38 @@ mod tests {
     /// Guessing `prompt` against a schema that has no text field would trip
     /// unknown-field validation; staying out of the way lets the caller get an
     /// error that names the real fields instead.
+    #[test]
+    fn prompt_goes_inside_an_unresolvable_args_wrapper() {
+        // v2 chutes publish `{"properties":{"args":{"$ref":...}}}`; the prompt
+        // belongs inside the wrapper even when its nested properties are missing.
+        let schema = Some(serde_json::json!({
+            "type": "object",
+            "required": ["args"],
+            "properties": { "args": { "$ref": "#/definitions/GenerateInput" } },
+            "definitions": {}
+        }));
+        let mut params = serde_json::Map::new();
+        apply_prompt(&schema, &mut params, "a red apple");
+        assert_eq!(
+            serde_json::Value::Object(params),
+            serde_json::json!({"args": {"prompt": "a red apple"}})
+        );
+    }
+
+    #[test]
+    fn invalid_published_schema_does_not_block_dispatch() {
+        // Some chutes reference definitions they do not ship. Local validation is
+        // best-effort; the server remains the authority.
+        let schema = Some(serde_json::json!({
+            "type": "object",
+            "required": ["args"],
+            "properties": { "args": { "$ref": "#/definitions/Missing" } }
+        }));
+        let params = serde_json::json!({"args": {"prompt": "x"}});
+        let params = params.as_object().expect("object").clone();
+        assert!(validate_schema_fields(&schema, &params, false).is_ok());
+    }
+
     #[test]
     fn no_prompt_field_means_no_guess() {
         let schema = serde_json::json!({"properties": {"image_b64": {"type": "string"}}});

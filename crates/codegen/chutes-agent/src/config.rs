@@ -285,6 +285,7 @@ fn chutes_build_core_toolset_with(
         (&chutes::GenerateMediaTool).into(),
         (&chutes::TranscribeAudioTool).into(),
         (&chutes::ExtractDocumentTool).into(),
+        (&chutes::OcrPageTool).into(),
         (&chutes::EmbedTextsTool).into(),
         (&chutes::BrowserTool).into(),
         (&chutes_build::UpdateGoalTool).into(),
@@ -433,6 +434,7 @@ fn chutes_build_plan_toolset() -> ToolServerConfig {
             (&chutes::GenerateMediaTool).into(),
             (&chutes::TranscribeAudioTool).into(),
             (&chutes::ExtractDocumentTool).into(),
+            (&chutes::OcrPageTool).into(),
             (&chutes::EmbedTextsTool).into(),
             (&chutes::BrowserTool).into(),
             (&chutes_build::UpdateGoalTool).into(),
@@ -486,6 +488,7 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&chutes::GenerateMediaTool).into(),
             (&chutes::TranscribeAudioTool).into(),
             (&chutes::ExtractDocumentTool).into(),
+            (&chutes::OcrPageTool).into(),
             (&chutes::EmbedTextsTool).into(),
             (&chutes::BrowserTool).into(),
             // Memory

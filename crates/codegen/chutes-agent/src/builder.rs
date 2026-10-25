@@ -2391,10 +2391,13 @@ mod tests {
         // generate_media, and scheduler_create: nested descriptions/examples are
         // dropped from the model-facing copy while dispatch still validates the
         // canonical schema, dropping the catalog to 10,239 estimated tokens.
+        // 2.0.3 also advertises ocr_page in every ecosystem toolset (it was
+        // registered but never offered), which adds its 278-token schema:
+        // 30 tools / 10,517 estimated tokens.
         assert!(
-            total <= 10_300,
+            total <= 10_600,
             "tool catalog grew to {total} estimated tokens across {} tools \
-             (ceiling 10300, baseline 10239) — deduplicate or justify the growth",
+             (ceiling 10600, baseline 10517) — deduplicate or justify the growth",
             rows.len()
         );
     }
