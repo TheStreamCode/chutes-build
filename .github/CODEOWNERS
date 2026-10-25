@@ -1,5 +1,7 @@
-* @TheStreamCode
-
-/.github/ @TheStreamCode
+# Ownership of first-party sources and documentation.
+# Dependency manifests, lockfiles and GitHub workflows are intentionally unowned so
+# Dependabot pull requests do not request a maintainer review on every update.
+/bin/ @TheStreamCode
+/docs/ @TheStreamCode
 /npm/ @TheStreamCode
-/crates/chutes-build-core/ @TheStreamCode
+/scripts/ @TheStreamCode
