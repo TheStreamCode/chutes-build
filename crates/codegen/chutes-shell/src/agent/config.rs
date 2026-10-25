@@ -2769,6 +2769,53 @@ fn drop_model_tables_under_external_auth(config: &mut Config) {
         );
         });
 }
+/// Build the live Chutes Auto entry: a latency-routed inline pool over the
+/// visible chat models. Returns `None` when no chat model is usable, or when the
+/// user configured an explicit `[model.model-router]` override.
+fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Option<ModelEntry> {
+    if cfg
+        .config_models
+        .contains_key(chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
+    {
+        return None;
+    }
+    let candidates: Vec<&ModelEntry> = catalog
+        .values()
+        .filter(|entry| entry.info.visible_for_auth(false))
+        .filter(|entry| entry.info.api_backend == ApiBackend::ChatCompletions)
+        .filter(|entry| !entry.info.hidden)
+        .filter(|entry| entry.info.model != chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
+        .filter(|entry| !entry.info.model.contains(','))
+        .take(4)
+        .collect();
+    let first = *candidates.first()?;
+    let ids: Vec<&str> = candidates
+        .iter()
+        .map(|entry| entry.info.model.as_str())
+        .collect();
+    let pool = chutes_build_core::routing::compose_live_auto_pool(
+        &ids,
+        chutes_build_core::routing::RoutingStrategy::Latency,
+    )?;
+    let mut entry = ModelEntry::fallback(
+        chutes_build_core::routing::LEGACY_AUTO_MODEL_ID,
+        &cfg.endpoints,
+    );
+    entry.info.model = pool;
+    entry.info.name = Some("Chutes Auto".to_owned());
+    entry.info.description =
+        Some("Automatic latency-routed pool across the available Chutes chat models".to_owned());
+    entry.info.context_window = first.info.context_window;
+    entry.info.context_windows = first.info.context_windows.clone();
+    entry.info.api_backend = ApiBackend::ChatCompletions;
+    entry.info.max_completion_tokens = first.info.max_completion_tokens;
+    entry.info.supports_backend_search = false;
+    entry.info.hidden = false;
+    entry.info.user_selectable = true;
+    entry.info.supported_in_api = true;
+    Some(entry)
+}
+
 /// Assemble the final model map. Priority (highest wins):
 /// config.toml `[model.*]` > prefetched (remote) > hardcoded defaults.
 pub(crate) fn resolve_model_list(
@@ -2819,6 +2866,22 @@ pub(crate) fn resolve_model_list(
             }
         }
         resolved = prefetched;
+    }
+    // The live catalog replaces the bundled list, which drops the compiled Auto
+    // entry. Rebuild it from the visible chat models so API-key sessions still
+    // get Chutes Auto as the default: an inline latency-routed pool, which works
+    // without a dashboard pool.
+    if !cfg.endpoints.has_custom_endpoint()
+        && let Some(auto) = live_auto_entry(&resolved, cfg)
+    {
+        let mut with_auto: IndexMap<String, ModelEntry> =
+            IndexMap::with_capacity(resolved.len() + 1);
+        with_auto.insert(
+            chutes_build_core::routing::LEGACY_AUTO_MODEL_ID.to_string(),
+            auto,
+        );
+        with_auto.extend(resolved);
+        resolved = with_auto;
     }
     let mut explicit_api_backend_keys = std::collections::HashSet::new();
     let mut explicit_supports_effort_false_keys = std::collections::HashSet::new();

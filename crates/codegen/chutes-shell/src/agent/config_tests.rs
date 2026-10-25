@@ -7902,7 +7902,11 @@ fn resolve_model_list_keeps_prefetch_only_entries_and_prunes_defaults() {
     p.insert("secret-xyz".to_string(), e);
     let resolved = resolve_model_list(&cfg, Some(p));
     assert!(resolved.contains_key("secret-xyz"));
-    assert!(!resolved.contains_key(dm));
+    // The live catalog replaces the bundled list, but Auto is rebuilt as a
+    // latency-routed inline pool over the visible chat models.
+    let auto = resolved.get(dm).expect("live Auto entry is present");
+    assert_eq!(auto.info.name.as_deref(), Some("Chutes Auto"));
+    assert_eq!(auto.info.model, "secret-xyz:latency");
 }
 #[test]
 fn resolve_model_list_prefetch_replaces_bundled_entirely() {

@@ -8,6 +8,11 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 
 By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Set `CHUTES_API_KEY`, then start a session.
 
+`model-router` is Chutes Auto: a live latency-routed inline pool composed from the
+visible chat models in the current catalog (`modelA,modelB,...:latency`). It needs
+no dashboard pool, so API-key-only accounts get it too. Selecting a concrete model
+bypasses routing.
+
 List all available models:
 
 ```bash

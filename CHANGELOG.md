@@ -16,6 +16,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and loops. The system prompt points at it only when a tool, command,
   permission, session, or capability fails, or when harness detail is needed.
 
+### Changed
+
+- **New sessions default to Chutes Auto in API-key builds.** The live catalog
+  replaces the bundled model list, which dropped the compiled Auto entry, so the
+  default silently fell back to the first listed model. Chutes Build now rebuilds
+  Auto from the visible chat models as a latency-routed inline pool
+  (`modelA,modelB,...:latency`), because the saved `default` alias needs a
+  dashboard pool that API-key-only accounts do not have. `models` and the picker
+  show `model-router` / Chutes Auto again, and a concrete model still bypasses
+  routing.
+
 ### Fixed
 
 - **`update --check` follows the npm registry, and self-update explains the npm
