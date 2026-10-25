@@ -2919,6 +2919,39 @@ fn resolve_update_trigger(flag: Option<&str>, auto: bool) -> auto_update::CliUpd
         auto_update::CliUpdateTrigger::UserCommand
     }
 }
+/// `update --check` against the npm registry, the channel this fork actually ships on.
+async fn print_npm_update_status(json: bool) -> Result<()> {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let latest = chutes_update::version::fetch_npm_latest_version(None).await?;
+    let update_available = match (
+        semver::Version::parse(&current),
+        semver::Version::parse(&latest),
+    ) {
+        (Ok(current), Ok(latest)) => latest > current,
+        _ => anyhow::bail!("could not compare npm versions (current={current}, latest={latest})"),
+    };
+    if json {
+        let status = chutes_update::UpdateStatus {
+            current_version: current,
+            latest_version: Some(latest),
+            update_available,
+            installer: Some("npm".to_owned()),
+            channel: "stable".to_owned(),
+            auto_update: None,
+            error: None,
+        };
+        println!("{}", serde_json::to_string(&status)?);
+        return Ok(());
+    }
+    if update_available {
+        println!("A new version of Chutes Build is available: {current} -> {latest}");
+        println!("Update with: npm install -g chutes-build@latest");
+    } else {
+        println!("Chutes Build - v{current} (latest on npm: {latest})");
+    }
+    Ok(())
+}
+
 #[tracing::instrument(level = "debug", skip_all)]
 async fn run_update_command(
     check: bool,
@@ -2932,16 +2965,22 @@ async fn run_update_command(
     if json && !check {
         anyhow::bail!("--json requires --check");
     }
-    let mut update_config = base_update_config.clone();
+    // This fork is distributed through npm and GitHub releases; the upstream
+    // release-channel pointer does not exist, and a self-downloaded binary would
+    // bypass the npm launcher/native-package pairing. Check npm instead.
     if check {
         if version.is_some() {
             anyhow::bail!("--version cannot be used with --check");
         }
-        auto_update::apply_channel_switch(channel_switch, &mut update_config).await;
-        let status = auto_update::check_update_status(&update_config).await;
-        auto_update::print_update_status(&status, json)?;
+        return print_npm_update_status(json).await;
+    }
+    if std::env::var_os("CHUTES_BUILD_LEGACY_SELF_UPDATE").is_none() {
+        println!(
+            "Self-update is not enabled in this build. Update with: npm install -g chutes-build@latest"
+        );
         return Ok(());
     }
+    let mut update_config = base_update_config.clone();
     if let Some(ref v) = version
         && semver::Version::parse(v).is_err()
     {

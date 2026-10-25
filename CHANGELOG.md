@@ -6,8 +6,26 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A native `chutes-build-harness` skill explains the CLI to the model.** It
+  covers the tool inventory, permission modes, slash commands, configuration
+  and session locations, diagnostic commands, and a troubleshooting matrix for
+  missing tools, denied calls, 401/403/429, chute-id and media payload errors,
+  document/media capacity failures, missing skills, npm updates, output limits,
+  and loops. The system prompt points at it only when a tool, command,
+  permission, session, or capability fails, or when harness detail is needed.
+
 ### Fixed
 
+- **`update --check` follows the npm registry, and self-update explains the npm
+  path.** This fork ships through npm and GitHub releases, so the upstream GCS
+  release-channel pointer is absent and the old check failed with HTTP 404 (or a
+  missing npm executable on Windows). `--check` now reads the `latest` dist-tag
+  over the registry HTTPS API and prints the npm update command; a non-check
+  `update` reports that self-update is disabled in this build and points at
+  `npm install -g chutes-build@latest`. The upstream installer path remains behind
+  the maintainer-only `CHUTES_BUILD_LEGACY_SELF_UPDATE` escape hatch.
 - **`ocr_page` is advertised again.** The tool was registered but never added to
   the ecosystem toolsets, so models could not call it even though the guide
   documented it. Every toolset that offers `extract_document` now offers it too.

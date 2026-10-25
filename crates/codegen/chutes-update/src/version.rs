@@ -156,6 +156,36 @@ async fn fetch_npm_version(channel: &str, npm_registry: Option<&str>) -> Result<
 
 /// Test-only entry point: invokes the private [`fetch_npm_tag`] for tests that swap in a fake `npm` via PATH.
 #[doc(hidden)]
+/// Fetch the `latest` dist-tag over the npm registry HTTPS API instead of
+/// spawning the npm CLI. The CLI is not on PATH for every launcher (and on
+/// Windows `Command::new("npm")` does not resolve `npm.cmd`), while the
+/// registry API is the same source `npm view` reads.
+pub async fn fetch_npm_latest_version(npm_registry: Option<&str>) -> Result<String> {
+    #[derive(Deserialize)]
+    struct LatestPackage {
+        version: String,
+    }
+    let base = npm_registry
+        .unwrap_or("https://registry.npmjs.org")
+        .trim_end_matches('/');
+    let url = format!("{base}/{NPM_PACKAGE}/latest");
+    let client = chutes_extra_ca::build_reqwest_client(|builder| {
+        builder
+            .timeout(Duration::from_secs(10))
+            .user_agent("chutes-build-update-check")
+    })?;
+    let response = client.get(&url).send().await?;
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("npm registry returned {status} for {url}");
+    }
+    let package: LatestPackage = response.json().await?;
+    if package.version.trim().is_empty() {
+        anyhow::bail!("npm registry returned an empty version for {url}");
+    }
+    Ok(package.version)
+}
+
 pub async fn fetch_npm_tag_for_test(tag: &str, npm_registry: Option<&str>) -> Result<String> {
     fetch_npm_tag(tag, npm_registry).await
 }

@@ -7,10 +7,16 @@
 use std::path::Path;
 
 /// Bundled skills shipped with the binary: directory name and `SKILL.md` body.
-const BUNDLED_SKILLS: &[(&str, &str)] = &[(
-    "chutes-platform",
-    include_str!("../assets/bundled-skills/chutes-platform/SKILL.md"),
-)];
+const BUNDLED_SKILLS: &[(&str, &str)] = &[
+    (
+        "chutes-platform",
+        include_str!("../assets/bundled-skills/chutes-platform/SKILL.md"),
+    ),
+    (
+        "chutes-build-harness",
+        include_str!("../assets/bundled-skills/chutes-build-harness/SKILL.md"),
+    ),
+];
 
 /// Write the embedded skills into `<chutes_home>/bundled/skills/`.
 ///

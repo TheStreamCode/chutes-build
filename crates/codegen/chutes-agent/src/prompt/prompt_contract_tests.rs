@@ -196,14 +196,19 @@ fn standard_primary_fixed_prompt_stays_under_the_token_ceiling() {
     // work_policy gained the independent-tool-call batching rule, taking the
     // standard render to 2,286; pointing the same block at the bundled
     // `chutes-platform` skill takes it to 2,311, with the full platform detail
-    // loaded on demand from that skill. The ceiling follows to 2,325.
+    // loaded on demand from that skill. A second pointer at the
+    // `chutes-build-harness` skill, for tool/command/permission failures and
+    // harness questions, takes it to 2,359 (ceiling 2,375). Making both pointers
+    // path-based, so they work even where no skill tool is advertised, takes the
+    // render to 2,392 (ceiling 2,405). Explicitly scoping the harness pointer to
+    // CLI questions as well as failures takes it to 2,408, ceiling 2,420.
     let renderer = default_renderer();
     let base = render_non_interactive(&renderer, false);
     let tokens = chutes_token_estimation::estimate_tokens(&base);
     assert!(
-        tokens <= 2325,
+        tokens <= 2420,
         "fixed system prompt grew to {tokens} estimated tokens \
-         (ceiling 2325, baseline 2311) — deduplicate or justify the growth"
+         (ceiling 2420, baseline 2408) — deduplicate or justify the growth"
     );
 }
 
@@ -236,7 +241,11 @@ fn base_prompt_renders_the_chutes_platform_block() {
     );
     assert!(
         rendered.contains("chutes-platform"),
-        "base prompt lost the bundled skill pointer"
+        "base prompt lost the bundled platform skill pointer"
+    );
+    assert!(
+        rendered.contains("chutes-build-harness"),
+        "base prompt lost the bundled harness skill pointer"
     );
     assert!(
         rendered.contains("optimized for the Chutes ecosystem"),

@@ -86,10 +86,16 @@ routing) plus one work_policy rule telling the model to batch independent tool
 calls, which the dispatch layer already runs in parallel. The standard primary
 render re-baselines from 2,161 to 2,286 estimated tokens (ceiling 2,300), and
 the same block points at the new bundled `chutes-platform` skill, taking it to
-2,311 (ceiling 2,325). The full platform/API detail ships as that skill, loaded
-on demand and shadowable by user or repository skills, so this is the complete
-fixed-cost increase, paid back on any turn that avoids a tool round trip or an
-unnecessary web search.
+2,311 (ceiling 2,325). A second bundled skill, `chutes-build-harness`, gives the
+model the harness's tools, permission modes, commands, config locations, and a
+failure-recovery matrix on demand; one pointer in the same block takes the
+render to 2,359 (ceiling 2,375). Both pointers name the bundled SKILL.md paths,
+so they work in every toolset whether or not a skill tool is advertised, taking
+the render to 2,392 and, with the pointer explicitly scoped to CLI questions as
+well as failures, 2,408 (ceiling 2,420). Both skills are loaded only when needed and
+are shadowable by user or repository skills, so this is the complete fixed-cost
+increase, paid back on any turn that avoids a tool round trip or an unnecessary
+web search.
 
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped
