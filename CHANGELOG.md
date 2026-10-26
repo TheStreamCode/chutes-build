@@ -48,6 +48,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   leader modes.
 - Credential headers are marked sensitive, so keys cannot appear in HTTP debug
   logs even for management routes that need the raw-key form.
+- The zstd stack is on the patched 0.14 line (RUSTSEC-2026-0391, -0398,
+  -0403, -0410) and the unused tonic zstd feature is gone; `cargo deny` is
+  clean again.
 
 ## [2.0.5] - 2026-10-25
 
