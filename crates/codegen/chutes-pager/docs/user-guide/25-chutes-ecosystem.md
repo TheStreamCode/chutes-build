@@ -56,8 +56,10 @@ is eventually consistent and intermittently returns 502. `/routing` and the
 plain `routing` command stay read-only.
 
 Some catalog entries have `confidential_compute: false`: they run on an external
-provider and require a positive PAYG balance, separately from the subscription
-quota. When that balance is not positive Chutes returns
+provider and require a positive PAYG balance, separately from any subscription
+quota. The beta models in this group (Qwen3.8-Max, DeepSeek-V4.1-Flash, GLM-5.3,
+Kimi-K2.7-Code, GLM-5.2-Fast, Qwen3.8-2.4T-A95B) are PAYG-only and not TEE. When
+that balance is not positive Chutes returns
 `402 A positive balance is required for external provider execution`. This is a
 PAYG funding condition, not the weekly or monthly subscription limit; top up the
 PAYG balance at https://chutes.ai/?_s=usage or use a TEE model. The picker marks
