@@ -7925,6 +7925,10 @@ fn live_auto_pool_keeps_only_tool_capable_large_context_models() {
     let mut small = prefetch_model_entry("small-context", 16_000, ApiBackend::default());
     small.info.supports_tools = true;
     p.insert("small-context".to_string(), small);
+    let mut external = prefetch_model_entry("external-payg", 200_000, ApiBackend::default());
+    external.info.supports_tools = true;
+    external.info.external_provider = true;
+    p.insert("external-payg".to_string(), external);
 
     let resolved = resolve_model_list(&cfg, Some(p));
     let auto = resolved.get(dm).expect("live Auto entry is present");
@@ -7943,6 +7947,7 @@ fn live_auto_pool_keeps_only_tool_capable_large_context_models() {
     );
     assert!(!auto.info.model.contains("no-tools"));
     assert!(!auto.info.model.contains("small-context"));
+    assert!(!auto.info.model.contains("external-payg"));
 }
 
 #[test]

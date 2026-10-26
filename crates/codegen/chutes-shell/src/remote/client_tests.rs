@@ -1155,3 +1155,31 @@ fn curated_reasoning_efforts_survive_a_minimal_catalogue_row() {
         .collect();
     assert_eq!(ids, ["low", "medium", "xhigh"]);
 }
+
+#[test]
+fn parse_marks_external_provider_rows() {
+    let external = serde_json::json!({
+        "model": "acme/external-model",
+        "confidential_compute": false
+    });
+    assert!(
+        parse_remote_model_value(&external, "https://default.url")
+            .expect("parses")
+            .external_provider
+    );
+    let tee = serde_json::json!({
+        "model": "acme/tee-model",
+        "confidential_compute": true
+    });
+    assert!(
+        !parse_remote_model_value(&tee, "https://default.url")
+            .expect("parses")
+            .external_provider
+    );
+    let unknown = serde_json::json!({"model": "acme/unknown"});
+    assert!(
+        !parse_remote_model_value(&unknown, "https://default.url")
+            .expect("parses")
+            .external_provider
+    );
+}

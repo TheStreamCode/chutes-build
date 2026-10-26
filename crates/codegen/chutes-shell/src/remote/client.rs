@@ -671,18 +671,10 @@ pub(crate) fn parse_remote_model_value(
             .any(|feature| feature.eq_ignore_ascii_case("tools"))
     });
     let curated_efforts = chutes_build_core::reasoning::curated_reasoning_efforts(&model);
-    let advertises_reasoning = curated_efforts.is_some()
-        || supported_features.as_ref().is_some_and(|features| {
-            features
-                .iter()
-                .any(|feature| feature.eq_ignore_ascii_case("reasoning"))
-        });
     // The catalogue publishes the `reasoning` feature but not the effort menu.
-    // Expose the menu only for generations whose template control, or whose
-    // endpoint-accepted values, we verified.
-    let supports_reasoning_effort = advertises_reasoning
-        && (curated_efforts.is_some()
-            || chutes_build_core::reasoning::reasoning_profile(&model).is_selectable());
+    // Expose the menu only for generations whose accepted values we probed
+    // against the endpoint; a profile alone is not enough to offer a menu.
+    let supports_reasoning_effort = curated_efforts.is_some();
 
     let confidential_compute = obj
         .get("confidential_compute")
@@ -802,6 +794,7 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| meta.and_then(|m| m.get("hidden")))
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        external_provider: confidential_compute == Some(false),
         supports_tools,
         supported_in_api: obj
             .get("supportedInApi")

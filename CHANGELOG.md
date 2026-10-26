@@ -13,18 +13,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /invocations/stats/llm`. Pool members and stats are resolved by
   `chute_id` against the live catalogue, so the view shows model names rather
   than private chute labels.
-- The routing view is read-only. Alias writes remain experimental and hidden:
-  the Chutes endpoint is eventually consistent, intermittently answers 502, and
-  only accepts the raw key for DELETE, so a supported write surface waits for
-  the platform to stabilise.
+- The routing view is read-only. Alias writes are not a supported surface yet:
+  the Chutes endpoint is eventually consistent and intermittently answers 502,
+  so the write path stays hidden until the platform stabilises.
 - When the account has a saved `default` routing pool, Auto targets
   `default:latency` instead of composing an inline pool, so the server-side
   routing choice made in the Chutes web app is honoured.
-- Reasoning-effort controls are derived automatically for catalogue models that
-  advertise the `reasoning` feature and belong to a verified generation family
-  (GLM, Qwen, Kimi, DeepSeek V3.2, Gemma). The catalogue publishes the feature
-  but not the effort menu, so the built-in verified menu is used instead of
-  leaving `/effort` empty.
+- Reasoning-effort controls are exposed only for models whose accepted values
+  were probed against the Chutes endpoint. The catalogue publishes the
+  `reasoning` feature but not the effort menu, so the verified value set is used
+  instead of the generic fallback.
 - The external-provider `deepseek-ai/DeepSeek-V4-Pro-0813` and
   `Qwen/Qwen3.8-Max-0902` rows carry no feature list, so their effort menus come
   from endpoint-verified values (`low|medium|high` and `low|medium|xhigh`).
@@ -37,8 +35,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The live invocation-stats body is tens of megabytes: fetch it with a longer
   deadline and `Accept-Encoding: identity` so the routing view can decode it
   behind edges that negotiate an unsupported compression.
-- `/routing` does not block the TUI on the stats fetch: a cold cache starts a
-  background refresh and asks the user to run the command again.
+- `/routing` does not block the TUI on the stats fetch: a cold or stale cache
+  starts a background refresh and asks the user to run the command again.
+- Auto excludes `confidential_compute: false` models explicitly instead of
+  relying on their missing feature list, so a PAYG model can never join the
+  automatic pool.
+- The saved-pool alias cache is seeded on every interactive startup path, not
+  only the headless one, so Auto can honour `default:latency` in the TUI and
+  leader modes.
+- Credential headers are marked sensitive, so keys cannot appear in HTTP debug
+  logs even for management routes that need the raw-key form.
 
 ## [2.0.5] - 2026-10-25
 

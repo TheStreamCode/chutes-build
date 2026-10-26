@@ -52,10 +52,8 @@ targets `default:latency`, so the pool configured in the Chutes web app wins
 over the client-side inline pool.
 
 Pool writes are not part of the supported surface yet: the Chutes alias endpoint
-is eventually consistent and intermittently returns 502, and `DELETE` only
-accepts the raw key. Experimental `add`/`remove`/`save` commands exist behind
-`CHUTES_ROUTING_EXPERIMENTAL=1`, one command at a time; `/routing` and the plain
-`routing` command stay read-only.
+is eventually consistent and intermittently returns 502. `/routing` and the
+plain `routing` command stay read-only.
 
 Some catalog entries have `confidential_compute: false`: they run on an external
 provider and require a positive PAYG balance, separately from the subscription

@@ -116,11 +116,11 @@ impl ChutesCredentials {
         }
     }
 
-    /// Raw API key without a scheme. The `DELETE /model_aliases/{alias}`
+    /// Raw API key as a sensitive header. The `DELETE /model_aliases/{alias}`
     /// endpoint rejects the Bearer form and returns 404 instead; verified
     /// 2026-10-26 against the live API. Keep this scoped to that call.
-    pub fn management_raw_authorization(&self) -> Cow<'_, str> {
-        Cow::Borrowed(&self.api_key)
+    pub fn management_raw_authorization_header(&self) -> reqwest::header::HeaderValue {
+        sensitive_header_value(&self.api_key)
     }
 
     /// Like [`Self::inference_authorization`], but as a `HeaderValue` marked
@@ -159,6 +159,13 @@ pub enum CredentialError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_authorization_header_is_sensitive() {
+        let credentials = ChutesCredentials::from_key("cpk_test_value").expect("key");
+        let header = credentials.management_raw_authorization_header();
+        assert!(header.is_sensitive(), "raw key must be redacted from logs");
+    }
 
     #[test]
     fn endpoints_have_no_trailing_slash() {

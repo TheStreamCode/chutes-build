@@ -172,6 +172,8 @@ pub fn curated_reasoning_efforts(model_id: &str) -> Option<&'static [&'static st
         Some(&["minimal", "low", "medium", "high", "xhigh"])
     } else if model.contains("kimi-k3") {
         Some(&["low", "medium", "high", "max"])
+    } else if model.contains("glm-5.2") {
+        Some(&["low", "medium", "high", "max"])
     } else {
         None
     }
@@ -241,10 +243,17 @@ mod tests {
             Some(&["low", "medium", "high", "max"][..])
         );
         assert_eq!(
+            curated_reasoning_efforts("zai-org/GLM-5.2-TEE"),
+            Some(&["low", "medium", "high", "max"][..])
+        );
+        assert_eq!(
             curated_reasoning_efforts("deepseek-ai/DeepSeek-V4-Flash-0731-TEE"),
             Some(&["minimal", "low", "medium", "high", "xhigh"][..])
         );
-        assert_eq!(curated_reasoning_efforts("zai-org/GLM-5.2-TEE"), None);
+        assert_eq!(
+            curated_reasoning_efforts("zai-org/GLM-5.2-TEE"),
+            Some(&["low", "medium", "high", "max"][..])
+        );
         assert_eq!(curated_reasoning_efforts("acme/unknown"), None);
     }
 

@@ -8,11 +8,11 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 
 By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Set `CHUTES_API_KEY`, then start a session.
 
-`/effort` (and `--reasoning-effort` for headless runs) is offered for catalogue
-models that advertise `reasoning` and belong to a generation whose reasoning
-control is verified. The catalogue publishes the feature but not the effort
-menu, so the built-in verified menu is used. A new generation that publishes
-neither can be configured explicitly with
+`/effort` (and `--reasoning-effort` for headless runs) is offered only for
+models whose accepted effort values have been probed against the Chutes
+endpoint. The catalogue publishes the `reasoning` feature but not the menu, so
+the verified value set is used. A generation without a verified set, or without
+catalogue metadata, can be configured explicitly with
 `[model.<id>] supports_reasoning_effort = true` and `reasoning_efforts = [...]`.
 Endpoint-verified value sets cover `DeepSeek-V4-Pro` (`low|medium|high`),
 `Qwen3.8-Max` (`low|medium|xhigh`), `DeepSeek-V4-Flash`

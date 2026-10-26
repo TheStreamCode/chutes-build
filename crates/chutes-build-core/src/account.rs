@@ -1,4 +1,8 @@
-//! Read-only access to Chutes account usage endpoints.
+//! Chutes account and model-management endpoints.
+//!
+//! Usage endpoints are read-only. The same client also exposes the saved
+//! routing aliases (`/model_aliases/`) and their hidden, experimental writes;
+//! alias deletion uses a raw-key Authorization header scoped to that route.
 //!
 //! Responses stay as raw [`serde_json::Value`] deliberately rather than
 //! typed structs: `subscription_usage`/`quotas`/`quota_usage`/`model_stats`
@@ -78,7 +82,7 @@ impl ChutesAccountClient {
     ) -> Result<serde_json::Value, AccountError> {
         let model_stats_request = async {
             if include_model_stats {
-                self.invocation_stats().await
+                self.get_json("/invocations/stats/llm").await
             } else {
                 Ok(serde_json::Value::Null)
             }
@@ -251,7 +255,7 @@ impl ChutesAccountClient {
             // 404 for an alias that GET lists. Verified 2026-10-26.
             .header(
                 AUTHORIZATION,
-                self.credentials.management_raw_authorization().into_owned(),
+                self.credentials.management_raw_authorization_header(),
             )
             .timeout(std::time::Duration::from_secs(30))
             .send()

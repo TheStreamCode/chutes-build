@@ -15,6 +15,7 @@ use crate::account::ChutesAccountClient;
 
 const ALIAS_CACHE_TTL: Duration = Duration::from_secs(60);
 const STATS_CACHE_TTL: Duration = Duration::from_secs(120);
+const CATALOG_CACHE_TTL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,12 +178,20 @@ pub fn find_catalog_model<'a>(catalog: &'a [RoutingModel], slug: &str) -> Option
     catalog.iter().find(|model| model.id == slug)
 }
 
-/// Display name for a pool member: the catalogue slug when known, else a short
-/// form of the raw chute id.
-pub fn chute_display_name(catalog: &[RoutingModel], chute_id: &str) -> String {
+/// Catalogue row for a pool member, matched by chute id.
+pub fn catalog_model_for_chute<'a>(
+    catalog: &'a [RoutingModel],
+    chute_id: &str,
+) -> Option<&'a RoutingModel> {
     catalog
         .iter()
         .find(|model| model.chute_id.as_deref() == Some(chute_id))
+}
+
+/// Display name for a pool member: the catalogue slug when known, else a short
+/// form of the raw chute id.
+pub fn chute_display_name(catalog: &[RoutingModel], chute_id: &str) -> String {
+    catalog_model_for_chute(catalog, chute_id)
         .map(|model| model.id.clone())
         .unwrap_or_else(|| {
             if chute_id.len() > 12 {
@@ -250,7 +259,7 @@ pub fn cached_catalog() -> Option<Vec<RoutingModel>> {
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .as_ref()
-        .filter(|cache| cache.fetched_at.elapsed() < ALIAS_CACHE_TTL)
+        .filter(|cache| cache.fetched_at.elapsed() < CATALOG_CACHE_TTL)
         .map(|cache| cache.value.clone())
 }
 

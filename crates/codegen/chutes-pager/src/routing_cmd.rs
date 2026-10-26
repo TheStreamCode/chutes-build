@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use chutes_build_core::account::ChutesAccountClient;
 use chutes_build_core::routing_pools::{
     self, RoutingAlias, RoutingModel, RoutingStat, RoutingView, add_pool_members,
-    chute_display_name, find_catalog_model, remove_pool_members,
+    catalog_model_for_chute, chute_display_name, find_catalog_model, remove_pool_members,
 };
 use clap::Subcommand;
 
@@ -34,7 +34,11 @@ impl RoutingAction {
 }
 
 fn writes_enabled() -> bool {
-    std::env::var("CHUTES_ROUTING_EXPERIMENTAL").as_deref() == Ok("1")
+    writes_enabled_from(std::env::var("CHUTES_ROUTING_EXPERIMENTAL").ok().as_deref())
+}
+
+fn writes_enabled_from(value: Option<&str>) -> bool {
+    value == Some("1")
 }
 
 #[derive(Debug, Subcommand, Clone)]
@@ -337,9 +341,7 @@ fn format_edit(result: &PlannedEdit, catalog: &[RoutingModel], dry_run: bool) ->
 fn append_pool(out: &mut String, pool: &[String], catalog: &[RoutingModel]) {
     for (index, chute_id) in pool.iter().enumerate() {
         let name = chute_display_name(catalog, chute_id);
-        let payg = catalog
-            .iter()
-            .find(|model| model.chute_id.as_deref() == Some(chute_id.as_str()))
+        let payg = catalog_model_for_chute(catalog, chute_id)
             .and_then(|model| model.confidential_compute)
             == Some(false);
         out.push_str(&format!(
@@ -410,10 +412,7 @@ fn display_stats<'a>(
         if stat.average_ttft_secs.unwrap_or(0.0) <= 0.0 || stat.total_requests.unwrap_or(0) == 0 {
             continue;
         }
-        let Some(model) = catalog
-            .iter()
-            .find(|model| model.chute_id.as_deref() == Some(stat.chute_id.as_str()))
-        else {
+        let Some(model) = catalog_model_for_chute(catalog, &stat.chute_id) else {
             continue;
         };
         best.entry(model.id.as_str())
@@ -507,6 +506,14 @@ mod tests {
         let rows = display_stats(&stats, &catalog);
         let names: Vec<&str> = rows.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["acme/model-a", "acme/model-b"]);
+    }
+
+    #[test]
+    fn routing_writes_require_the_experimental_flag() {
+        assert!(!writes_enabled_from(None));
+        assert!(!writes_enabled_from(Some("0")));
+        assert!(!writes_enabled_from(Some("true")));
+        assert!(writes_enabled_from(Some("1")));
     }
 
     #[test]

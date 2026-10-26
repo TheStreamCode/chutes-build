@@ -1326,6 +1326,14 @@ async fn run_agent_command(
         .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
     let mut agent_config = AgentConfig::new_from_toml_cfg(&raw_config)
         .map_err(|e| anyhow::anyhow!("Failed to create agent config: {}", e))?;
+    // The saved key is the normal TUI credential store; expose it before the
+    // routing prefetch so Auto sees the account's saved pool on that path too.
+    chutes_build_core::api_key_store::ensure_env_from_store(
+        &chutes_shell::util::chutes_home::chutes_home(),
+    );
+    // Auto prefers the saved Chutes routing pool; seed the cache before the
+    // model manager resolves the default on every interactive surface.
+    chutes_build_core::routing_pools::prefetch_aliases_from_env().await;
     agent_config.default_model_override = agent_args.model.clone();
     agent_config.reasoning_effort_override = agent_args
         .reasoning_effort

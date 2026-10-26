@@ -25,7 +25,7 @@ impl SlashCommand for RoutingCommand {
         }
         let aliases = chutes_build_core::routing_pools::cached_aliases();
         let stats = chutes_build_core::routing_pools::cached_stats();
-        if aliases.is_none() && stats.is_none() {
+        if aliases.is_none() || stats.is_none() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async {
                     chutes_build_core::routing_pools::prefetch_view_from_env().await;

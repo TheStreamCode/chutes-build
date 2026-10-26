@@ -2784,6 +2784,7 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
             entry.info.visible_for_auth(false)
                 && entry.info.api_backend == ApiBackend::ChatCompletions
                 && !entry.info.hidden
+                && !entry.info.external_provider
         })
     };
     let first = first_visible()?;
@@ -2800,6 +2801,7 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
             .filter(|entry| entry.info.visible_for_auth(false))
             .filter(|entry| entry.info.api_backend == ApiBackend::ChatCompletions)
             .filter(|entry| !entry.info.hidden)
+            .filter(|entry| !entry.info.external_provider)
             .filter(|entry| entry.info.supports_tools)
             .filter(|entry| entry.info.context_window.get() >= 32_000)
             .filter(|entry| entry.info.model != chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
@@ -3283,6 +3285,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 use_concise: false,
                 hidden: m.hidden,
                 supported_in_api: m.supported_in_api,
+                external_provider: false,
                 supports_tools: None,
                 reasoning_effort: m.reasoning_effort,
                 supports_reasoning_effort: m.supports_reasoning_effort,
@@ -3410,6 +3413,10 @@ pub struct ModelEntryConfig {
     /// When false, only OAuth users see this in the picker.
     #[serde(default = "default_true")]
     pub supported_in_api: bool,
+    /// The live row has `confidential_compute: false`: it runs on an external
+    /// provider and is billed PAYG, so Auto must never select it implicitly.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub external_provider: bool,
     /// `supported_features` from the live catalog: `Some(true)` only when the
     /// list names `tools`. Absent/unknown keeps the compatible default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3478,6 +3485,7 @@ impl Default for ModelEntryConfig {
             subagent_rate_limit_max_attempts: None,
             hidden: false,
             supported_in_api: true,
+            external_provider: false,
             supports_tools: None,
             supports_backend_search: false,
             compactions_remaining: None,
@@ -3769,6 +3777,9 @@ pub struct ModelInfo {
     /// When false, only OAuth users see this in the picker.
     #[serde(default = "default_true")]
     pub supported_in_api: bool,
+    /// Whether this entry runs on an external provider (PAYG).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub external_provider: bool,
     /// The catalog advertises tool/function-calling support for this model.
     #[serde(default = "default_true")]
     pub supports_tools: bool,
@@ -3815,6 +3826,7 @@ impl ModelInfo {
         ModelInfo {
             user_selectable: true,
             supports_tools: true,
+            external_provider: false,
             id: None,
             model: slug.to_owned(),
             model_family: None,
@@ -3888,6 +3900,7 @@ impl ModelInfo {
             subagent_rate_limit_max_attempts: entry.subagent_rate_limit_max_attempts,
             hidden: entry.hidden,
             supported_in_api: entry.supported_in_api,
+            external_provider: entry.external_provider,
             supports_tools: entry.supports_tools.unwrap_or(false),
             reasoning_effort: entry.reasoning_effort,
             supports_reasoning_effort: entry.supports_reasoning_effort,
@@ -4574,6 +4587,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
             info: ModelInfo {
                 user_selectable: false,
                 supports_tools: true,
+                external_provider: false,
                 id: None,
                 model_family: None,
                 model: catalog_entry
@@ -4804,6 +4818,7 @@ fn resolve_hidden_default_web_search_sampling_config(
     let entry = ModelEntry {
         info: ModelInfo {
             supports_tools: true,
+            external_provider: false,
             id: None,
             model_family: None,
             model: model_id.to_owned(),

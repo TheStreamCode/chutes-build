@@ -15,6 +15,9 @@ user chooses to invoke.
 
 - Ambient Chutes credentials are attached only to official allowlisted HTTPS
   destinations. Redirects are disabled on credential-bearing clients.
+- Every Authorization header built by the endpoint helpers is a sensitive
+  `HeaderValue`; the raw-key form used by the hidden alias write route goes
+  through the same helper, so debug logging redacts it.
 - Endpoint URLs reject embedded credentials, unexpected ports, insecure
   schemes, and untrusted hosts. DNS resolution rejects private, loopback,
   link-local, multicast, documentation, and other special-use ranges at connect
