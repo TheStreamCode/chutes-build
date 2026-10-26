@@ -1,7 +1,10 @@
 use crate::session::export::{ExportedMessage, ExportedMetadata, ExportedSession};
 use chutes_login::backend::{ActiveAuthBackend, AuthBackend};
 use chutes_login::{ChutesAuth, LoginConfig};
-use chutes_sampling_types::{MODEL_NOTICE_META_KEY, ModelNotice, ModelNoticeSeverity};
+use chutes_sampling_types::{
+    MODEL_NOTICE_META_KEY, ModelNotice, ModelNoticeSeverity, ReasoningEffort,
+    ReasoningEffortOption, effort_label,
+};
 use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
@@ -667,15 +670,19 @@ pub(crate) fn parse_remote_model_value(
             .iter()
             .any(|feature| feature.eq_ignore_ascii_case("tools"))
     });
-    let advertises_reasoning = supported_features.as_ref().is_some_and(|features| {
-        features
-            .iter()
-            .any(|feature| feature.eq_ignore_ascii_case("reasoning"))
-    });
+    let curated_efforts = chutes_build_core::reasoning::curated_reasoning_efforts(&model);
+    let advertises_reasoning = curated_efforts.is_some()
+        || supported_features.as_ref().is_some_and(|features| {
+            features
+                .iter()
+                .any(|feature| feature.eq_ignore_ascii_case("reasoning"))
+        });
     // The catalogue publishes the `reasoning` feature but not the effort menu.
-    // Expose the menu only for generations whose template control we verified.
+    // Expose the menu only for generations whose template control, or whose
+    // endpoint-accepted values, we verified.
     let supports_reasoning_effort = advertises_reasoning
-        && chutes_build_core::reasoning::reasoning_profile(&model).is_selectable();
+        && (curated_efforts.is_some()
+            || chutes_build_core::reasoning::reasoning_profile(&model).is_selectable());
 
     let confidential_compute = obj
         .get("confidential_compute")
@@ -724,7 +731,23 @@ pub(crate) fn parse_remote_model_value(
                 .and_then(|v| v.as_object())
                 .and_then(parse_capabilities_reasoning_efforts)
         })
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            let options = curated_efforts
+                .into_iter()
+                .flatten()
+                .filter_map(|value| {
+                    let effort: ReasoningEffort = value.parse().ok()?;
+                    Some(ReasoningEffortOption {
+                        id: (*value).to_owned(),
+                        value: effort,
+                        label: effort_label(effort),
+                        description: Some(format!("{value} reasoning")),
+                        default: effort == ReasoningEffort::Medium,
+                    })
+                })
+                .collect::<Vec<_>>();
+            (options, false)
+        });
 
     Some(crate::agent::config::ModelEntryConfig {
         id,

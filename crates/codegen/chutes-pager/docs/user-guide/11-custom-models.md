@@ -14,6 +14,11 @@ control is verified. The catalogue publishes the feature but not the effort
 menu, so the built-in verified menu is used. A new generation that publishes
 neither can be configured explicitly with
 `[model.<id>] supports_reasoning_effort = true` and `reasoning_efforts = [...]`.
+Endpoint-verified value sets cover `DeepSeek-V4-Pro` (`low|medium|high`),
+`Qwen3.8-Max` (`low|medium|xhigh`), `DeepSeek-V4-Flash`
+(`minimal|low|medium|high|xhigh`), and `Kimi-K3`
+(`low|medium|high|max`); Auto still excludes the non-TEE external models so
+their PAYG cost is only incurred when selected explicitly.
 
 Models with `confidential_compute: false` run on an external provider. They need
 a positive PAYG balance and do not draw on the subscription weekly quota; without

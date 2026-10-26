@@ -20,6 +20,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (GLM, Qwen, Kimi, DeepSeek V3.2, Gemma). The catalogue publishes the feature
   but not the effort menu, so the built-in verified menu is used instead of
   leaving `/effort` empty.
+- The external-provider `deepseek-ai/DeepSeek-V4-Pro-0813` and
+  `Qwen/Qwen3.8-Max-0902` rows carry no feature list, so their effort menus come
+  from endpoint-verified values (`low|medium|high` and `low|medium|xhigh`).
+  `DeepSeek-V4-Flash` and `Kimi-K3` use their verified value sets too. Auto still
+  leaves non-TEE external models out of its pool, so selecting them is explicit
+  and never spends PAYG silently.
 
 ### Fixed
 

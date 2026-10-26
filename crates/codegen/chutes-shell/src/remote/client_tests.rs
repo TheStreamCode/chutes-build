@@ -1128,3 +1128,30 @@ fn parse_derives_reasoning_effort_from_catalogue_feature() {
         "no reasoning feature means no effort menu"
     );
 }
+
+#[test]
+fn curated_reasoning_efforts_survive_a_minimal_catalogue_row() {
+    let external = serde_json::json!({
+        "model": "deepseek-ai/DeepSeek-V4-Pro-0813"
+    });
+    let entry = parse_remote_model_value(&external, "https://default.url").expect("parses");
+    assert!(entry.supports_reasoning_effort);
+    let ids: Vec<&str> = entry
+        .reasoning_efforts
+        .iter()
+        .map(|o| o.id.as_str())
+        .collect();
+    assert_eq!(ids, ["low", "medium", "high"]);
+
+    let qwen = serde_json::json!({
+        "model": "Qwen/Qwen3.8-Max-0902"
+    });
+    let entry = parse_remote_model_value(&qwen, "https://default.url").expect("parses");
+    assert!(entry.supports_reasoning_effort);
+    let ids: Vec<&str> = entry
+        .reasoning_efforts
+        .iter()
+        .map(|o| o.id.as_str())
+        .collect();
+    assert_eq!(ids, ["low", "medium", "xhigh"]);
+}

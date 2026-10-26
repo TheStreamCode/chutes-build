@@ -158,6 +158,25 @@ pub fn reasoning_profile(model_id: &str) -> ReasoningProfile {
     ReasoningProfile::Unknown
 }
 
+/// Reasoning-effort values verified against the live Chutes endpoint for
+/// generations whose catalogue row does not publish a menu. The values are sent
+/// verbatim as the top-level `reasoning_effort`; keep this list limited to
+/// generations probed against the endpoint (2026-10-26).
+pub fn curated_reasoning_efforts(model_id: &str) -> Option<&'static [&'static str]> {
+    let model = model_id.to_ascii_lowercase();
+    if model.contains("deepseek-v4-pro-0813") {
+        Some(&["low", "medium", "high"])
+    } else if model.contains("qwen3.8-max-0902") {
+        Some(&["low", "medium", "xhigh"])
+    } else if model.contains("deepseek-v4-flash") {
+        Some(&["minimal", "low", "medium", "high", "xhigh"])
+    } else if model.contains("kimi-k3") {
+        Some(&["low", "medium", "high", "max"])
+    } else {
+        None
+    }
+}
+
 /// Convert a provider-neutral effort into a request compatible with the
 /// selected model's published chat template and Chutes' request schema.
 pub fn reasoning_wire_plan(model_id: &str, requested: RequestedReasoning) -> ReasoningWirePlan {
@@ -206,6 +225,28 @@ pub fn reasoning_wire_plan(model_id: &str, requested: RequestedReasoning) -> Rea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curated_efforts_cover_probed_generations_only() {
+        assert_eq!(
+            curated_reasoning_efforts("deepseek-ai/DeepSeek-V4-Pro-0813"),
+            Some(&["low", "medium", "high"][..])
+        );
+        assert_eq!(
+            curated_reasoning_efforts("Qwen/Qwen3.8-Max-0902"),
+            Some(&["low", "medium", "xhigh"][..])
+        );
+        assert_eq!(
+            curated_reasoning_efforts("moonshotai/Kimi-K3-TEE"),
+            Some(&["low", "medium", "high", "max"][..])
+        );
+        assert_eq!(
+            curated_reasoning_efforts("deepseek-ai/DeepSeek-V4-Flash-0731-TEE"),
+            Some(&["minimal", "low", "medium", "high", "xhigh"][..])
+        );
+        assert_eq!(curated_reasoning_efforts("zai-org/GLM-5.2-TEE"), None);
+        assert_eq!(curated_reasoning_efforts("acme/unknown"), None);
+    }
 
     #[test]
     fn current_chutes_catalog_has_conservative_profiles() {
