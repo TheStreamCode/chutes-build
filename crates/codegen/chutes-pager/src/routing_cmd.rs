@@ -213,17 +213,16 @@ async fn edit(
         return Ok(());
     }
 
-    if !existing.is_empty() {
-        if let Err(error) = client.delete_model_alias(alias).await {
-            // A missing alias is fine for the first write; any other failure is
-            // real and must not be followed by a create.
-            if !matches!(
-                error,
-                chutes_build_core::account::AccountError::Http { status: 404, .. }
-            ) {
-                return Err(anyhow::anyhow!("Cannot replace alias '{alias}': {error}"));
-            }
-        }
+    // A missing alias is fine for the first write; any other delete failure is
+    // real and must not be followed by a create.
+    if !existing.is_empty()
+        && let Err(error) = client.delete_model_alias(alias).await
+        && !matches!(
+            error,
+            chutes_build_core::account::AccountError::Http { status: 404, .. }
+        )
+    {
+        return Err(anyhow::anyhow!("Cannot replace alias '{alias}': {error}"));
     }
     if deleted {
         let _ = wait_for_pool(client, alias, None).await;

@@ -303,7 +303,7 @@ pub fn has_saved_default_pool() -> bool {
 
 /// Fetch aliases and the live stats table, refreshing both caches.
 pub async fn fetch_view(client: &ChutesAccountClient) -> Result<RoutingView, String> {
-    let (mut aliases, stats, catalog) = tokio::join!(
+    let (aliases, stats, catalog) = tokio::join!(
         client.model_aliases(),
         client.invocation_stats(),
         client.model_catalog()

@@ -356,7 +356,7 @@ fn transient_gateway(error: &AccountError) -> bool {
     matches!(
         error,
         AccountError::Http {
-            status: 502 | 503 | 504,
+            status: 502..=504,
             ..
         }
     )
