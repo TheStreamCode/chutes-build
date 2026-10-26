@@ -105,9 +105,171 @@ impl ChutesAccountClient {
         }))
     }
 
+    /// Public inference catalogue, used to map model slugs to chute ids for
+    /// alias writes and stats matching.
+    pub async fn model_catalog(&self) -> Result<serde_json::Value, AccountError> {
+        self.get_absolute_json_retrying(&format!("{}/models", self.endpoints.inference))
+            .await
+    }
+
+    /// Create or replace a routing alias. The API has no update verb, so a
+    /// replace deletes first; callers that need a blue/green switch must do the
+    /// two calls themselves.
+    pub async fn create_model_alias(
+        &self,
+        alias: &str,
+        chute_ids: &[String],
+    ) -> Result<serde_json::Value, AccountError> {
+        let body = serde_json::json!({ "alias": alias, "chute_ids": chute_ids });
+        self.post_json_retrying("/model_aliases/", &body).await
+    }
+
+    /// Delete a routing alias. A missing alias surfaces as
+    /// `AccountError::Http { status: 404 }`.
+    pub async fn delete_model_alias(&self, alias: &str) -> Result<(), AccountError> {
+        self.delete_retrying(&format!("/model_aliases/{alias}"))
+            .await
+    }
+
+    async fn get_json_retrying(&self, path: &str) -> Result<serde_json::Value, AccountError> {
+        let mut attempt = 0;
+        loop {
+            match self.get_json(path).await {
+                Ok(value) => return Ok(value),
+                Err(error) if transient_gateway(&error) && attempt < 3 => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn get_absolute_json_retrying(
+        &self,
+        url: &str,
+    ) -> Result<serde_json::Value, AccountError> {
+        let mut attempt = 0;
+        loop {
+            match self.get_absolute_json(url).await {
+                Ok(value) => return Ok(value),
+                Err(error) if transient_gateway(&error) && attempt < 3 => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn post_json_retrying(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, AccountError> {
+        let mut attempt = 0;
+        loop {
+            match self.post_json(path, body).await {
+                Ok(value) => return Ok(value),
+                Err(error) if transient_gateway(&error) && attempt < 3 => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn delete_retrying(&self, path: &str) -> Result<(), AccountError> {
+        let mut attempt = 0;
+        loop {
+            match self.delete(path).await {
+                Ok(()) => return Ok(()),
+                Err(error) if transient_gateway(&error) && attempt < 3 => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn get_absolute_json(&self, url: &str) -> Result<serde_json::Value, AccountError> {
+        let response = self
+            .http
+            .get(url)
+            .header(ACCEPT, "application/json")
+            .send()
+            .await?;
+        let status = response.status();
+        let body = response.text().await?;
+        if !status.is_success() {
+            return Err(AccountError::Http {
+                status: status.as_u16(),
+                body: body.chars().take(500).collect(),
+            });
+        }
+        serde_json::from_str(&body).map_err(AccountError::Decode)
+    }
+
+    async fn post_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, AccountError> {
+        let response = self
+            .http
+            .post(format!("{}{}", self.endpoints.account, path))
+            .header(
+                AUTHORIZATION,
+                self.credentials.management_authorization_header(),
+            )
+            .header(ACCEPT, "application/json")
+            .timeout(std::time::Duration::from_secs(30))
+            .json(body)
+            .send()
+            .await?;
+        let status = response.status();
+        let text = response.text().await?;
+        if !status.is_success() {
+            return Err(AccountError::Http {
+                status: status.as_u16(),
+                body: text.chars().take(500).collect(),
+            });
+        }
+        if text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        serde_json::from_str(&text).map_err(AccountError::Decode)
+    }
+
+    async fn delete(&self, path: &str) -> Result<(), AccountError> {
+        let response = self
+            .http
+            .delete(format!("{}{}", self.endpoints.account, path))
+            // The alias delete route only accepts the raw key; Bearer answers
+            // 404 for an alias that GET lists. Verified 2026-10-26.
+            .header(
+                AUTHORIZATION,
+                self.credentials.management_raw_authorization().into_owned(),
+            )
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let body = response.text().await.unwrap_or_default();
+        Err(AccountError::Http {
+            status: status.as_u16(),
+            body: body.chars().take(500).collect(),
+        })
+    }
+
     /// Saved model-routing aliases (`GET /model_aliases/`).
     pub async fn model_aliases(&self) -> Result<serde_json::Value, AccountError> {
-        self.get_json("/model_aliases/").await
+        self.get_json_retrying("/model_aliases/").await
     }
 
     /// Live per-chute TTFT/TPS table (`GET /invocations/stats/llm`).
@@ -184,6 +346,16 @@ impl ChutesAccountClient {
         }
         serde_json::from_str(&body).map_err(AccountError::Decode)
     }
+}
+
+fn transient_gateway(error: &AccountError) -> bool {
+    matches!(
+        error,
+        AccountError::Http {
+            status: 502 | 503 | 504,
+            ..
+        }
+    )
 }
 
 fn has_quota_usage_data(value: &serde_json::Value) -> bool {

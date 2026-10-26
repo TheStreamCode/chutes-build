@@ -8,10 +8,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `chutes-build routing` and the `/routing` slash command show the account's
-  saved Chutes model-routing pool, the three strategies, and live TTFT/TPS from
-  `GET /invocations/stats/llm`. The view is cached and read-only; it never
-  changes the account.
+- `chutes-build routing` and the `/routing` slash command show the saved
+  Chutes model-routing pool, the three strategies, and live TTFT/TPS from
+  `GET /invocations/stats/llm`. Pool members and stats are resolved by
+  `chute_id` against the live catalogue, so the view shows model names rather
+  than private chute labels.
+- `routing add`, `routing remove`, and `routing save` write the account alias
+  through `/model_aliases/`, with an ordered pool, the 20-model cap, `--alias`,
+  and `--dry-run`. A replace restores the previous pool if the create fails.
+  The Chutes alias endpoint is eventually consistent and occasionally answers
+  502, so writes poll until the list reflects the new pool; the view never
+  writes.
 - When the account has a saved `default` routing pool, Auto targets
   `default:latency` instead of composing an inline pool, so the server-side
   routing choice made in the Chutes web app is honoured.

@@ -116,6 +116,13 @@ impl ChutesCredentials {
         }
     }
 
+    /// Raw API key without a scheme. The `DELETE /model_aliases/{alias}`
+    /// endpoint rejects the Bearer form and returns 404 instead; verified
+    /// 2026-10-26 against the live API. Keep this scoped to that call.
+    pub fn management_raw_authorization(&self) -> Cow<'_, str> {
+        Cow::Borrowed(&self.api_key)
+    }
+
     /// Like [`Self::inference_authorization`], but as a `HeaderValue` marked
     /// sensitive so it's redacted from HTTP debug/trace logging.
     pub fn inference_authorization_header(&self) -> reqwest::header::HeaderValue {

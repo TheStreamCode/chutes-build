@@ -38,6 +38,7 @@ impl SlashCommand for RoutingCommand {
         let view = chutes_build_core::routing_pools::RoutingView {
             aliases: aliases.unwrap_or_default(),
             stats: stats.unwrap_or_default(),
+            catalog: chutes_build_core::routing_pools::cached_catalog().unwrap_or_default(),
         };
         CommandResult::Message(crate::routing_cmd::format_human(&view))
     }

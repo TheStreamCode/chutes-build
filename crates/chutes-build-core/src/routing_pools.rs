@@ -34,11 +34,21 @@ pub struct RoutingStat {
     pub date: Option<String>,
 }
 
+/// A catalogue row needed to resolve pool members and stats by `chute_id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingModel {
+    pub id: String,
+    pub chute_id: Option<String>,
+    pub confidential_compute: Option<bool>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingView {
     pub aliases: Vec<RoutingAlias>,
     pub stats: Vec<RoutingStat>,
+    pub catalog: Vec<RoutingModel>,
 }
 
 struct Cached<T> {
@@ -49,6 +59,8 @@ struct Cached<T> {
 static ALIAS_CACHE: LazyLock<RwLock<Option<Cached<Vec<RoutingAlias>>>>> =
     LazyLock::new(|| RwLock::new(None));
 static STATS_CACHE: LazyLock<RwLock<Option<Cached<Vec<RoutingStat>>>>> =
+    LazyLock::new(|| RwLock::new(None));
+static CATALOG_CACHE: LazyLock<RwLock<Option<Cached<Vec<RoutingModel>>>>> =
     LazyLock::new(|| RwLock::new(None));
 
 /// Parse the `GET /model_aliases/` payload. Accepts the array shape the API
@@ -136,6 +148,85 @@ pub fn parse_stats(value: &serde_json::Value) -> Vec<RoutingStat> {
         .collect()
 }
 
+/// Parse the public `/v1/models` rows into the id/chute-id mapping needed by
+/// alias writes and stats matching.
+pub fn parse_catalog(value: &serde_json::Value) -> Vec<RoutingModel> {
+    let Some(items) = value.get("data").and_then(|data| data.as_array()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let obj = item.as_object()?;
+            let id = first_string(obj, &["id", "model"])?;
+            Some(RoutingModel {
+                id,
+                chute_id: first_string(obj, &["chute_id", "chuteId"]),
+                confidential_compute: obj
+                    .get("confidential_compute")
+                    .or_else(|| obj.get("confidentialCompute"))
+                    .and_then(|value| value.as_bool()),
+            })
+        })
+        .collect()
+}
+
+/// Resolve a model slug to its chute id. Returns the row when the slug exists
+/// but the catalogue omitted `chute_id`, so callers can report the exact gap.
+pub fn find_catalog_model<'a>(catalog: &'a [RoutingModel], slug: &str) -> Option<&'a RoutingModel> {
+    catalog.iter().find(|model| model.id == slug)
+}
+
+/// Display name for a pool member: the catalogue slug when known, else a short
+/// form of the raw chute id.
+pub fn chute_display_name(catalog: &[RoutingModel], chute_id: &str) -> String {
+    catalog
+        .iter()
+        .find(|model| model.chute_id.as_deref() == Some(chute_id))
+        .map(|model| model.id.clone())
+        .unwrap_or_else(|| {
+            if chute_id.len() > 12 {
+                format!("{}…", &chute_id[..12])
+            } else {
+                chute_id.to_owned()
+            }
+        })
+}
+
+/// Append members, de-duplicating by chute id and preserving the pool cap.
+pub fn add_pool_members(
+    pool: &mut Vec<String>,
+    ids: &[String],
+    max_pool_size: usize,
+) -> Result<Vec<String>, String> {
+    let mut added = Vec::new();
+    for id in ids {
+        if pool.iter().any(|existing| existing == id) {
+            continue;
+        }
+        if pool.len() >= max_pool_size {
+            return Err(format!("pool limit is {max_pool_size} models"));
+        }
+        pool.push(id.clone());
+        added.push(id.clone());
+    }
+    Ok(added)
+}
+
+/// Remove members, returning the ids that were present.
+pub fn remove_pool_members(pool: &mut Vec<String>, ids: &[String]) -> Vec<String> {
+    let mut removed = Vec::new();
+    pool.retain(|existing| {
+        if ids.iter().any(|id| id == existing) {
+            removed.push(existing.clone());
+            false
+        } else {
+            true
+        }
+    });
+    removed
+}
+
 pub fn cache_aliases(aliases: Vec<RoutingAlias>) {
     *ALIAS_CACHE
         .write()
@@ -143,6 +234,24 @@ pub fn cache_aliases(aliases: Vec<RoutingAlias>) {
         fetched_at: Instant::now(),
         value: aliases,
     });
+}
+
+pub fn cache_catalog(catalog: Vec<RoutingModel>) {
+    *CATALOG_CACHE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Cached {
+        fetched_at: Instant::now(),
+        value: catalog,
+    });
+}
+
+pub fn cached_catalog() -> Option<Vec<RoutingModel>> {
+    CATALOG_CACHE
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .filter(|cache| cache.fetched_at.elapsed() < ALIAS_CACHE_TTL)
+        .map(|cache| cache.value.clone())
 }
 
 pub fn cache_stats(stats: Vec<RoutingStat>) {
@@ -185,15 +294,34 @@ pub fn has_saved_default_pool() -> bool {
 
 /// Fetch aliases and the live stats table, refreshing both caches.
 pub async fn fetch_view(client: &ChutesAccountClient) -> Result<RoutingView, String> {
-    let (aliases, stats) = tokio::join!(client.model_aliases(), client.invocation_stats());
-    let aliases = aliases.map_err(|error| format!("model aliases: {error}"))?;
+    let (mut aliases, stats, catalog) = tokio::join!(
+        client.model_aliases(),
+        client.invocation_stats(),
+        client.model_catalog()
+    );
+    let mut aliases = aliases.map_err(|error| format!("model aliases: {error}"))?;
+    // The alias list can lag a just-finished write by a moment; retry briefly
+    // so `routing` immediately after `routing save` shows the new pool.
+    for attempt in 0..3 {
+        if !parse_aliases(&aliases).is_empty() || attempt == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        aliases = client
+            .model_aliases()
+            .await
+            .map_err(|error| format!("model aliases: {error}"))?;
+    }
     let stats = stats.map_err(|error| format!("model stats: {error}"))?;
+    let catalog = catalog.map_err(|error| format!("model catalog: {error}"))?;
     let view = RoutingView {
         aliases: parse_aliases(&aliases),
         stats: parse_stats(&stats),
+        catalog: parse_catalog(&catalog),
     };
     cache_aliases(view.aliases.clone());
     cache_stats(view.stats.clone());
+    cache_catalog(view.catalog.clone());
     Ok(view)
 }
 
@@ -272,6 +400,36 @@ mod tests {
         assert_eq!(stats[0].average_ttft_secs, Some(0.34));
         assert_eq!(stats[1].name, "b");
         assert_eq!(stats[1].average_ttft_secs, None);
+    }
+
+    #[test]
+    fn parses_catalogue_chute_ids_and_resolves_names() {
+        let value = serde_json::json!({"data": [
+            {"id": "acme/model-a", "chute_id": "chute-a", "confidential_compute": true},
+            {"id": "acme/model-b", "chute_id": "chute-b", "confidential_compute": false}
+        ]});
+        let catalog = parse_catalog(&value);
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog[0].chute_id.as_deref(), Some("chute-a"));
+        assert_eq!(chute_display_name(&catalog, "chute-b"), "acme/model-b");
+        assert_eq!(
+            chute_display_name(&catalog, "unknown-id-123456"),
+            "unknown-id-1…"
+        );
+    }
+
+    #[test]
+    fn pool_mutations_dedupe_and_respect_the_cap() {
+        let mut pool = vec!["a".to_string(), "b".to_string()];
+        let added =
+            add_pool_members(&mut pool, &["b".to_string(), "c".to_string()], 20).expect("fits");
+        assert_eq!(added, ["c"]);
+        assert_eq!(pool, ["a", "b", "c"]);
+        let mut full = vec!["a".to_string()];
+        assert!(add_pool_members(&mut full, &["b".to_string()], 1).is_err());
+        let removed = remove_pool_members(&mut pool, &["b".to_string()]);
+        assert_eq!(removed, ["b"]);
+        assert_eq!(pool, ["a", "c"]);
     }
 
     #[test]
