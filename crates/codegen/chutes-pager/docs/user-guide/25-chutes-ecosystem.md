@@ -51,17 +51,11 @@ shown instead of private chute labels. When a saved `default` pool exists, Auto
 targets `default:latency`, so the pool configured in the Chutes web app wins
 over the client-side inline pool.
 
-Writes are explicit and capped at 20 models:
-
-```bash
-chutes-build routing add zai-org/GLM-5.2-TEE
-chutes-build routing remove Qwen/Qwen3.8-27B-TEE --alias default
-chutes-build routing save model-a model-b --alias default --dry-run
-```
-
-The alias endpoint is eventually consistent and occasionally returns 502; the
-command polls the list until the write is visible and restores the old pool if a
-replace fails. `/routing` itself stays read-only.
+Pool writes are not part of the supported surface yet: the Chutes alias endpoint
+is eventually consistent and intermittently returns 502, and `DELETE` only
+accepts the raw key. Experimental `add`/`remove`/`save` commands exist behind
+`CHUTES_ROUTING_EXPERIMENTAL=1`, one command at a time; `/routing` and the plain
+`routing` command stay read-only.
 
 Some catalog entries have `confidential_compute: false`: they run on an external
 provider and require a positive PAYG balance, separately from the subscription

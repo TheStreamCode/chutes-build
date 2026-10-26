@@ -13,12 +13,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GET /invocations/stats/llm`. Pool members and stats are resolved by
   `chute_id` against the live catalogue, so the view shows model names rather
   than private chute labels.
-- `routing add`, `routing remove`, and `routing save` write the account alias
-  through `/model_aliases/`, with an ordered pool, the 20-model cap, `--alias`,
-  and `--dry-run`. A replace restores the previous pool if the create fails.
-  The Chutes alias endpoint is eventually consistent and occasionally answers
-  502, so writes poll until the list reflects the new pool; the view never
-  writes.
+- The routing view is read-only. Alias writes remain experimental and hidden:
+  the Chutes endpoint is eventually consistent, intermittently answers 502, and
+  only accepts the raw key for DELETE, so a supported write surface waits for
+  the platform to stabilise.
 - When the account has a saved `default` routing pool, Auto targets
   `default:latency` instead of composing an inline pool, so the server-side
   routing choice made in the Chutes web app is honoured.

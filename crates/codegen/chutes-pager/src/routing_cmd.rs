@@ -24,11 +24,25 @@ pub struct RoutingArgs {
     pub json: bool,
 }
 
+impl RoutingAction {
+    fn is_write(&self) -> bool {
+        matches!(
+            self,
+            Self::Add { .. } | Self::Remove { .. } | Self::Save { .. }
+        )
+    }
+}
+
+fn writes_enabled() -> bool {
+    std::env::var("CHUTES_ROUTING_EXPERIMENTAL").as_deref() == Ok("1")
+}
+
 #[derive(Debug, Subcommand, Clone)]
 pub enum RoutingAction {
     /// Show the saved pool, strategies, and live model latency.
     View,
-    /// Append models to a saved pool.
+    /// Append models to a saved pool (experimental; disabled by default).
+    #[command(hide = true)]
     Add {
         /// Model id or slug, as printed by `chutes-build models`.
         model: String,
@@ -39,7 +53,8 @@ pub enum RoutingAction {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove models from a saved pool.
+    /// Remove models from a saved pool (experimental; disabled by default).
+    #[command(hide = true)]
     Remove {
         /// Model id or slug.
         model: String,
@@ -50,7 +65,8 @@ pub enum RoutingAction {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Replace a saved pool with the given models, in order.
+    /// Replace a saved pool with the given models, in order (experimental; disabled by default).
+    #[command(hide = true)]
     Save {
         /// Model ids or slugs, in failover order.
         #[arg(required = true)]
@@ -66,6 +82,11 @@ pub enum RoutingAction {
 
 pub async fn run(args: RoutingArgs) -> Result<()> {
     let client = ChutesAccountClient::from_env().context("Cannot load Chutes routing data")?;
+    if args.command.as_ref().is_some_and(RoutingAction::is_write) && !writes_enabled() {
+        anyhow::bail!(
+            "Routing pool writes are experimental and disabled. The Chutes alias API is              eventually consistent and intermittently returns 502. Set              CHUTES_ROUTING_EXPERIMENTAL=1 to enable add/remove/save, one command at a time."
+        );
+    }
     match args.command {
         None | Some(RoutingAction::View) => show(&client, args.json).await,
         Some(RoutingAction::Add {
