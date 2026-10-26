@@ -519,6 +519,7 @@ pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "rename",
     "resume",
     "rewind",
+    "routing",
     "session-info",
     "sessions",
     "settings",
