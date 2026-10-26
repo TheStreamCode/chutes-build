@@ -60,6 +60,7 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
             Command::Inspect { .. }
             | Command::Doctor(_)
             | Command::Account(_)
+            | Command::Routing(_)
             | Command::Leader(_)
             | Command::Logout
             | Command::Mcp(_)
@@ -101,6 +102,7 @@ fn command_needs_pre_sandbox_policy_heal(command: Option<&Command>) -> bool {
             Command::Inspect { .. }
             | Command::Doctor(_)
             | Command::Account(_)
+            | Command::Routing(_)
             | Command::Leader(_)
             | Command::Logout
             | Command::Login { .. }
@@ -2506,6 +2508,11 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 init_tracing_simple("cli");
                 let _otel_guard = chutes_telemetry::otel_layer::otel_guard();
                 return chutes_pager::account_cmd::run(account_args).await;
+            }
+            Command::Routing(routing_args) => {
+                init_tracing_simple("cli");
+                let _otel_guard = chutes_telemetry::otel_layer::otel_guard();
+                return chutes_pager::routing_cmd::run(routing_args).await;
             }
             Command::Share(ref share_args) => {
                 init_tracing_simple("cli");

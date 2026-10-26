@@ -4,6 +4,31 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `chutes-build routing` and the `/routing` slash command show the account's
+  saved Chutes model-routing pool, the three strategies, and live TTFT/TPS from
+  `GET /invocations/stats/llm`. The view is cached and read-only; it never
+  changes the account.
+- When the account has a saved `default` routing pool, Auto targets
+  `default:latency` instead of composing an inline pool, so the server-side
+  routing choice made in the Chutes web app is honoured.
+- Reasoning-effort controls are derived automatically for catalogue models that
+  advertise the `reasoning` feature and belong to a verified generation family
+  (GLM, Qwen, Kimi, DeepSeek V3.2, Gemma). The catalogue publishes the feature
+  but not the effort menu, so the built-in verified menu is used instead of
+  leaving `/effort` empty.
+
+### Fixed
+
+- The live invocation-stats body is tens of megabytes: fetch it with a longer
+  deadline and `Accept-Encoding: identity` so the routing view can decode it
+  behind edges that negotiate an unsupported compression.
+- `/routing` does not block the TUI on the stats fetch: a cold cache starts a
+  background refresh and asks the user to run the command again.
+
 ## [2.0.5] - 2026-10-25
 
 ### Fixed

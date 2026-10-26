@@ -396,6 +396,8 @@ pub async fn run_headless(
     .ok()
     .flatten();
     tracing::info!("Prefetched models: {:?}", prefetched_models);
+    // Auto prefers the account's saved Chutes routing pool when one exists.
+    chutes_build_core::routing_pools::prefetch_aliases_from_env().await;
     let (ws_to_agent_tx, mut ws_to_agent_rx) = mpsc::unbounded_channel::<String>();
     let (acp_incoming_rx, acp_incoming_tx) = simplex(MAX_BUFFER_SIZE);
     let (acp_outgoing_rx, acp_outgoing_tx) = simplex(MAX_BUFFER_SIZE);

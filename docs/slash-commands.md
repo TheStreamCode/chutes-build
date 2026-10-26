@@ -54,6 +54,7 @@ may add more commands at runtime.
 | `/logout` | Unavailable: this build has no account sign-in |
 | `/usage` | View this session's token, cost, and inference-speed totals; `/usage manage` opens the Chutes usage page |
 | `/account` | View the API key's Chutes plan, quotas, usage, and credit |
+| `/routing` | View the saved Chutes routing pool and live model latency |
 | `/imagine [model] <description>` | Generate an image with a live Chutes media model; bare `/imagine` lists the available models |
 | `/imagine-video [model] <description>` | Generate a video with a live Chutes media model; bare `/imagine-video` lists the available models |
 | `/voice` | Configure or activate manual voice input |

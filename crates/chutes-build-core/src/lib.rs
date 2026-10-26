@@ -15,6 +15,7 @@ pub mod privacy;
 pub mod product;
 pub mod reasoning;
 pub mod routing;
+pub mod routing_pools;
 pub mod vision;
 pub mod wellness;
 

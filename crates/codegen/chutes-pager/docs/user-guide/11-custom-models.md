@@ -8,6 +8,13 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 
 By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Set `CHUTES_API_KEY`, then start a session.
 
+`/effort` (and `--reasoning-effort` for headless runs) is offered for catalogue
+models that advertise `reasoning` and belong to a generation whose reasoning
+control is verified. The catalogue publishes the feature but not the effort
+menu, so the built-in verified menu is used. A new generation that publishes
+neither can be configured explicitly with
+`[model.<id>] supports_reasoning_effort = true` and `reasoning_efforts = [...]`.
+
 Models with `confidential_compute: false` run on an external provider. They need
 a positive PAYG balance and do not draw on the subscription weekly quota; without
 that balance Chutes returns a `402` external-provider error. TEE models do not

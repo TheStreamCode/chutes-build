@@ -1089,3 +1089,42 @@ fn parse_marks_non_tee_models_as_external_provider() {
         "TEE models carry no PAYG notice"
     );
 }
+
+#[test]
+fn parse_derives_reasoning_effort_from_catalogue_feature() {
+    let verified = serde_json::json!({
+        "model": "zai-org/GLM-5.2-TEE",
+        "context_length": 1_048_576,
+        "supported_features": ["tools", "reasoning"]
+    });
+    assert!(
+        parse_remote_model_value(&verified, "https://default.url")
+            .expect("parses")
+            .supports_reasoning_effort,
+        "a verified reasoning generation must expose the effort menu"
+    );
+
+    let unverified = serde_json::json!({
+        "model": "acme/unknown-reasoner",
+        "context_length": 100_000,
+        "supported_features": ["reasoning"]
+    });
+    assert!(
+        !parse_remote_model_value(&unverified, "https://default.url")
+            .expect("parses")
+            .supports_reasoning_effort,
+        "an unverified generation must fail closed"
+    );
+
+    let plain = serde_json::json!({
+        "model": "google/gemma-4-31B-turbo-TEE",
+        "context_length": 131_072,
+        "supported_features": ["tools"]
+    });
+    assert!(
+        !parse_remote_model_value(&plain, "https://default.url")
+            .expect("parses")
+            .supports_reasoning_effort,
+        "no reasoning feature means no effort menu"
+    );
+}

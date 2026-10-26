@@ -2779,33 +2779,55 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
     {
         return None;
     }
-    let candidates: Vec<&ModelEntry> = catalog
-        .values()
-        .filter(|entry| entry.info.visible_for_auth(false))
-        .filter(|entry| entry.info.api_backend == ApiBackend::ChatCompletions)
-        .filter(|entry| !entry.info.hidden)
-        .filter(|entry| entry.info.supports_tools)
-        .filter(|entry| entry.info.context_window.get() >= 32_000)
-        .filter(|entry| entry.info.model != chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
-        .filter(|entry| !entry.info.model.contains(','))
-        .collect();
-    let first = *candidates.first()?;
-    let ids: Vec<&str> = candidates
-        .iter()
-        .map(|entry| entry.info.model.as_str())
-        .collect();
-    let pool = chutes_build_core::routing::compose_live_auto_pool(
-        &ids,
-        chutes_build_core::routing::RoutingStrategy::Latency,
-    )?;
+    let first_visible = || {
+        catalog.values().find(|entry| {
+            entry.info.visible_for_auth(false)
+                && entry.info.api_backend == ApiBackend::ChatCompletions
+                && !entry.info.hidden
+        })
+    };
+    let first = first_visible()?;
+    // A saved Chutes routing pool is the user's explicit choice: target its
+    // latency strategy instead of composing a client-side inline pool.
+    let (pool, description) = if chutes_build_core::routing_pools::has_saved_default_pool() {
+        (
+            "default:latency".to_owned(),
+            "Chutes Auto through the account's saved Chutes routing pool",
+        )
+    } else {
+        let candidates: Vec<&ModelEntry> = catalog
+            .values()
+            .filter(|entry| entry.info.visible_for_auth(false))
+            .filter(|entry| entry.info.api_backend == ApiBackend::ChatCompletions)
+            .filter(|entry| !entry.info.hidden)
+            .filter(|entry| entry.info.supports_tools)
+            .filter(|entry| entry.info.context_window.get() >= 32_000)
+            .filter(|entry| entry.info.model != chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
+            .filter(|entry| !entry.info.model.contains(','))
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let ids: Vec<&str> = candidates
+            .iter()
+            .map(|entry| entry.info.model.as_str())
+            .collect();
+        let pool = chutes_build_core::routing::compose_live_auto_pool(
+            &ids,
+            chutes_build_core::routing::RoutingStrategy::Latency,
+        )?;
+        (
+            pool,
+            "Automatic latency-routed pool across tool-capable Chutes chat models",
+        )
+    };
     let mut entry = ModelEntry::fallback(
         chutes_build_core::routing::LEGACY_AUTO_MODEL_ID,
         &cfg.endpoints,
     );
     entry.info.model = pool;
     entry.info.name = Some("Chutes Auto".to_owned());
-    entry.info.description =
-        Some("Automatic latency-routed pool across tool-capable Chutes chat models".to_owned());
+    entry.info.description = Some(description.to_owned());
     entry.info.context_window = first.info.context_window;
     entry.info.context_windows = first.info.context_windows.clone();
     entry.info.api_backend = ApiBackend::ChatCompletions;

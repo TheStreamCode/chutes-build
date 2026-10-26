@@ -43,6 +43,12 @@ run on their own hosts and bill per compute-second; their gateway has a public
 timeout of about ten minutes, and a 504 response is an HTML error page rather
 than media, so always check the status and content type.
 
+`chutes-build routing` (and `/routing` in the TUI) prints the saved Chutes
+routing pool, the three strategies (`default`, `default:latency`,
+`default:throughput`), and the live per-model TTFT/TPS table. It is read-only.
+When a saved `default` pool exists, Auto targets `default:latency`, so the pool
+configured in the Chutes web app wins over the client-side inline pool.
+
 Some catalog entries have `confidential_compute: false`: they run on an external
 provider and require a positive PAYG balance, separately from the subscription
 quota. When that balance is not positive Chutes returns

@@ -11,7 +11,7 @@
 //! the `quota_usage_fallback` path, not by typing the payload itself.
 
 use futures_util::StreamExt as _;
-use reqwest::header::{ACCEPT, AUTHORIZATION};
+use reqwest::header::{ACCEPT, ACCEPT_ENCODING, AUTHORIZATION};
 
 use crate::{ChutesCredentials, ChutesEndpoints};
 
@@ -78,7 +78,7 @@ impl ChutesAccountClient {
     ) -> Result<serde_json::Value, AccountError> {
         let model_stats_request = async {
             if include_model_stats {
-                self.get_json("/invocations/stats/llm").await
+                self.invocation_stats().await
             } else {
                 Ok(serde_json::Value::Null)
             }
@@ -103,6 +103,21 @@ impl ChutesAccountClient {
             "quota_usage": quota_usage,
             "model_stats": model_stats,
         }))
+    }
+
+    /// Saved model-routing aliases (`GET /model_aliases/`).
+    pub async fn model_aliases(&self) -> Result<serde_json::Value, AccountError> {
+        self.get_json("/model_aliases/").await
+    }
+
+    /// Live per-chute TTFT/TPS table (`GET /invocations/stats/llm`).
+    pub async fn invocation_stats(&self) -> Result<serde_json::Value, AccountError> {
+        self.get_json_with_timeout(
+            "/invocations/stats/llm",
+            Some(std::time::Duration::from_secs(120)),
+            true,
+        )
+        .await
     }
 
     async fn quota_usage_fallback(&self, quotas: &serde_json::Value) -> serde_json::Value {
@@ -131,16 +146,34 @@ impl ChutesAccountClient {
     }
 
     async fn get_json(&self, path: &str) -> Result<serde_json::Value, AccountError> {
-        let response = self
+        self.get_json_with_timeout(path, None, false).await
+    }
+
+    /// The live stats table is tens of megabytes; the client-wide 15 s deadline
+    /// is right for account metadata but too short for this body.
+    async fn get_json_with_timeout(
+        &self,
+        path: &str,
+        timeout: Option<std::time::Duration>,
+        identity_encoding: bool,
+    ) -> Result<serde_json::Value, AccountError> {
+        let mut request = self
             .http
             .get(format!("{}{}", self.endpoints.account, path))
             .header(
                 AUTHORIZATION,
                 self.credentials.management_authorization_header(),
             )
-            .header(ACCEPT, "application/json")
-            .send()
-            .await?;
+            .header(ACCEPT, "application/json");
+        if identity_encoding {
+            // The stats body is large and some edges answer with a compressed
+            // encoding this client build cannot decode; ask for the raw bytes.
+            request = request.header(ACCEPT_ENCODING, "identity");
+        }
+        if let Some(timeout) = timeout {
+            request = request.timeout(timeout);
+        }
+        let response = request.send().await?;
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {

@@ -18,6 +18,8 @@ pub enum Command {
     Doctor(crate::doctor_cmd::DoctorArgs),
     /// Show the Chutes account plan, quotas, usage, and credit for the configured API key
     Account(crate::account_cmd::AccountArgs),
+    /// Show the saved Chutes model-routing pool and live model latency
+    Routing(crate::routing_cmd::RoutingArgs),
     /// Manage running leader processes
     Leader(LeaderMgmtArgs),
     /// Delete the locally saved Chutes API key (this build has no account sign-in)

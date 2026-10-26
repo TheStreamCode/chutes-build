@@ -650,7 +650,7 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| meta.and_then(|m| get_string(m, "agent_type")))
         .unwrap_or_else(crate::agent::config::default_agent_type);
 
-    let supports_tools = obj
+    let supported_features: Option<Vec<String>> = obj
         .get("supported_features")
         .or_else(|| obj.get("supportedFeatures"))
         .or_else(|| meta.and_then(|m| m.get("supported_features")))
@@ -659,8 +659,23 @@ pub(crate) fn parse_remote_model_value(
             features
                 .iter()
                 .filter_map(serde_json::Value::as_str)
-                .any(|feature| feature.eq_ignore_ascii_case("tools"))
+                .map(str::to_owned)
+                .collect()
         });
+    let supports_tools = supported_features.as_ref().map(|features| {
+        features
+            .iter()
+            .any(|feature| feature.eq_ignore_ascii_case("tools"))
+    });
+    let advertises_reasoning = supported_features.as_ref().is_some_and(|features| {
+        features
+            .iter()
+            .any(|feature| feature.eq_ignore_ascii_case("reasoning"))
+    });
+    // The catalogue publishes the `reasoning` feature but not the effort menu.
+    // Expose the menu only for generations whose template control we verified.
+    let supports_reasoning_effort = advertises_reasoning
+        && chutes_build_core::reasoning::reasoning_profile(&model).is_selectable();
 
     let confidential_compute = obj
         .get("confidential_compute")
@@ -783,7 +798,7 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| obj.get("supports_reasoning_effort"))
             .or_else(|| meta.and_then(|m| m.get("supportsReasoningEffort")))
             .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+            .unwrap_or(supports_reasoning_effort),
         reasoning_efforts,
         reasoning_effort_server_default,
         // Each entry is read on its own so one bad entry costs only its effort, never the whole list.
