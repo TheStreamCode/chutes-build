@@ -4,6 +4,19 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Auto now pools tool-capable PAYG models together with TEE models. The
+  subscription-only split is gone: a catalogue row no longer has to be
+  confidential to join Auto. PAYG rows keep their `PAYG` notice, and a dry
+  balance still surfaces Chutes' 402 instead of being hidden.
+- Tool support for the PAYG beta rows is curated from endpoint probes
+  (`DeepSeek-V4-Pro`, `DeepSeek-V4.1-Flash`, `Qwen3.8-Max`, `Qwen3.8-2.4T-A95B`,
+  `GLM-5.3`, `GLM-5.2-Fast`, `Kimi-K2.7-Code`), because the catalogue still
+  omits `supported_features` for them.
+
 ## [2.0.6] - 2026-10-26
 
 ### Added

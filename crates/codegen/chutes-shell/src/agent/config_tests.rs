@@ -7941,13 +7941,19 @@ fn live_auto_pool_keeps_only_tool_capable_large_context_models() {
     assert_eq!(
         members,
         vec![
-            "tools-0", "tools-1", "tools-2", "tools-3", "tools-4", "tools-5"
+            "tools-0",
+            "tools-1",
+            "tools-2",
+            "tools-3",
+            "tools-4",
+            "tools-5",
+            "external-payg"
         ],
         "Auto keeps every tool-capable model with enough context, not the first four"
     );
     assert!(!auto.info.model.contains("no-tools"));
     assert!(!auto.info.model.contains("small-context"));
-    assert!(!auto.info.model.contains("external-payg"));
+    assert!(auto.info.model.contains("external-payg"));
 }
 
 #[test]

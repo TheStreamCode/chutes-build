@@ -2784,7 +2784,6 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
             entry.info.visible_for_auth(false)
                 && entry.info.api_backend == ApiBackend::ChatCompletions
                 && !entry.info.hidden
-                && !entry.info.external_provider
         })
     };
     let first = first_visible()?;
@@ -2801,7 +2800,6 @@ fn live_auto_entry(catalog: &IndexMap<String, ModelEntry>, cfg: &Config) -> Opti
             .filter(|entry| entry.info.visible_for_auth(false))
             .filter(|entry| entry.info.api_backend == ApiBackend::ChatCompletions)
             .filter(|entry| !entry.info.hidden)
-            .filter(|entry| !entry.info.external_provider)
             .filter(|entry| entry.info.supports_tools)
             .filter(|entry| entry.info.context_window.get() >= 32_000)
             .filter(|entry| entry.info.model != chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
@@ -3414,7 +3412,8 @@ pub struct ModelEntryConfig {
     #[serde(default = "default_true")]
     pub supported_in_api: bool,
     /// The live row has `confidential_compute: false`: it runs on an external
-    /// provider and is billed PAYG, so Auto must never select it implicitly.
+    /// provider and is billed PAYG. Auto treats it like any other tool-capable
+    /// model; the flag drives the PAYG notice and cost messaging.
     #[serde(default, skip_serializing_if = "is_false")]
     pub external_provider: bool,
     /// `supported_features` from the live catalog: `Some(true)` only when the

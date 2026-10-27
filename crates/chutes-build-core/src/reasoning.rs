@@ -158,6 +158,24 @@ pub fn reasoning_profile(model_id: &str) -> ReasoningProfile {
     ReasoningProfile::Unknown
 }
 
+/// Models whose catalogue row omits `supported_features` but whose
+/// tool-calling support was verified against the live endpoint (PAYG beta wave,
+/// 2026-10-26). Auto may pool them once the subscription-only split is gone.
+pub fn curated_supports_tools(model_id: &str) -> bool {
+    let model = model_id.to_ascii_lowercase();
+    [
+        "deepseek-v4-pro-0813",
+        "deepseek-v4.1-flash",
+        "qwen3.8-max-0902",
+        "qwen3.8-2.4t",
+        "glm-5.3",
+        "glm-5.2-fast",
+        "kimi-k2.7",
+    ]
+    .iter()
+    .any(|needle| model.contains(needle))
+}
+
 /// Reasoning-effort values verified against the live Chutes endpoint for
 /// generations whose catalogue row does not publish a menu. The values are sent
 /// verbatim as the top-level `reasoning_effort`; keep this list limited to
@@ -252,6 +270,24 @@ mod tests {
                 "unexpected effort set for {model}"
             );
         }
+    }
+
+    #[test]
+    fn curated_tool_support_covers_verified_payg_models() {
+        let yes = [
+            "deepseek-ai/DeepSeek-V4-Pro-0813",
+            "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+            "Qwen/Qwen3.8-Max-0902",
+            "Qwen/Qwen3.8-2.4T-A95B",
+            "zai-org/GLM-5.3",
+            "zai-org/GLM-5.2-Fast",
+            "moonshotai/Kimi-K2.7-Code",
+        ];
+        for model in yes {
+            assert!(curated_supports_tools(model), "expected tools for {model}");
+        }
+        assert!(!curated_supports_tools("acme/unknown"));
+        assert!(!curated_supports_tools("google/gemma-4-31B-turbo-TEE"));
     }
 
     #[test]

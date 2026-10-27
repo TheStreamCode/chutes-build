@@ -49,7 +49,8 @@ routing pool, the three strategies (`default`, `default:latency`,
 stats are resolved by `chute_id` against the live catalogue, so model names are
 shown instead of private chute labels. When a saved `default` pool exists, Auto
 targets `default:latency`, so the pool configured in the Chutes web app wins
-over the client-side inline pool.
+over the client-side inline pool. TEE and PAYG tool-capable rows are pooled
+together now that subscriptions are ending.
 
 Pool writes are not part of the supported surface yet: the Chutes alias endpoint
 is eventually consistent and intermittently returns 502. `/routing` and the

@@ -1183,3 +1183,22 @@ fn parse_marks_external_provider_rows() {
             .external_provider
     );
 }
+
+#[test]
+fn parse_marks_curated_payg_rows_tool_capable() {
+    let payg = serde_json::json!({
+        "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "confidential_compute": false
+    });
+    let entry = parse_remote_model_value(&payg, "https://default.url").expect("parses");
+    assert_eq!(
+        entry.supports_tools,
+        Some(true),
+        "verified PAYG tool support must be curated"
+    );
+    assert!(entry.external_provider);
+
+    let unknown = serde_json::json!({"model": "acme/unknown-payg"});
+    let entry = parse_remote_model_value(&unknown, "https://default.url").expect("parses");
+    assert_eq!(entry.supports_tools, None, "unknown rows stay closed");
+}

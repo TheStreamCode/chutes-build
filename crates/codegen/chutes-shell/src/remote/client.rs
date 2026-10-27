@@ -665,11 +665,14 @@ pub(crate) fn parse_remote_model_value(
                 .map(str::to_owned)
                 .collect()
         });
-    let supports_tools = supported_features.as_ref().map(|features| {
-        features
-            .iter()
-            .any(|feature| feature.eq_ignore_ascii_case("tools"))
-    });
+    let supports_tools = supported_features
+        .as_ref()
+        .map(|features| {
+            features
+                .iter()
+                .any(|feature| feature.eq_ignore_ascii_case("tools"))
+        })
+        .or_else(|| chutes_build_core::reasoning::curated_supports_tools(&model).then_some(true));
     let curated_efforts = chutes_build_core::reasoning::curated_reasoning_efforts(&model);
     // The catalogue publishes the `reasoning` feature but not the effort menu.
     // Expose the menu only for generations whose accepted values we probed
