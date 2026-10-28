@@ -8,9 +8,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- `DeepSeek-V4.1-Flash` now offers `max` in the reasoning menu. The live
-  endpoint accepts `low|medium|high|max`; the first probe only covered the
-  lower three, so 2.0.6 shipped a truncated set.
+- Reasoning-effort menus now come from a live probe snapshot covering every
+  model in the current catalogue, not from per-model hand entries.
+  `DeepSeek-V4.1-Flash` exposes the full set the gateway accepts, including
+  `max`; GLM-5.3, GLM-5.2, Qwen and Kimi rows are covered too. Regenerate the
+  snapshot with `python scripts/probe_reasoning_efforts.py --write` when the
+  catalogue changes; the script sends one invalid `reasoning_effort` value per
+  model and reads the accepted literals from the validation error.
 
 ## [2.0.7] - 2026-10-27
 

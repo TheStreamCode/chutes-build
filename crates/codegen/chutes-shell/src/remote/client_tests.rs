@@ -1215,5 +1215,8 @@ fn parse_exposes_max_effort_for_v4_1_flash() {
         .iter()
         .map(|o| o.id.as_str())
         .collect();
-    assert_eq!(ids, ["low", "medium", "high", "max"]);
+    assert_eq!(
+        ids,
+        ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    );
 }

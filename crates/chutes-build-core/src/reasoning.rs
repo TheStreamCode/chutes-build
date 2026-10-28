@@ -4,6 +4,9 @@
 //! describe how its chat template controls that reasoning. Keep the
 //! model-specific knowledge here so the UI and sampler cannot drift apart.
 
+#[path = "reasoning_efforts_snapshot.rs"]
+mod reasoning_efforts_snapshot;
+
 /// Chat-template switch understood by a model family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TemplateSwitch {
@@ -181,6 +184,9 @@ pub fn curated_supports_tools(model_id: &str) -> bool {
 /// verbatim as the top-level `reasoning_effort`; keep this list limited to
 /// generations probed against the endpoint (2026-10-26).
 pub fn curated_reasoning_efforts(model_id: &str) -> Option<&'static [&'static str]> {
+    if let Some(values) = snapshot_efforts(model_id) {
+        return Some(values);
+    }
     let model = model_id.to_ascii_lowercase();
     if model.contains("deepseek-v4-pro-0813") {
         Some(&["low", "medium", "high"])
@@ -199,6 +205,13 @@ pub fn curated_reasoning_efforts(model_id: &str) -> Option<&'static [&'static st
     } else {
         None
     }
+}
+
+fn snapshot_efforts(model_id: &str) -> Option<&'static [&'static str]> {
+    reasoning_efforts_snapshot::EFFORT_SNAPSHOT
+        .iter()
+        .find(|(id, _)| id.eq_ignore_ascii_case(model_id))
+        .map(|(_, values)| *values)
 }
 
 /// Convert a provider-neutral effort into a request compatible with the
@@ -251,27 +264,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn curated_efforts_cover_new_beta_models() {
-        let cases = [
-            (
-                "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-                &["low", "medium", "high", "max"][..],
-            ),
-            ("zai-org/GLM-5.3", &["low", "high", "max"][..]),
-            ("zai-org/GLM-5.2-Fast", &["low", "high", "max"][..]),
-            (
-                "moonshotai/Kimi-K2.7-Code",
-                &["low", "medium", "high", "max"][..],
-            ),
-            ("Qwen/Qwen3.8-2.4T-A95B", &["low", "medium", "xhigh"][..]),
-        ];
-        for (model, expected) in cases {
-            assert_eq!(
-                curated_reasoning_efforts(model),
-                Some(expected),
-                "unexpected effort set for {model}"
-            );
-        }
+    fn snapshot_covers_the_probed_catalogue() {
+        assert_eq!(
+            curated_reasoning_efforts("deepseek-ai/DeepSeek-V4.1-Flash-1017"),
+            Some(
+                &[
+                    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+                ][..]
+            )
+        );
+        assert_eq!(
+            curated_reasoning_efforts("zai-org/GLM-5.3"),
+            Some(&["low", "high", "max"][..])
+        );
+        assert_eq!(
+            curated_reasoning_efforts("zai-org/GLM-5.2-TEE"),
+            Some(&["none", "low", "medium", "high", "max"][..])
+        );
+        assert_eq!(
+            curated_reasoning_efforts("deepseek-ai/DeepSeek-V4-Pro-0813"),
+            Some(&["low", "medium", "high", "xhigh", "max"][..])
+        );
+        assert_eq!(
+            curated_reasoning_efforts("Qwen/Qwen3.8-Max-0902"),
+            Some(&["none", "minimal", "low", "medium", "high", "xhigh", "max"][..])
+        );
+        assert_eq!(curated_reasoning_efforts("acme/unknown"), None);
+    }
+
+    #[test]
+    fn unprobed_models_still_use_the_family_fallback() {
+        assert_eq!(
+            curated_reasoning_efforts("moonshotai/Kimi-K2.7-Code"),
+            Some(&["low", "medium", "high", "max"][..])
+        );
     }
 
     #[test]
@@ -290,35 +316,6 @@ mod tests {
         }
         assert!(!curated_supports_tools("acme/unknown"));
         assert!(!curated_supports_tools("google/gemma-4-31B-turbo-TEE"));
-    }
-
-    #[test]
-    fn curated_efforts_cover_probed_generations_only() {
-        assert_eq!(
-            curated_reasoning_efforts("deepseek-ai/DeepSeek-V4-Pro-0813"),
-            Some(&["low", "medium", "high"][..])
-        );
-        assert_eq!(
-            curated_reasoning_efforts("Qwen/Qwen3.8-Max-0902"),
-            Some(&["low", "medium", "xhigh"][..])
-        );
-        assert_eq!(
-            curated_reasoning_efforts("moonshotai/Kimi-K3-TEE"),
-            Some(&["low", "medium", "high", "max"][..])
-        );
-        assert_eq!(
-            curated_reasoning_efforts("zai-org/GLM-5.2-TEE"),
-            Some(&["low", "medium", "high", "max"][..])
-        );
-        assert_eq!(
-            curated_reasoning_efforts("deepseek-ai/DeepSeek-V4-Flash-0731-TEE"),
-            Some(&["minimal", "low", "medium", "high", "xhigh"][..])
-        );
-        assert_eq!(
-            curated_reasoning_efforts("zai-org/GLM-5.2-TEE"),
-            Some(&["low", "medium", "high", "max"][..])
-        );
-        assert_eq!(curated_reasoning_efforts("acme/unknown"), None);
     }
 
     #[test]

@@ -10,18 +10,15 @@ By default, Chutes Build uses models hosted by Chutes, and new sessions start wi
 
 `/effort` (and `--reasoning-effort` for headless runs) is offered only for
 models whose accepted effort values have been probed against the Chutes
-endpoint. The catalogue publishes the `reasoning` feature but not the menu, so
-the verified value set is used. A generation without a verified set, or without
+endpoint. The catalogue publishes the `reasoning` feature but not the menu, so a
+generated snapshot supplies the verified value set for the current catalogue.
+`python scripts/probe_reasoning_efforts.py --write` refreshes it by sending one
+invalid `reasoning_effort` value per model and reading the accepted literals
+from the validation error. A generation without a probed set, or without
 catalogue metadata, can be configured explicitly with
 `[model.<id>] supports_reasoning_effort = true` and `reasoning_efforts = [...]`.
-Endpoint-verified value sets cover `DeepSeek-V4-Pro` (`low|medium|high`),
-`DeepSeek-V4.1-Flash` (`low|medium|high|max`), `Qwen3.8-Max` and
-`Qwen3.8-2.4T-A95B` (`low|medium|xhigh`), `DeepSeek-V4-Flash`
-(`minimal|low|medium|high|xhigh`), `Kimi-K3` and `Kimi-K2.7-Code`
-(`low|medium|high|max`), `GLM-5.3` and `GLM-5.2-Fast` (`low|high|max`), and
-`GLM-5.2` (`low|medium|high|max`). Auto pools TEE and PAYG tool-capable models
-together: the subscription-only split is gone, so a PAYG model can be chosen by
-the router like any TEE model.
+Auto pools TEE and PAYG tool-capable models together: the subscription-only
+split is gone, so a PAYG model can be chosen by the router like any TEE model.
 
 Models with `confidential_compute: false` run on an external provider and are
 billed PAYG. They need a positive credit balance; without it Chutes returns a
