@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Updated `pulldown-cmark` to 0.13.5 for RUSTSEC-2026-0414; `cargo deny` is
+  clean again.
 - Reasoning-effort menus now come from a live probe snapshot covering every
   model in the current catalogue, not from per-model hand entries.
   `DeepSeek-V4.1-Flash` exposes the full set the gateway accepts, including
