@@ -1202,3 +1202,18 @@ fn parse_marks_curated_payg_rows_tool_capable() {
     let entry = parse_remote_model_value(&unknown, "https://default.url").expect("parses");
     assert_eq!(entry.supports_tools, None, "unknown rows stay closed");
 }
+
+#[test]
+fn parse_exposes_max_effort_for_v4_1_flash() {
+    let row = serde_json::json!({
+        "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "confidential_compute": false
+    });
+    let entry = parse_remote_model_value(&row, "https://default.url").expect("parses");
+    let ids: Vec<&str> = entry
+        .reasoning_efforts
+        .iter()
+        .map(|o| o.id.as_str())
+        .collect();
+    assert_eq!(ids, ["low", "medium", "high", "max"]);
+}

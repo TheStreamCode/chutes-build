@@ -14,8 +14,8 @@ endpoint. The catalogue publishes the `reasoning` feature but not the menu, so
 the verified value set is used. A generation without a verified set, or without
 catalogue metadata, can be configured explicitly with
 `[model.<id>] supports_reasoning_effort = true` and `reasoning_efforts = [...]`.
-Endpoint-verified value sets cover `DeepSeek-V4-Pro` and
-`DeepSeek-V4.1-Flash` (`low|medium|high`), `Qwen3.8-Max` and
+Endpoint-verified value sets cover `DeepSeek-V4-Pro` (`low|medium|high`),
+`DeepSeek-V4.1-Flash` (`low|medium|high|max`), `Qwen3.8-Max` and
 `Qwen3.8-2.4T-A95B` (`low|medium|xhigh`), `DeepSeek-V4-Flash`
 (`minimal|low|medium|high|xhigh`), `Kimi-K3` and `Kimi-K2.7-Code`
 (`low|medium|high|max`), `GLM-5.3` and `GLM-5.2-Fast` (`low|high|max`), and

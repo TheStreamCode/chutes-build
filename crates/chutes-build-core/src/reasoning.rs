@@ -182,8 +182,10 @@ pub fn curated_supports_tools(model_id: &str) -> bool {
 /// generations probed against the endpoint (2026-10-26).
 pub fn curated_reasoning_efforts(model_id: &str) -> Option<&'static [&'static str]> {
     let model = model_id.to_ascii_lowercase();
-    if model.contains("deepseek-v4-pro-0813") || model.contains("deepseek-v4.1-flash") {
+    if model.contains("deepseek-v4-pro-0813") {
         Some(&["low", "medium", "high"])
+    } else if model.contains("deepseek-v4.1-flash") {
+        Some(&["low", "medium", "high", "max"])
     } else if model.contains("qwen3.8-max-0902") || model.contains("qwen3.8-2.4t") {
         Some(&["low", "medium", "xhigh"])
     } else if model.contains("deepseek-v4-flash") {
@@ -253,7 +255,7 @@ mod tests {
         let cases = [
             (
                 "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-                &["low", "medium", "high"][..],
+                &["low", "medium", "high", "max"][..],
             ),
             ("zai-org/GLM-5.3", &["low", "high", "max"][..]),
             ("zai-org/GLM-5.2-Fast", &["low", "high", "max"][..]),
