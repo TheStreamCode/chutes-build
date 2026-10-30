@@ -138,7 +138,9 @@ Chutes Build resolves the API key in this order:
 
 ### Context Window
 
-The `context_window` value tells Chutes Build when to trigger auto-compaction. When you override a known model, Chutes Build inherits that model's context window. When you define a new model and omit `context_window`, Chutes Build defaults to 200,000 tokens, so set it explicitly to match your provider.
+The `context_window` value tells Chutes Build when to trigger auto-compaction. When you override a known model, Chutes Build inherits that model's context window. When you define a new model and omit `context_window`, Chutes Build defaults to 256,000 tokens, so set it explicitly to match your provider.
+
+Chutes catalogue rows that publish `context_length` always win. The PAYG beta rows currently omit it, so Chutes Build falls back to the vendor limit: DeepSeek V4.1 Flash and V4 Pro use 1,048,576 tokens; Qwen3.8 Max, GLM-5.3 and GLM-5.2 Fast use 1,000,000; Qwen3.8-2.4T and Kimi-K2.7 use 262,144. `/context-window` can lower the value for a session.
 
 ### Request Size Limit
 

@@ -28,6 +28,8 @@ Chutes Build discovers skills from these directories, in priority order:
 
 Chutes Build deduplicates skills by name -- a higher-priority location overrides a lower one. Chutes Build also scans `.agents/skills/` (and `commands/`) at each tier (alongside `.chutes-build/`) and walks every directory between your working directory and the repo root.
 
+The external `chutes-media` skill is skipped on purpose. Media generation is native through `generate_media`; Chutes Build does not need the media MCP server or the external CLI for images, video, music, or speech.
+
 Flat `*.md` files under a `commands/` directory become user-invocable slash commands (filename stem = command name), matching Claude Code's legacy custom-command layout.
 
 Skill and command discovery does **not** use `.gitignore`. Paths under known skill roots (`.chutes-build/`, `.agents/`, `.claude/`, `.cursor/`) always load when present on disk — teams often ignore `.claude/**` as local-only config while still expecting `/frontend`-style project commands to work. To hide a skill, use `[skills] ignore` in config (not repo ignore rules).
