@@ -155,6 +155,22 @@ pub fn collect_skill_config_dirs(
     )
 }
 
+/// Skills shipped inside the binary. An external copy with the same directory
+/// name would shadow the native instructions, so discovery skips it outside
+/// the bundled tree; the bundled copy is added separately.
+const NATIVE_SKILL_DIRS: &[&str] = &["chutes-media"];
+
+fn is_native_skill_path(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            NATIVE_SKILL_DIRS
+                .iter()
+                .any(|native| name.eq_ignore_ascii_case(native))
+        })
+}
+
 fn collect_skill_config_dirs_from_sources(
     project_sources: Option<&crate::repo::StartupProjectSources>,
     global_dir: &Path,
@@ -290,9 +306,12 @@ async fn list_skills_with_options(
     for config_dir in &config_dirs {
         let scope = scope_for_config_dir(config_dir, cwd.as_deref(), git_root);
 
-        // Skills before commands: skills win name collisions.
+        // Skills before commands: skills win name collisions. Native skills are
+        // excluded here so an external copy cannot shadow the bundled one.
         collect_discovered_paths(
-            find_skill_paths(config_dir),
+            find_skill_paths(config_dir)
+                .into_iter()
+                .filter(|path| !is_native_skill_path(path)),
             scope,
             &mut seen_canonical_paths,
             &mut skill_files,
@@ -686,6 +705,16 @@ mod tests {
             "---\nname: {name}\ndescription: A test skill called {name}\n---\n\nSkill body here.\n"
         );
         fs::write(dir.join("SKILL.md"), content).unwrap();
+    }
+
+    #[test]
+    fn external_chutes_media_skill_is_never_loaded() {
+        assert!(is_native_skill_path(Path::new(
+            "/home/user/.agents/skills/chutes-media/SKILL.md"
+        )));
+        assert!(!is_native_skill_path(Path::new(
+            "/home/user/.agents/skills/other-name/SKILL.md"
+        )));
     }
 
     // ── Server-synced skills (injected server_skill_dirs) ────────────────

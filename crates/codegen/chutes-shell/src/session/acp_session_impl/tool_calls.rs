@@ -1443,11 +1443,27 @@ impl SessionActor {
     }
     pub(crate) async fn prepare_tool_call(
         &self,
-        call: crate::sampling::types::ToolCallResponse,
+        mut call: crate::sampling::types::ToolCallResponse,
         deferred_followups: &mut Vec<ConversationItem>,
         requested_model: Option<&str>,
     ) -> Result<Result<PreparedToolCall, ToolLoop>, acp::Error> {
         let tool_call_id = acp::ToolCallId::new(Arc::from(call.id.clone()));
+        if call.function.name.trim().is_empty()
+            && let Some(inferred) = infer_tool_name_from_arguments(&call.function.arguments)
+            && let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+            && self
+                .tool_bridge_handle()
+                .try_parse(inferred, args)
+                .await
+                .is_ok()
+        {
+            tracing::warn!(
+                call_id = %call.id,
+                inferred_tool = inferred,
+                "Model emitted a tool call with an empty name; repairing it from the argument shape"
+            );
+            call.function.name = inferred.to_owned();
+        }
         let model_id = crate::session::telemetry::requested_model_snapshot(requested_model);
         let model_id_str = model_id.as_deref().unwrap_or("");
         tracing::info!(
@@ -3824,5 +3840,49 @@ mod wait_interrupt_tests {
         );
         drop(new);
         assert_eq!(depth.depth(), 0);
+    }
+}
+
+/// Recover the tool a model meant to call when it emitted an empty name.
+/// Restricted to unambiguous argument shapes so a malformed call is never
+/// silently turned into a different action.
+fn infer_tool_name_from_arguments(raw_arguments: &str) -> Option<&'static str> {
+    let value: serde_json::Value = serde_json::from_str(raw_arguments).ok()?;
+    let object = value.as_object()?;
+    if object.contains_key("target_file") || object.contains_key("file_path") {
+        return Some("read_file");
+    }
+    if object.contains_key("kind")
+        && (object.contains_key("prompt") || object.contains_key("params"))
+    {
+        return Some("generate_media");
+    }
+    None
+}
+
+#[cfg(test)]
+mod empty_tool_name_tests {
+    use super::infer_tool_name_from_arguments;
+
+    #[test]
+    fn infers_read_file_from_its_argument() {
+        assert_eq!(
+            infer_tool_name_from_arguments(r#"{"target_file":"a.txt"}"#),
+            Some("read_file")
+        );
+    }
+
+    #[test]
+    fn infers_generate_media_from_kind_and_prompt() {
+        assert_eq!(
+            infer_tool_name_from_arguments(r#"{"kind":"image","prompt":"a cat"}"#),
+            Some("generate_media")
+        );
+    }
+
+    #[test]
+    fn leaves_ambiguous_arguments_alone() {
+        assert_eq!(infer_tool_name_from_arguments(r#"{"path":"a.txt"}"#), None);
+        assert_eq!(infer_tool_name_from_arguments("not json"), None);
     }
 }

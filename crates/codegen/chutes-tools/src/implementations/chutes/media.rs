@@ -321,6 +321,7 @@ impl chutes_tool_runtime::Tool for GenerateMediaTool {
                 ));
             }
         };
+        normalize_params_for_cord(&cord.schema, &mut params);
         if let Some(prompt) = input.prompt.as_deref() {
             apply_prompt(&cord.schema, &mut params, prompt);
         }
@@ -333,12 +334,17 @@ impl chutes_tool_runtime::Tool for GenerateMediaTool {
                 ),
             ));
         }
-        validate_schema_fields(
-            &cord.schema,
-            &params,
-            env_flag_default("CHUTES_ALLOW_UNKNOWN_PARAMS", false),
-        )
-        .map_err(|error| execution_error("generate_media", error))?;
+        let allow_unknown = env_flag_default("CHUTES_ALLOW_UNKNOWN_PARAMS", false);
+        if let Err(error) = validate_schema_fields(&cord.schema, &params, allow_unknown) {
+            if inject_required_model(&cord.schema, &mut params, &resolved_model)
+                && validate_schema_fields(&cord.schema, &params, allow_unknown).is_ok()
+            {
+                // The model was required by the cord wrapper and is now filled
+                // with the resolved catalogue entry.
+            } else {
+                return Err(execution_error("generate_media", error));
+            }
+        }
         encode_workspace_assets(&mut params, &cwd)
             .await
             .map_err(|error| execution_error("generate_media", error))?;
@@ -849,6 +855,61 @@ fn normalize_model_key(value: &str) -> String {
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+/// Move caller fields under a cord's single object wrapper (`args`,
+/// `input_args`, ...). A caller naturally writes `width`/`height` at the top
+/// level, while these cords expect them inside the wrapper; merging here keeps
+/// both forms working without a describe round-trip.
+fn normalize_params_for_cord(
+    schema: &Option<serde_json::Value>,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(wrapper) = single_prompt_wrapper(schema) else {
+        return;
+    };
+    let mut nested = match params.remove(&wrapper) {
+        Some(serde_json::Value::Object(nested)) => nested,
+        Some(other) => {
+            // Leave a non-object wrapper alone for validation to report.
+            params.insert(wrapper, other);
+            return;
+        }
+        None => serde_json::Map::new(),
+    };
+    for (key, value) in std::mem::take(params) {
+        nested.entry(key).or_insert(value);
+    }
+    params.insert(wrapper, serde_json::Value::Object(nested));
+}
+
+/// Some image cords require the selected model inside their `args` wrapper.
+/// Local validation reports it; fill it with the already resolved catalogue
+/// identifier and let validation run once more.
+fn inject_required_model(
+    schema: &Option<serde_json::Value>,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+    resolved_model: &str,
+) -> bool {
+    if resolved_model.trim().is_empty() {
+        return false;
+    }
+    if let Some(wrapper) = single_prompt_wrapper(schema) {
+        let entry = params
+            .entry(wrapper)
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        let Some(nested) = entry.as_object_mut() else {
+            return false;
+        };
+        nested
+            .entry("model")
+            .or_insert_with(|| serde_json::Value::String(resolved_model.to_owned()));
+        return true;
+    }
+    params
+        .entry("model")
+        .or_insert_with(|| serde_json::Value::String(resolved_model.to_owned()));
+    true
 }
 
 /// Place `prompt` into the field this cord declares for free text, leaving an
@@ -1695,6 +1756,61 @@ fn read_only_capabilities() -> chutes_tool_protocol::ToolCapabilities {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        value.as_object().cloned().expect("object")
+    }
+
+    #[test]
+    fn top_level_params_move_into_a_single_args_wrapper() {
+        let schema = Some(serde_json::json!({
+            "type": "object",
+            "required": ["args"],
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "width": {"type": "integer"},
+                        "height": {"type": "integer"}
+                    }
+                }
+            }
+        }));
+        let mut params = object(serde_json::json!({"width": 1280, "height": 720}));
+        normalize_params_for_cord(&schema, &mut params);
+        assert_eq!(
+            serde_json::Value::Object(params),
+            serde_json::json!({"args": {"width": 1280, "height": 720}})
+        );
+    }
+
+    #[test]
+    fn a_required_model_is_filled_inside_the_args_wrapper() {
+        let schema = Some(serde_json::json!({
+            "type": "object",
+            "required": ["args"],
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "required": ["model", "prompt"],
+                    "properties": {
+                        "model": {"type": "string"},
+                        "prompt": {"type": "string"}
+                    }
+                }
+            }
+        }));
+        let mut params = object(serde_json::json!({}));
+        apply_prompt(&schema, &mut params, "a red apple");
+        assert!(validate_schema_fields(&schema, &params, false).is_err());
+        assert!(inject_required_model(&schema, &mut params, "imageclassic"));
+        assert!(validate_schema_fields(&schema, &params, false).is_ok());
+        assert_eq!(params["args"]["model"], "imageclassic");
+        assert_eq!(params["args"]["prompt"], "a red apple");
+    }
+
     use super::*;
 
     /// Serializes tests that call `encode_workspace_assets`/

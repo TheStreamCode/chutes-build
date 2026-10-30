@@ -4,6 +4,22 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Tool calls with an empty function name are repaired before dispatch when
+  their arguments identify one tool unambiguously: `target_file`/`file_path`
+  becomes `read_file`, and `kind` with `prompt`/`params` becomes
+  `generate_media`. The inferred tool must exist and parse its arguments.
+- The external `chutes-media` skill under `~/.agents/skills` is no longer
+  discovered, so it cannot shadow the native `generate_media` path. Media
+  generation stays native and does not require the MCP server or the CLI.
+- `generate_media` now moves caller fields into a cord's `args`/`input_args`
+  wrapper and fills a required `model` with the resolved catalogue entry,
+  fixing the `model is a required property` and unexpected `width`/`height`
+  errors.
+
 ## [2.0.8] - 2026-10-28
 
 ### Fixed
