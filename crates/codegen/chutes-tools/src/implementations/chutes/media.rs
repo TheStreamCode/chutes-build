@@ -1811,8 +1811,6 @@ mod tests {
         assert_eq!(params["args"]["prompt"], "a red apple");
     }
 
-    use super::*;
-
     /// Serializes tests that call `encode_workspace_assets`/
     /// `encode_workspace_file` against the process-global
     /// `CHUTES_MAX_INPUT_ASSET_BYTES` env var, so the one test that mutates

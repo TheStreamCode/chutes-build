@@ -4,6 +4,13 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Removed a duplicate test import that failed the Linux clippy gate.
+- Updated `libz-sys` to 1.1.31 for RUSTSEC-2026-0418; `cargo deny` is clean.
+
 ## [2.0.9] - 2026-10-30
 
 ### Fixed
