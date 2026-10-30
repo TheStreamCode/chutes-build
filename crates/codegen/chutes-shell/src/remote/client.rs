@@ -642,9 +642,15 @@ pub(crate) fn parse_remote_model_value(
         None => None,
     };
     let (context_window, context_windows) =
-        crate::agent::config::context_window_choices(scalar, &listed).or_else(|| {
-            std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).map(|w| (w, Vec::new()))
-        })?;
+        crate::agent::config::context_window_choices(scalar, &listed)
+            .or_else(|| {
+                chutes_build_core::model_metadata::curated_context_window(&model)
+                    .and_then(std::num::NonZeroU64::new)
+                    .map(|window| (window, Vec::new()))
+            })
+            .or_else(|| {
+                std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).map(|w| (w, Vec::new()))
+            })?;
     let agent_type = get_string(obj, "systemPromptType")
         .or_else(|| get_string(obj, "system_prompt_type"))
         .or_else(|| get_string(obj, "agent_type"))

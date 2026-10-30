@@ -1220,3 +1220,20 @@ fn parse_exposes_max_effort_for_v4_1_flash() {
         ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
     );
 }
+
+#[test]
+fn parse_uses_curated_context_for_payg_rows() {
+    let payg = serde_json::json!({
+        "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "confidential_compute": false
+    });
+    let entry = parse_remote_model_value(&payg, "https://default.url").expect("parses");
+    assert_eq!(entry.context_window.get(), 1_048_576);
+
+    let explicit = serde_json::json!({
+        "model": "deepseek-ai/DeepSeek-V4-Flash-0731-TEE",
+        "context_length": 131_072
+    });
+    let entry = parse_remote_model_value(&explicit, "https://default.url").expect("parses");
+    assert_eq!(entry.context_window.get(), 131_072, "catalogue value wins");
+}

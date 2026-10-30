@@ -8,6 +8,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- PAYG catalogue rows that omit `context_length` now use their vendor context
+  instead of the 256k fallback: DeepSeek V4.1 Flash and V4 Pro 1M, Qwen3.8 Max
+  and GLM-5.3/GLM-5.2 Fast 1M, Qwen3.8-2.4T and Kimi-K2.7 262k. Explicit
+  catalogue values still win.
 - Removed a duplicate test import that failed the Linux clippy gate.
 - Updated `libz-sys` to 1.1.31 for RUSTSEC-2026-0418; `cargo deny` is clean.
 

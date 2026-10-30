@@ -11,6 +11,7 @@ pub mod embeddings;
 pub mod endpoint_policy;
 pub mod endpoints;
 pub mod media;
+pub mod model_metadata;
 pub mod privacy;
 pub mod product;
 pub mod reasoning;
