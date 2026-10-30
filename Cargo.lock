@@ -1845,7 +1845,7 @@ dependencies = [
 
 [[package]]
 name = "chutes-build"
-version = "2.0.9"
+version = "2.0.10"
 dependencies = [
  "anyhow",
  "chutes-acp-lib",
@@ -2806,7 +2806,7 @@ dependencies = [
 
 [[package]]
 name = "chutes-pager"
-version = "2.0.9"
+version = "2.0.10"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -3308,7 +3308,7 @@ dependencies = [
 
 [[package]]
 name = "chutes-shell"
-version = "2.0.9"
+version = "2.0.10"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3911,7 +3911,7 @@ dependencies = [
 
 [[package]]
 name = "chutes-version"
-version = "2.0.9"
+version = "2.0.10"
 dependencies = [
  "semver",
 ]
