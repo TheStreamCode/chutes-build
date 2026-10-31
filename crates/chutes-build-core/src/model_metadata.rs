@@ -15,9 +15,7 @@ pub fn curated_context_window(model_id: &str) -> Option<u64> {
         Some(1_000_000)
     } else if model.contains("qwen3.8-2.4t") {
         Some(262_144)
-    } else if model.contains("glm-5.3") {
-        Some(1_000_000)
-    } else if model.contains("glm-5.2-fast") {
+    } else if model.contains("glm-5.3") || model.contains("glm-5.2-fast") {
         Some(1_000_000)
     } else if model.contains("kimi-k2.7") {
         Some(262_144)
