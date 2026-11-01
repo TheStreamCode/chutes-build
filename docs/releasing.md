@@ -14,8 +14,10 @@ Configure the public GitHub repository with:
 - full commit SHA pinning for every GitHub Action;
 - an `npm-release` environment used only by the publish job, with required
   reviewer approval when repository policy supports it;
-- an `NPM_TOKEN` environment secret limited to publishing the Chutes Build npm
-  packages, with OIDC enabled for npm provenance attestations; and
+- npm trusted publishers on npmjs.com for `chutes-build` and the six native
+  packages, each bound to `TheStreamCode/chutes-build`, the
+  `package-release.yml` workflow, and the `npm-release` environment, with
+  publish permission enabled; and
 - Actions permissions restricted to read-only by default.
 
 Recommended repository topics are `chutes`, `coding-agent`, `cli`, `rust`,
@@ -136,32 +138,24 @@ fix belongs in the workflow. Check `npm view chutes-build version` and
 still free and a re-dispatch is clean. That check is what made cancelling and
 re-running safe here rather than burning a version number.
 
-### A PUT 404 is an auth failure, and the secret has two homes
+### Trusted publishing is the publish credential
 
-The 1.5.0 publish failed on its first package — all six builds and the smoke
-test green — with `npm error 404 Not Found - PUT
-https://registry.npmjs.org/chutes-build-darwin-arm64`. The package exists
-(through 1.4.0); npm answers 404 to an unauthorized publish, so on an
-existing package that error means the credential, never the code. The release
-files were byte-identical to the working 1.4.0 apart from the version bumps,
-which closed the case from the other side.
+The publish job uses GitHub OIDC through `id-token: write`; it has no
+`NPM_TOKEN` and does not read one. npm authenticates the workflow from the
+short-lived token and attaches provenance.
 
-The credential had two layers of wrong. The `NPM_TOKEN` the job reads lives on
-the `npm-release` environment, where it had sat untouched since July and died
-quietly — and an environment secret **shadows** a repo secret of the same
-name, so two fresh repo-level tokens had exactly zero effect until the new
-token was set on the environment with `gh secret set NPM_TOKEN --env
-npm-release`. There is deliberately no repo-level `NPM_TOKEN` any more: one
-home for the secret means the next failure cannot be this one again. Verify a
-replacement token with `npm whoami` against the package maintainers before
-re-running; then `gh run rerun <id> --failed` — the publish loop skips what
-already landed, so no version burns.
+npmjs.com must have a trusted publisher for every package the job publishes:
+`chutes-build`, `chutes-build-darwin-arm64`, `chutes-build-darwin-x64`,
+`chutes-build-linux-arm64-gnu`, `chutes-build-linux-x64-gnu`,
+`chutes-build-win32-arm64`, and `chutes-build-win32-x64`. Each entry names
+repository `TheStreamCode/chutes-build`, workflow file `package-release.yml`,
+and environment `npm-release`, with publish allowed.
 
-One more timing trap in the same run: npm answers `+ chutes-build@1.5.0`
-followed by "Your package is being processed and may take a few minutes to
-become available", and it means it — the packument still shows the old
-`latest` for minutes after a genuinely successful PUT. Wait before declaring
-a phantom failure.
+A `404 Not Found` on a package `PUT` still means the trusted publisher is
+missing, mis-scoped, or attached to a different workflow or environment.
+Fix the npm package settings; do not reintroduce a long-lived token. A
+successful publish can take a few minutes to update the `latest` tag, so do
+not treat that delay as a failed PUT.
 
 ### Why the release is not a manual step any more
 
