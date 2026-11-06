@@ -3,26 +3,12 @@
 A Chutes-native terminal coding agent
 
 [![CI](https://github.com/TheStreamCode/chutes-build/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TheStreamCode/chutes-build/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/chutes-build?logo=npm&color=cb3837)](https://www.npmjs.com/package/chutes-build)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ![Chutes Build TUI](assets/chutes/screenshot/chutes-build.png)
 
 Chutes Build is a terminal-based AI coding agent for the [Chutes](https://chutes.ai) ecosystem. It runs as a full-screen TUI (terminal user interface) that understands a codebase, edits files, executes shell commands, searches the web, and manages long-running tasks, interactively, headlessly for scripts and CI, or embedded in editors through the Agent Client Protocol (ACP). It is an independent, unofficial fork of [xai-org/grok-build](https://github.com/xai-org/grok-build) with Chutes-native inference, model routing, media and account endpoints, and it is not affiliated with or endorsed by xAI.
-
-## Contents
-
-- [Install](#install)
-- [Quick start](#quick-start)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Configuration](#configuration)
-- [Privacy and security](#privacy-and-security)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Support](#support)
-- [Contributing](#contributing)
-- [License](#license)
 
 ## Install
 
