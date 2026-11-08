@@ -4,6 +4,21 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.11] - 2026-11-08
+
+### Changed
+
+- Chutes now bills pay-as-you-go: `chutes-build account` and `/account` report
+  **Pay-as-you-go**, omit monthly price/cap values, hide the Plus/Pro plan
+  reference, and keep the rolling four-hour and daily request windows plus the
+  PAYG balance.
+
+### Fixed
+
+- `list_media_models` now returns an explicit message when a category has no
+  available model (for example video), and `/imagine`/`/imagine-video` tell the
+  user that generation is unavailable instead of inventing a model.
+
 ## [2.0.10] - 2026-10-31
 
 ### Fixed

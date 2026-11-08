@@ -170,7 +170,7 @@ fn imagine_model_list_instruction(kind: &str) -> String {
         "imagine-video"
     };
     format!(
-        "Call list_media_models with kind \"{kind}\" and limit 20, then present the available {kind} models as a compact list: slug (or name), id, and a one-line reason to pick it. Do not generate anything yet. Close with the three forms the user can run: `/{command} <description>` lets the tool pick an available model automatically, `/{command} <model> <description>` chooses one of the listed models, and `/{command} --model <model> <description>` is the unambiguous form. Only list models that appear in the tool result; never invent one."
+        "Call list_media_models with kind \"{kind}\" and limit 20, then present the available {kind} models as a compact list: slug (or name), id, and a one-line reason to pick it. Do not generate anything yet. If the tool result has count 0, tell the user clearly that no {kind} model is currently available and that {kind} generation cannot be performed right now; do not invent a model or claim that generation succeeded. Close with the three forms the user can run: `/{command} <description>` lets the tool pick an available model automatically, `/{command} <model> <description>` chooses one of the listed models, and `/{command} --model <model> <description>` is the unambiguous form. Only list models that appear in the tool result; never invent one."
     )
 }
 
@@ -343,6 +343,8 @@ mod tests {
         let text = imagine_instruction("");
         assert!(text.contains("list_media_models"));
         assert!(!text.contains("generate_media"));
+        assert!(text.contains("count 0"));
+        assert!(text.contains("no image model is currently available"));
     }
 
     #[test]
@@ -376,6 +378,8 @@ mod tests {
         let text = imagine_video_instruction("");
         assert!(text.contains("list_media_models"));
         assert!(text.contains("/imagine-video <model> <description>"));
+        assert!(text.contains("count 0"));
+        assert!(text.contains("no video model is currently available"));
     }
 
     #[test]

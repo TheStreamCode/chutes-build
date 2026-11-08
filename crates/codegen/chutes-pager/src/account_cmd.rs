@@ -209,6 +209,59 @@ mod tests {
     }
 
     #[test]
+    fn human_dashboard_reports_pay_as_you_go_without_monthly_caps() {
+        let summary = AccountSummary {
+            windows: vec![
+                UsageWindow {
+                    id: "four_hour_window".to_string(),
+                    kind: UsageWindowKind::Rolling4h,
+                    label: "4-Hour Window".to_string(),
+                    unit: UsageUnit::Usd,
+                    used: Some(0.0),
+                    limit: Some(8.33),
+                    remaining: Some(8.33),
+                    percent_used: Some(0.0),
+                    reset_label: None,
+                    status: None,
+                    data_source: None,
+                },
+                UsageWindow {
+                    id: "quotas-daily".to_string(),
+                    kind: UsageWindowKind::DailyRequests,
+                    label: "Daily Quota".to_string(),
+                    unit: UsageUnit::Requests,
+                    used: Some(0.0),
+                    limit: Some(5001.0),
+                    remaining: Some(5001.0),
+                    percent_used: Some(0.0),
+                    reset_label: None,
+                    status: Some("trusted".to_string()),
+                    data_source: Some("quota-usage".to_string()),
+                },
+            ],
+            quotas: Vec::new(),
+            plan: Some(PlanInfo {
+                plan_name: Some("Pay-as-you-go".to_string()),
+                monthly_price_usd: None,
+                monthly_cap_usd: None,
+                four_hour_cap_usd: Some(8.33),
+                daily_request_limit: Some(5001.0),
+                payg_discount_percent: None,
+            }),
+            plan_limits: Vec::new(),
+            payg_credit_usd: Some(53.5),
+        };
+
+        let text = format_human(&summary);
+        assert!(text.contains("Plan: Pay-as-you-go"), "{text}");
+        assert!(!text.contains("/mo"), "{text}");
+        assert!(!text.contains("monthly cap"), "{text}");
+        assert!(text.contains("4-hour cap"), "{text}");
+        assert!(text.contains("daily requests"), "{text}");
+        assert!(text.contains("Credit: $53.50 PAYG balance"), "{text}");
+    }
+
+    #[test]
     fn human_dashboard_degrades_without_data() {
         let text = format_human(&AccountSummary {
             windows: Vec::new(),

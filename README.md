@@ -122,6 +122,10 @@ The TUI degrades decorative glyphs on the legacy Windows console: arrows, checkm
 
 Browser automation needs Chrome or Edge, or an explicit `CHUTES_BROWSER_EXECUTABLE`. Video inspection needs FFmpeg, or an explicit `CHUTES_FFMPEG_EXECUTABLE`; install it and restart the process.
 
+### No model available for a media category
+
+Chutes media models come and go. If the live catalog has no model for a requested category, `/imagine`, `/imagine-video`, and `generate_media` report that no model is currently available and do not invent one. For example, when no video model is published, video generation cannot run until Chutes adds one; the same applies to image, music, and speech. Pick another category or retry later.
+
 ## Development
 
 Clone the repository and build with the pinned toolchain:

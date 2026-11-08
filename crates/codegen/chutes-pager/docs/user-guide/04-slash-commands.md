@@ -248,7 +248,9 @@ list changes over time, so no model is hardcoded: `/imagine <description>`
 picks a currently available image model from the live Chutes catalog, and
 `/imagine <model> <description>` uses the model you name (`--model <model>`
 is the unambiguous form). Bare `/imagine` lists the image models that are
-available right now.
+available right now. If no image model is available, it says so explicitly
+instead of inventing a model; image generation stays unavailable until Chutes
+publishes one.
 
 ```
 /imagine a golden sunset over a calm ocean with silhouetted palm trees
@@ -263,7 +265,9 @@ generates source images, and animates them with `generate_media`. As with
 `/imagine`, the model is chosen from the live catalog unless you name one:
 `/imagine-video <description>` auto-selects, `/imagine-video <model>
 <description>` (or `--model <model>`) uses your choice, and bare
-`/imagine-video` lists the video models available right now.
+`/imagine-video` lists the video models available right now. If no video model
+is available, it says so explicitly instead of inventing a model; video
+generation stays unavailable until Chutes publishes one.
 
 ```
 /imagine-video a cat playing piano in a jazz club
@@ -444,7 +448,7 @@ Unavailable: this build has no account sign-in.
 
 ### `/account`
 
-Show the Chutes plan, quotas, usage windows, and PAYG credit for the
+Show the Chutes billing mode, quotas, usage windows, and PAYG credit for the
 configured API key. Same data as `chutes-build account` (which also offers
 `--json` for scripts).
 

@@ -177,10 +177,11 @@ hop.
 primary is unavailable or failing, and MUST return an honest error when no
 fallback exists at all — never a silent wrong result.
 
-4.4. Account data (plan, quotas, usage windows, PAYG credit) MUST be
+4.4. Account data (billing mode, quotas, usage windows, PAYG credit) MUST be
 derivable from the API key alone and visible via `chutes-build account`
-(human and `--json`) and `/account`. Failures (no key, network error)
-MUST report honestly, never as fake zeros.
+(human and `--json`) and `/account`. An uncapped monthly payload MUST render
+as pay-as-you-go, without a monthly price, monthly cap, or Plus/Pro reference.
+Failures (no key, network error) MUST report honestly, never as fake zeros.
 
 4.5. Inference speed MUST be reported as output tokens per API second
 (`tok/s`): after each turn next to the elapsed time, and as a Speed row
@@ -195,7 +196,9 @@ the model to it. The legacy `image_gen`/`image_edit`/`image_to_video`/
 not serve and were deleted in 2.0.3 (see §7); no legacy media tool,
 client, or upstream Imagine model id may be reintroduced. Media batch
 caps are per tool name, and `generate_media` takes the image budget (8)
-by name for all its calls.
+by name for all its calls. When the live catalog has no model for a requested
+kind, the tools MUST report that the category is unavailable instead of
+inventing a model or attempting generation.
 
 ## 5. Docs and naming truth
 

@@ -175,11 +175,20 @@ impl chutes_tool_runtime::Tool for ListMediaModelsTool {
             })
             .take(limit)
             .collect::<Vec<_>>();
-        pretty_text(
-            serde_json::json!({ "count": models.len(), "models": models }),
-            "list_media_models",
-        )
+        let count = models.len();
+        let mut result = serde_json::json!({ "count": count, "models": models });
+        if count == 0 {
+            result["message"] = serde_json::Value::String(empty_media_message(input.kind));
+        }
+        pretty_text(result, "list_media_models")
     }
+}
+
+fn empty_media_message(kind: Option<MediaKind>) -> String {
+    let category = kind.map_or("media", MediaKind::as_str);
+    format!(
+        "No {category} models are currently available in the Chutes catalog. {category} generation cannot be performed right now.",
+    )
 }
 
 #[derive(Debug, Default)]
@@ -2430,6 +2439,27 @@ mod tests {
             "matches on name too, but still resolves to the id"
         );
         assert_eq!(catalog_identifier(&catalog, "missing"), None);
+    }
+
+    #[test]
+    fn empty_media_message_names_the_missing_category() {
+        assert!(
+            empty_media_message(Some(MediaKind::Video))
+                .contains("No video models are currently available")
+        );
+        assert!(
+            empty_media_message(Some(MediaKind::Image))
+                .contains("No image models are currently available")
+        );
+        assert!(
+            empty_media_message(Some(MediaKind::Music))
+                .contains("No music models are currently available")
+        );
+        assert!(
+            empty_media_message(Some(MediaKind::Speech))
+                .contains("No speech models are currently available")
+        );
+        assert!(empty_media_message(None).contains("No media models are currently available"));
     }
 
     /// Video chutes call themselves "diffusion" and mention images (i2v), so the
