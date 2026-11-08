@@ -50,21 +50,20 @@ stats are resolved by `chute_id` against the live catalogue, so model names are
 shown instead of private chute labels. When a saved `default` pool exists, Auto
 targets `default:latency`, so the pool configured in the Chutes web app wins
 over the client-side inline pool. TEE and PAYG tool-capable rows are pooled
-together now that subscriptions are ending.
+together now that Chutes bills pay-as-you-go.
 
 Pool writes are not part of the supported surface yet: the Chutes alias endpoint
 is eventually consistent and intermittently returns 502. `/routing` and the
 plain `routing` command stay read-only.
 
 Some catalog entries have `confidential_compute: false`: they run on an external
-provider and require a positive PAYG balance, separately from any subscription
-quota. The beta models in this group (Qwen3.8-Max, DeepSeek-V4.1-Flash, GLM-5.3,
-Kimi-K2.7-Code, GLM-5.2-Fast, Qwen3.8-2.4T-A95B) are PAYG-only and not TEE. When
-that balance is not positive Chutes returns
-`402 A positive balance is required for external provider execution`. This is a
-PAYG funding condition, not the weekly or monthly subscription limit; top up the
-PAYG balance at https://chutes.ai/?_s=usage or use a TEE model. The picker marks
-those entries with a `PAYG` notice.
+provider and require a positive PAYG balance. The beta models in this group
+(Qwen3.8-Max, DeepSeek-V4.1-Flash, GLM-5.3, Kimi-K2.7-Code, GLM-5.2-Fast,
+Qwen3.8-2.4T-A95B) are PAYG-only and not TEE. When that balance is not positive
+Chutes returns `402 A positive balance is required for external provider
+execution`. This is a PAYG funding condition, not the rolling 4-hour or daily
+request limit; top up the PAYG balance at https://chutes.ai/?_s=usage or use a
+TEE model. The picker marks those entries with a `PAYG` notice.
 
 TEE models run inside hardware enclaves and expose attestation evidence through
 `GET https://api.chutes.ai/chutes/{chute_id}/evidence`; do not claim verified
@@ -158,14 +157,14 @@ the gap and separates documented facts from inference.
 
 ## Plan and quota indicator
 
-The status bar shows the account plan plus the rolling four-hour and monthly
-percentages when both are available. Its severity follows the highest consumed
-active window: green is below 80%, warning color begins at 80%, and the error
-color is used at 100% or above. Click the indicator or run `/usage` to inspect
-every active window and its reset time.
+The status bar shows the account billing mode (for example **Pay-as-you-go**)
+plus the rolling four-hour and daily percentages when available. Its severity
+follows the highest consumed active window: green is below 80%, warning color
+begins at 80%, and the error color is used at 100% or above. Click the indicator
+or run `/usage` to inspect every active window and its reset time.
 
-Subscription usage and quota metadata are loaded concurrently. When aggregate
-quota usage is not available, Chutes Build queries the documented per-chute
-quota endpoints concurrently and combines their used/limit values. The compact
+Billing usage and quota metadata are loaded concurrently. When aggregate quota
+usage is not available, Chutes Build queries the documented per-chute quota
+endpoints concurrently and combines their used/limit values. The compact
 indicator and detailed view preserve whether each window is daily, four-hour,
-weekly, or monthly.
+weekly, or any other window the API returns.

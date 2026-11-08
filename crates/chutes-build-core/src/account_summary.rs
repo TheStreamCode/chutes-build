@@ -486,7 +486,7 @@ fn normalize_usage_windows(
             );
             let label = pick_string(nested, payload, &[], &["label"])
                 .unwrap_or_else(|| candidate.label.to_string());
-            if nested.is_none() && used.is_none() && limit.is_none() && remaining.is_none() {
+            if used.is_none() && limit.is_none() && remaining.is_none() {
                 return None;
             }
             Some(UsageWindow {
@@ -600,24 +600,11 @@ fn normalize_plan(payload: &serde_json::Value, windows: &[UsageWindow]) -> Optio
     let get = |map: &serde_json::Map<String, serde_json::Value>, key: &str| {
         map.get(key).and_then(|v| as_number(Some(v)))
     };
-    let plan_name = source
-        .get("name")
-        .and_then(|v| as_string(Some(v)))
-        .or_else(|| as_string(object.get("plan_name")))
-        .or_else(|| derive_plan_name(object));
-    let monthly_price_usd =
-        get(source, "monthly_price").or_else(|| as_number(object.get("monthly_price")));
-    let monthly_cap_usd = get(source, "monthly_cap_usd")
-        .or_else(|| as_number(object.get("monthly_cap_usd")))
-        .or_else(|| as_number(object.get("billing_cycle_limit")))
-        .or_else(|| {
-            object
-                .get("monthly")
-                .and_then(|v| v.as_object())
-                .and_then(|inner| as_number(inner.get("cap")))
-        })
-        .or_else(|| billing_cap.and_then(|inner| as_number(inner.get("limit"))))
-        .or_else(|| billing_window.and_then(|w| w.limit));
+    let monthly = object.get("monthly").and_then(|v| v.as_object());
+    let pay_as_you_go = monthly
+        .and_then(|inner| inner.get("uncapped"))
+        .and_then(|v| v.as_bool())
+        == Some(true);
     let four_hour_cap_usd = get(source, "four_hour_cap_usd")
         .or_else(|| as_number(object.get("four_hour_cap_usd")))
         .or_else(|| as_number(object.get("four_hour_limit")))
@@ -636,6 +623,31 @@ fn normalize_plan(payload: &serde_json::Value, windows: &[UsageWindow]) -> Optio
         .or_else(|| daily_window.and_then(|w| w.limit));
     let payg_discount_percent = get(source, "payg_discount_percent")
         .or_else(|| as_number(object.get("payg_discount_percent")));
+
+    if pay_as_you_go {
+        return Some(PlanInfo {
+            plan_name: Some("Pay-as-you-go".to_string()),
+            monthly_price_usd: None,
+            monthly_cap_usd: None,
+            four_hour_cap_usd,
+            daily_request_limit,
+            payg_discount_percent,
+        });
+    }
+
+    let plan_name = source
+        .get("name")
+        .and_then(|v| as_string(Some(v)))
+        .or_else(|| as_string(object.get("plan_name")))
+        .or_else(|| derive_plan_name(object));
+    let monthly_price_usd =
+        get(source, "monthly_price").or_else(|| as_number(object.get("monthly_price")));
+    let monthly_cap_usd = get(source, "monthly_cap_usd")
+        .or_else(|| as_number(object.get("monthly_cap_usd")))
+        .or_else(|| as_number(object.get("billing_cycle_limit")))
+        .or_else(|| monthly.and_then(|inner| as_number(inner.get("cap"))))
+        .or_else(|| billing_cap.and_then(|inner| as_number(inner.get("limit"))))
+        .or_else(|| billing_window.and_then(|w| w.limit));
 
     if plan_name.is_none()
         && monthly_price_usd.is_none()
@@ -683,6 +695,10 @@ fn derive_plan_name(payload: &serde_json::Map<String, serde_json::Value>) -> Opt
 }
 
 fn normalize_plan_limits(plan: Option<&PlanInfo>) -> Vec<PlanLimitEntry> {
+    if plan.and_then(|p| p.plan_name.as_deref()) == Some("Pay-as-you-go") {
+        return Vec::new();
+    }
+
     let references = [("Plus", 10.0, 6.0), ("Pro", 20.0, 10.0)];
     let mut entries: Vec<PlanLimitEntry> = references
         .iter()
@@ -814,6 +830,44 @@ mod tests {
         assert_eq!(daily.used, None);
         assert_eq!(daily.status.as_deref(), Some("stale"));
         assert_eq!(daily.reset_label.as_deref(), Some("Possible sync delay"));
+    }
+
+    #[test]
+    fn uncapped_monthly_payload_is_pay_as_you_go() {
+        let snapshot = serde_json::json!({
+            "subscription_usage": {
+                "subscription": true,
+                "custom": true,
+                "monthly_price": 20,
+                "monthly": {"uncapped": true},
+                "four_hour": {"usage": 0, "cap": 8.333333333333332, "remaining": 8.333333333333332}
+            },
+            "quotas": [{"chute_id": "*", "quota": 5001, "model": "All Models"}],
+            "quota_usage": {"used": 0, "quota": 5001},
+            "model_stats": serde_json::Value::Null,
+        });
+        let profile = serde_json::json!({"balance": 53.50094759099999});
+        let summary = summarize_snapshot(&snapshot, &profile);
+        let plan = summary.plan.expect("plan");
+        assert_eq!(plan.plan_name.as_deref(), Some("Pay-as-you-go"));
+        assert_eq!(plan.monthly_price_usd, None);
+        assert_eq!(plan.monthly_cap_usd, None);
+        assert_eq!(plan.four_hour_cap_usd, Some(8.333333333333332));
+        assert_eq!(plan.daily_request_limit, Some(5001.0));
+        assert!(
+            summary
+                .windows
+                .iter()
+                .all(|w| w.kind != UsageWindowKind::BillingCycle)
+        );
+        assert!(
+            summary
+                .windows
+                .iter()
+                .any(|w| w.kind == UsageWindowKind::Rolling4h)
+        );
+        assert!(summary.plan_limits.is_empty());
+        assert_eq!(summary.payg_credit_usd, Some(53.50094759099999));
     }
 
     #[test]
