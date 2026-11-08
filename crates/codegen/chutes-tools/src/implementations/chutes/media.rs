@@ -176,10 +176,15 @@ impl chutes_tool_runtime::Tool for ListMediaModelsTool {
             .take(limit)
             .collect::<Vec<_>>();
         let count = models.len();
-        let mut result = serde_json::json!({ "count": count, "models": models });
-        if count == 0 {
-            result["message"] = serde_json::Value::String(empty_media_message(input.kind));
-        }
+        let result = if count == 0 {
+            serde_json::json!({
+                "count": count,
+                "models": models,
+                "message": empty_media_message(input.kind),
+            })
+        } else {
+            serde_json::json!({ "count": count, "models": models })
+        };
         pretty_text(result, "list_media_models")
     }
 }
