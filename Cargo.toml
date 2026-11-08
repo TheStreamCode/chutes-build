@@ -397,7 +397,7 @@ chutes-tool-types = { path = "crates/common/chutes-tool-types" }
 chutes-tracing = { path = "crates/common/chutes-tracing" }
 chutes-tty-utils = { path = "crates/codegen/chutes-tty-utils" }
 zbus = { version = "5" }
-zip = "3"
+zip = "9"
 zstd = "0.14"
 
 [profile.release]
