@@ -181,6 +181,11 @@ Two timing rules decide whether an otherwise correct entry works:
   exchange with `package not found` while it propagates. npm surfaces that as
   the same `E404`, so retry the publish before changing anything else.
 
+Recreating the seven entries and re-running the publish job resolved the
+v2.0.11 run; the registry and the release assets then took about twenty
+minutes to finish propagating, and until they did `npm install` reported the
+native package as missing.
+
 A successful publish can take a few minutes to update the `latest` tag, so do
 not treat that delay as a failed PUT.
 
