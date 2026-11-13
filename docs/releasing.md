@@ -105,6 +105,11 @@ and for re-publishing after a partial failure (`publish` enabled reuses the
 idempotent publish jobs). A failed or partial run must be investigated; do
 not reuse an already published version.
 
+Re-run the failed jobs rather than the whole workflow while the six native
+artifacts are still inside their seven-day retention:
+`gh run rerun <run-id> --failed` republishes from the existing binaries. After
+retention expires, a re-dispatch rebuilds every target.
+
 Step 5 is not a formality either. Doing it for 1.0.0 — `npm install chutes-build`
 into a throwaway prefix, then reading every subcommand's `--help` — found five
 places where the re-base had taken upstream's branding back over the fork's, three
@@ -151,10 +156,32 @@ npmjs.com must have a trusted publisher for every package the job publishes:
 repository `TheStreamCode/chutes-build`, workflow file `package-release.yml`,
 and environment `npm-release`, with publish allowed.
 
-A `404 Not Found` on a package `PUT` still means the trusted publisher is
-missing, mis-scoped, or attached to a different workflow or environment.
-Fix the npm package settings; do not reintroduce a long-lived token. A
-successful publish can take a few minutes to update the `latest` tag, so do
+A `404 Not Found` on a package `PUT` means the trusted publisher is missing,
+mis-scoped, attached to a different workflow or environment, or **expired**.
+Fix the npm package settings; do not reintroduce a long-lived token.
+
+Two timing rules decide whether an otherwise correct entry works:
+
+- **Two days.** A newly created trusted publisher must complete its first
+  successful publish within two days. An entry that has not validated by then
+  expires and cannot be edited, only deleted and recreated:
+
+  ```sh
+  npm trust list <package> --json   # note the configuration id
+  npm trust revoke --id <id> <package>
+  npm trust github <package> --file package-release.yml \
+    --repo TheStreamCode/chutes-build --env npm-release --allow-publish
+  ```
+
+  Configure the seven entries immediately before a release, not days earlier.
+  The v2.0.11 entries were in place by 4 November but first used on
+  9 November, and npm reported the result as `E404` on the package `PUT`.
+
+- **A few hours.** A freshly created entry can still answer the OIDC token
+  exchange with `package not found` while it propagates. npm surfaces that as
+  the same `E404`, so retry the publish before changing anything else.
+
+A successful publish can take a few minutes to update the `latest` tag, so do
 not treat that delay as a failed PUT.
 
 ### Why the release is not a manual step any more
